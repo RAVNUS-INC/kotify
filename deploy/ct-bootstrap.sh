@@ -9,7 +9,16 @@
 set -euo pipefail
 
 # ── 설정 변수 ────────────────────────────────────────────────────────────────
-REPO_URL="https://github.com/RAVNUS-INC/sms-sys.git"
+# Private repo인 경우 GITHUB_TOKEN 환경변수 또는 REPO_URL 직접 지정
+#   GITHUB_TOKEN=ghp_xxx bash ct-bootstrap.sh
+#   REPO_URL=https://<token>@github.com/RAVNUS-INC/sms-sys.git bash ct-bootstrap.sh
+if [[ -n "${REPO_URL:-}" ]]; then
+    : # 사용자가 명시적으로 지정함
+elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    REPO_URL="https://${GITHUB_TOKEN}@github.com/RAVNUS-INC/sms-sys.git"
+else
+    REPO_URL="https://github.com/RAVNUS-INC/sms-sys.git"
+fi
 INSTALL_DIR="/opt/sms"
 DATA_DIR="/var/lib/sms"
 LOG_DIR="/var/log/sms"
