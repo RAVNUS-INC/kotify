@@ -56,9 +56,9 @@ async def verify_csrf(request: Request) -> None:
 
     try:
         session_token = request.session.get("csrf_token")
-    except AssertionError:
+    except AssertionError as exc:
         # SessionMiddleware 미설치 시 Starlette가 AssertionError를 발생시킴
-        raise HTTPException(status_code=403, detail="CSRF 검증 실패: 세션 없음")
+        raise HTTPException(status_code=403, detail="CSRF 검증 실패: 세션 없음") from exc
     if not session_token:
         raise HTTPException(status_code=403, detail="CSRF 토큰이 없습니다.")
 

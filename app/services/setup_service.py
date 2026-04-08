@@ -7,7 +7,7 @@ from __future__ import annotations
 import hmac
 import secrets
 import stat
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -103,7 +103,7 @@ def complete_setup(
     store.mark_bootstrap_completed(first_admin_sub)
 
     # 첫 admin user upsert
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     import json
     user = db.get(User, first_admin_sub)
     if user is None:

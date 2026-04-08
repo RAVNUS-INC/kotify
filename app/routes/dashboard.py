@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, Message, User
+from app.models import Campaign, User
 from app.web import templates
 
 router = APIRouter()
@@ -33,8 +33,8 @@ async def dashboard(
 
     today_start_kst = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow_start_kst = today_start_kst + timedelta(days=1)
-    today_start_utc = today_start_kst.astimezone(timezone.utc).isoformat()
-    tomorrow_start_utc = tomorrow_start_kst.astimezone(timezone.utc).isoformat()
+    today_start_utc = today_start_kst.astimezone(UTC).isoformat()
+    tomorrow_start_utc = tomorrow_start_kst.astimezone(UTC).isoformat()
 
     month_start_kst = now_kst.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     # 다음 달 1일
@@ -42,8 +42,8 @@ async def dashboard(
         next_month_kst = month_start_kst.replace(year=month_start_kst.year + 1, month=1)
     else:
         next_month_kst = month_start_kst.replace(month=month_start_kst.month + 1)
-    month_start_utc = month_start_kst.astimezone(timezone.utc).isoformat()
-    next_month_utc = next_month_kst.astimezone(timezone.utc).isoformat()
+    month_start_utc = month_start_kst.astimezone(UTC).isoformat()
+    next_month_utc = next_month_kst.astimezone(UTC).isoformat()
 
     # 최근 캠페인 10건
     recent_campaigns = list(

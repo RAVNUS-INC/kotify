@@ -1,8 +1,7 @@
 """대시보드 KST 경계 케이스 테스트."""
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
-
+from datetime import UTC, datetime, timedelta, timezone
 
 _KST = timezone(timedelta(hours=9))
 
@@ -12,8 +11,8 @@ def _kst_range_for_today(now_kst: datetime):
     today_start_kst = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow_start_kst = today_start_kst + timedelta(days=1)
     return (
-        today_start_kst.astimezone(timezone.utc),
-        tomorrow_start_kst.astimezone(timezone.utc),
+        today_start_kst.astimezone(UTC),
+        tomorrow_start_kst.astimezone(UTC),
     )
 
 
@@ -25,8 +24,8 @@ def _kst_range_for_month(now_kst: datetime):
     else:
         next_month_kst = month_start_kst.replace(month=month_start_kst.month + 1)
     return (
-        month_start_kst.astimezone(timezone.utc),
-        next_month_kst.astimezone(timezone.utc),
+        month_start_kst.astimezone(UTC),
+        next_month_kst.astimezone(UTC),
     )
 
 
@@ -37,8 +36,8 @@ def test_kst_today_range_midnight_boundary():
     start_utc, end_utc = _kst_range_for_today(now_kst)
 
     # KST 00:00 = UTC 전날 15:00
-    assert start_utc == datetime(2026, 4, 7, 15, 0, 0, tzinfo=timezone.utc)
-    assert end_utc == datetime(2026, 4, 8, 15, 0, 0, tzinfo=timezone.utc)
+    assert start_utc == datetime(2026, 4, 7, 15, 0, 0, tzinfo=UTC)
+    assert end_utc == datetime(2026, 4, 8, 15, 0, 0, tzinfo=UTC)
 
 
 def test_kst_today_range_afternoon():
@@ -46,8 +45,8 @@ def test_kst_today_range_afternoon():
     now_kst = datetime(2026, 4, 8, 14, 0, 0, tzinfo=_KST)
     start_utc, end_utc = _kst_range_for_today(now_kst)
 
-    assert start_utc == datetime(2026, 4, 7, 15, 0, 0, tzinfo=timezone.utc)
-    assert end_utc == datetime(2026, 4, 8, 15, 0, 0, tzinfo=timezone.utc)
+    assert start_utc == datetime(2026, 4, 7, 15, 0, 0, tzinfo=UTC)
+    assert end_utc == datetime(2026, 4, 8, 15, 0, 0, tzinfo=UTC)
 
 
 def test_kst_month_range_december():
@@ -56,9 +55,9 @@ def test_kst_month_range_december():
     start_utc, end_utc = _kst_range_for_month(now_kst)
 
     # 12월 1일 00:00 KST = 11월 30일 15:00 UTC
-    assert start_utc == datetime(2026, 11, 30, 15, 0, 0, tzinfo=timezone.utc)
+    assert start_utc == datetime(2026, 11, 30, 15, 0, 0, tzinfo=UTC)
     # 2027년 1월 1일 00:00 KST = 2026년 12월 31일 15:00 UTC
-    assert end_utc == datetime(2026, 12, 31, 15, 0, 0, tzinfo=timezone.utc)
+    assert end_utc == datetime(2026, 12, 31, 15, 0, 0, tzinfo=UTC)
 
 
 def test_kst_month_range_regular():
@@ -67,9 +66,9 @@ def test_kst_month_range_regular():
     start_utc, end_utc = _kst_range_for_month(now_kst)
 
     # 4월 1일 00:00 KST = 3월 31일 15:00 UTC
-    assert start_utc == datetime(2026, 3, 31, 15, 0, 0, tzinfo=timezone.utc)
+    assert start_utc == datetime(2026, 3, 31, 15, 0, 0, tzinfo=UTC)
     # 5월 1일 00:00 KST = 4월 30일 15:00 UTC
-    assert end_utc == datetime(2026, 4, 30, 15, 0, 0, tzinfo=timezone.utc)
+    assert end_utc == datetime(2026, 4, 30, 15, 0, 0, tzinfo=UTC)
 
 
 def test_timestamp_in_range():
@@ -78,7 +77,7 @@ def test_timestamp_in_range():
     start_utc, end_utc = _kst_range_for_today(now_kst)
 
     # KST 10:00 = UTC 01:00
-    campaign_created_at_utc = datetime(2026, 4, 8, 1, 0, 0, tzinfo=timezone.utc)
+    campaign_created_at_utc = datetime(2026, 4, 8, 1, 0, 0, tzinfo=UTC)
     assert start_utc <= campaign_created_at_utc < end_utc
 
 
@@ -88,5 +87,5 @@ def test_timestamp_before_range():
     start_utc, end_utc = _kst_range_for_today(now_kst)
 
     # KST 2026-04-07 23:00 = UTC 2026-04-07 14:00 (전날이고 start보다 작음)
-    campaign_created_at_utc = datetime(2026, 4, 7, 14, 0, 0, tzinfo=timezone.utc)
+    campaign_created_at_utc = datetime(2026, 4, 7, 14, 0, 0, tzinfo=UTC)
     assert not (start_utc <= campaign_created_at_utc < end_utc)

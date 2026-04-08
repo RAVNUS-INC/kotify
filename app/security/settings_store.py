@@ -4,13 +4,14 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Setting
-from app.security.crypto import decrypt, encrypt, mask as _mask
+from app.security.crypto import decrypt, encrypt
+from app.security.crypto import mask as _mask
 
 
 class SettingsStore:
@@ -76,7 +77,7 @@ class SettingsStore:
             updated_by: 변경자 users.sub (감사 목적).
         """
         stored_value = encrypt(value) if is_secret else value
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         row = self._db.execute(
             select(Setting).where(Setting.key == key)

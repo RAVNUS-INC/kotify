@@ -23,7 +23,7 @@ def get_fallback_secret() -> str:
     return _FALLBACK_SECRET
 
 
-def get_session_secret(db: "Session") -> str:
+def get_session_secret(db: Session) -> str:
     """DB에서 session.secret을 읽어 반환한다.
 
     설정이 없으면 메모리 기반 임시 키를 반환한다.
@@ -41,7 +41,7 @@ def get_session_secret(db: "Session") -> str:
     return secret if secret else _FALLBACK_SECRET
 
 
-def add_session_middleware(app: "FastAPI", secret_key: str) -> None:
+def add_session_middleware(app: FastAPI, secret_key: str) -> None:
     """FastAPI 앱에 SessionMiddleware를 추가한다.
 
     Args:

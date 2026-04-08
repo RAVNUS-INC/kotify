@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
@@ -121,9 +121,10 @@ app = FastAPI(
 # DB 테이블이 아직 없을 수 있으므로 try/except로 보호.
 # 설정이 없으면 임시 키(fallback) 사용.
 # 실제 add_middleware는 데코레이터 미들웨어들 이후에 호출 (outermost 보장).
-from app.auth.session import get_session_secret, add_session_middleware, get_fallback_secret as _get_fallback_secret
-
 from sqlalchemy.exc import OperationalError as _OperationalError
+
+from app.auth.session import add_session_middleware, get_session_secret
+from app.auth.session import get_fallback_secret as _get_fallback_secret
 
 try:
     # 테이블이 이미 존재하면 DB에서 읽음
@@ -141,13 +142,13 @@ except Exception:  # noqa: BLE001
     _session_secret = _get_fallback_secret()
 
 # ── 라우터 등록 ───────────────────────────────────────────────────────────────
+from app.routes.admin import router as admin_router
+from app.routes.auth import router as auth_router
+from app.routes.campaigns import router as campaigns_router
+from app.routes.compose import router as compose_router
+from app.routes.dashboard import router as dashboard_router
 from app.routes.health import router as health_router
 from app.routes.setup import router as setup_router
-from app.routes.auth import router as auth_router
-from app.routes.dashboard import router as dashboard_router
-from app.routes.compose import router as compose_router
-from app.routes.campaigns import router as campaigns_router
-from app.routes.admin import router as admin_router
 
 app.include_router(health_router)
 app.include_router(setup_router)

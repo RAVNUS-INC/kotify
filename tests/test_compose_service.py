@@ -1,14 +1,12 @@
 """dispatch_campaign 통합 테스트 — mock NCP 클라이언트 사용."""
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.ncp.client import ListResponse, MessageItem, SendResponse
+from app.ncp.client import ListResponse
 from app.services.compose import validate_message
-
 
 # ── validate_message ──────────────────────────────────────────────────────────
 
@@ -150,6 +148,7 @@ class TestDispatchCampaign:
     async def test_dispatch_creates_ncp_requests(self, session_factory, sample_user, sample_caller, mock_ncp_client):
         """청크 수만큼 NcpRequest 레코드가 생성됨."""
         from sqlalchemy import select
+
         from app.models import NcpRequest
         from app.services.compose import dispatch_campaign
 
@@ -180,6 +179,7 @@ class TestDispatchCampaign:
     async def test_dispatch_creates_messages(self, session_factory, sample_user, sample_caller, mock_ncp_client):
         """수신자 수만큼 Message 레코드가 생성됨."""
         from sqlalchemy import select
+
         from app.models import Message
         from app.services.compose import dispatch_campaign
 

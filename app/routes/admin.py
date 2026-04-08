@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -23,7 +23,7 @@ _admin_dep = require_role("admin")
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ── 설정 ─────────────────────────────────────────────────────────────────────
@@ -144,11 +144,11 @@ async def test_ncp(
         return HTMLResponse('<span class="ok">✓ NCP 인증 성공</span>')
     except NotImplementedError:
         return HTMLResponse('<span class="warn">⚠ signature.py 미구현 (stub)</span>')
-    except (NCPAuthError,) as exc:
+    except NCPAuthError as exc:
         # #7: 인증 실패는 명확히 에러로 표시
         return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
     except Exception as exc:
-        from app.ncp.client import NCPError, NCPForbidden
+        from app.ncp.client import NCPForbidden
         if isinstance(exc, (NCPAuthError, NCPForbidden)):
             return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
         # 404 등 → 인증 통과 (requestId 없음)

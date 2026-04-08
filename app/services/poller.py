@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -41,7 +41,7 @@ def _backoff_interval(poll_count: int) -> int:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _parse_dt(s: str | None) -> datetime | None:
@@ -65,7 +65,7 @@ class Poller:
     def __init__(
         self,
         db_factory: Callable[[], Session],
-        ncp_client_factory: Callable[[], "NCPClient | None"],  # type: ignore[name-defined]  # noqa: F821
+        ncp_client_factory: Callable[[], NCPClient | None],  # type: ignore[name-defined]  # noqa: F821
     ) -> None:
         self._db_factory = db_factory
         self._ncp_client_factory = ncp_client_factory
@@ -223,7 +223,7 @@ class Poller:
         if sent_at:
             # timezone-aware 비교
             if sent_at.tzinfo is None:
-                sent_at = sent_at.replace(tzinfo=timezone.utc)
+                sent_at = sent_at.replace(tzinfo=UTC)
             if now - sent_at > timedelta(seconds=_TIMEOUT_SECONDS):
                 for msg in messages:
                     msg.status = "TIMEOUT"
@@ -242,7 +242,7 @@ class Poller:
             latest_polled = max(_parse_dt(s) for s in last_polled_strs if _parse_dt(s))
             if latest_polled:
                 if latest_polled.tzinfo is None:
-                    latest_polled = latest_polled.replace(tzinfo=timezone.utc)
+                    latest_polled = latest_polled.replace(tzinfo=UTC)
                 if (now - latest_polled).total_seconds() < backoff_secs:
                     return  # 아직 backoff 시간이 안 됨
 

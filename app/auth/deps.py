@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from starlette.responses import RedirectResponse
 
 from app.db import get_db
 from app.models import User
@@ -21,10 +21,10 @@ if TYPE_CHECKING:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def parse_user_roles(user: "User | None") -> list[str]:
+def parse_user_roles(user: User | None) -> list[str]:
     """user.roles JSON 문자열을 list로 파싱한다. 실패 시 빈 list 반환.
 
     Args:

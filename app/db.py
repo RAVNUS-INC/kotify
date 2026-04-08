@@ -4,8 +4,7 @@ WAL 모드를 활성화하여 읽기/쓰기 동시성을 확보한다.
 """
 from __future__ import annotations
 
-from sqlalchemy import Engine, event, text
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings

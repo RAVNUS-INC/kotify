@@ -1,8 +1,6 @@
 """SettingsStore — get/set/암호화 검증."""
 from __future__ import annotations
 
-import pytest
-
 from app.security.settings_store import SettingsStore
 
 
@@ -87,6 +85,7 @@ class TestSettingsStore:
     def test_secret_value_is_encrypted_in_db(self, db_session):
         """DB에 저장된 시크릿 값은 암호화되어 있어야 함."""
         from sqlalchemy import select
+
         from app.models import Setting
 
         store = SettingsStore(db_session)

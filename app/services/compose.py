@@ -5,8 +5,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def validate_phone_list(text: str) -> tuple[list[str], list[str]]:
@@ -80,7 +79,7 @@ MAX_RECIPIENTS_PER_CAMPAIGN = 1000
 
 async def dispatch_campaign(
     db: Session,
-    ncp_client: "NCPClient",
+    ncp_client: NCPClient,
     created_by: str,
     caller_number: str,
     content: str,
@@ -286,7 +285,7 @@ async def dispatch_campaign(
             db.flush()
             db.commit()  # 실패 청크도 즉시 커밋
 
-        except NCPRateLimited as exc:
+        except NCPRateLimited:
             # 429: 30초 대기 후 1회 재시도 (#32)
             await asyncio.sleep(30)
             try:

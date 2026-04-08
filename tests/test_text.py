@@ -9,7 +9,6 @@ import pytest
 
 from app.util.text import classify_message_type, has_unsupported_chars, measure_bytes
 
-
 # ── measure_bytes ─────────────────────────────────────────────────────────────
 
 

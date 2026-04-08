@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,9 +15,10 @@ os.environ.setdefault("SMS_DEV_MODE", "true")
 # CSRF 검증 우회 — 테스트 전용. 운영 환경에서 절대 설정 금지.
 os.environ.setdefault("SMS_DISABLE_CSRF", "1")
 
-from app.db import Base
-from app.models import AuditLog, Caller, Campaign, Message, NcpRequest, Setting, User
+from datetime import UTC
 
+from app.db import Base
+from app.models import Caller, User
 
 # ── DB Fixture ───────────────────────────────────────────────────────────────
 
@@ -127,14 +127,14 @@ def mock_ncp_client():
 @pytest.fixture
 def sample_user(db_session):
     """테스트용 사용자."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     user = User(
         sub="test-sub-001",
         email="test@example.com",
         name="테스트 사용자",
         roles=json.dumps(["sender", "admin"]),
-        created_at=datetime.now(timezone.utc).isoformat(),
-        last_login_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
+        last_login_at=datetime.now(UTC).isoformat(),
     )
     db_session.add(user)
     db_session.commit()
@@ -144,13 +144,13 @@ def sample_user(db_session):
 @pytest.fixture
 def sample_caller(db_session):
     """테스트용 발신번호."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     caller = Caller(
         number="0212345678",
         label="대표번호",
         active=1,
         is_default=1,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
     )
     db_session.add(caller)
     db_session.commit()

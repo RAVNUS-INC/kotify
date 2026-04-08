@@ -1,15 +1,13 @@
 """Poller.run_once 동작 검증."""
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.ncp.client import ListResponse, MessageItem
 from app.services.poller import Poller, _backoff_interval
-
 
 # ── backoff 스케줄 ────────────────────────────────────────────────────────────
 
@@ -71,7 +69,7 @@ class TestPollerRunOnce:
         """미완료 메시지가 있으면 NCP 조회 후 상태 업데이트."""
         from app.models import Campaign, Message, NcpRequest
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # 데이터 삽입 (sample_user, sample_caller는 db_session을 통해 이미 커밋됨)
         setup_session = session_factory()
@@ -172,7 +170,7 @@ class TestPollerRunOnce:
         from app.models import Campaign, Message, NcpRequest
 
         two_hours_ago = (
-            datetime.now(timezone.utc) - timedelta(hours=2)
+            datetime.now(UTC) - timedelta(hours=2)
         ).isoformat()
 
         setup_session = session_factory()

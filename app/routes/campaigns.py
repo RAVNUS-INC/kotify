@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -51,9 +52,9 @@ async def campaigns_list(
         stmt = stmt.where(Campaign.created_at >= date_from)
     if date_to:
         # 다음 날 00:00:00 미만으로 비교하여 date_to 당일 전체를 포함 (I6)
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
         try:
-            date_to_dt = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            date_to_dt = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=UTC)
             next_day_dt = date_to_dt + timedelta(days=1)
             stmt = stmt.where(Campaign.created_at < next_day_dt.isoformat())
         except ValueError:

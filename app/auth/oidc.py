@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def get_oauth_client(db: "Session") -> OAuth | None:
+def get_oauth_client(db: Session) -> OAuth | None:
     """DB settings에서 Keycloak 설정을 읽어 OAuth 클라이언트를 반환한다.
 
     설정이 아직 없으면 None 반환 (setup wizard 완료 전).

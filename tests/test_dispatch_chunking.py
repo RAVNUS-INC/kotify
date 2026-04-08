@@ -1,7 +1,7 @@
 """dispatch_campaign 청크 분할 테스트 — 250건 → 3개 청크(100/100/50)."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -139,6 +139,7 @@ class TestDispatchChunking:
     ):
         """첫 번째 청크 실패해도 나머지 청크는 계속 처리된다."""
         from sqlalchemy import select
+
         from app.models import NcpRequest
         from app.services.compose import dispatch_campaign
 

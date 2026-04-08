@@ -1,8 +1,8 @@
 """Poller 트랜잭션 경계 테스트 — 한 청크 실패 시 다른 청크 영향 없음."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -11,7 +11,7 @@ from app.services.poller import Poller
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class TestPollerTransactions:

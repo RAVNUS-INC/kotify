@@ -9,7 +9,6 @@
 """
 from __future__ import annotations
 
-import os
 import stat
 from functools import lru_cache
 from pathlib import Path

@@ -6,11 +6,10 @@ from unittest.mock import MagicMock, patch
 
 def test_lifespan_skips_create_all_when_not_dev_mode():
     """dev_mode=False이면 Base.metadata.create_all이 호출되지 않아야 한다."""
-    from app.config import Settings
 
     # dev_mode=False 설정 생성 (db_path는 테스트용)
+    import tempfile
     from pathlib import Path
-    import tempfile, os
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # dev_mode=False 설정 오브젝트를 직접 생성하여 검증
@@ -35,8 +34,8 @@ def test_lifespan_skips_create_all_when_not_dev_mode():
 
 def test_lifespan_calls_create_all_when_dev_mode():
     """dev_mode=True이면 Base.metadata.create_all이 호출되어야 한다."""
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
     from unittest.mock import MagicMock, patch
 
     with tempfile.TemporaryDirectory() as tmpdir:

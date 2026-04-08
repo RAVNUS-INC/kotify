@@ -1,12 +1,12 @@
 """Setup 모드 IP ACL 테스트 — 외부 IP 차단, 사내망/loopback 통과."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi import HTTPException, Request
 
-from app.auth.deps import _is_private_network, _ALLOWED_SETUP_HOSTS, require_setup_mode
+from app.auth.deps import _ALLOWED_SETUP_HOSTS, _is_private_network, require_setup_mode
 
 
 class TestIsPrivateNetwork:
@@ -67,7 +67,6 @@ class TestRequireSetupMode:
         request = self._make_request("127.0.0.1")
 
         # bootstrap 미완료 상태 설정
-        from app.security.settings_store import SettingsStore
         # DB에 아무 설정도 없으면 is_bootstrap_completed() == False
         # → setup mode라 bootstrap 체크 후 IP 체크로 진행
         # 404 예외가 발생하지 않아야 함
@@ -83,7 +82,7 @@ class TestRequireSetupMode:
         request = self._make_request("10.10.0.50")
         try:
             require_setup_mode(request, db_session)
-        except HTTPException as exc:
+        except HTTPException:
             # IP ACL로 인한 404가 아니어야 함
             # (bootstrap 완료로 인한 404는 OK)
             pass  # bootstrap 미완료 상태에서만 IP ACL 실행됨
