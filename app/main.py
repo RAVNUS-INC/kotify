@@ -223,61 +223,6 @@ async def inject_user_context(request: Request, call_next):
     return response
 
 
-# ── 미들웨어: DEV 자동 로그인 (디자인 미리보기 전용) ─────────────────────────
-# SMS_DEV_MODE=true + KOTIFY_DEV_AUTOLOGIN=1 일 때만 동작.
-# 가짜 admin 세션을 자동 주입하여 Keycloak 없이 모든 화면 접근 가능.
-# 운영 환경에서는 절대 사용 금지 — systemd unit에 환경변수 미설정 확인 필수.
-@app.middleware("http")
-async def dev_autologin(request: Request, call_next):
-    import os as _os
-    if not (settings.dev_mode and _os.getenv("KOTIFY_DEV_AUTOLOGIN") == "1"):
-        return await call_next(request)
-
-    if "session" in request.scope and not request.session.get("user_sub"):
-        # 첫 요청: 가짜 admin 세션 주입 + bootstrap 자동 완료 + user upsert
-        try:
-            import json as _json
-            from datetime import datetime as _dt, timezone as _tz
-
-            from app.models import User as _User
-            from app.security.settings_store import SettingsStore as _SS
-
-            with SessionLocal() as _db:
-                _store = _SS(_db)
-                if not _store.is_bootstrap_completed():
-                    _store.set("setup.first_admin_email", "dev@example.com", is_secret=False)
-                    _store.set("app.public_url", "http://localhost:8000", is_secret=False)
-                    _store.mark_bootstrap_completed("dev-autologin")
-                _u = _db.query(_User).filter_by(sub="dev-admin-sub").first()
-                _now = _dt.now(_tz.utc).isoformat()
-                if not _u:
-                    _u = _User(
-                        sub="dev-admin-sub",
-                        email="dev@example.com",
-                        name="DEV Admin",
-                        roles=_json.dumps(["admin", "sender", "viewer"]),
-                        created_at=_now,
-                        last_login_at=_now,
-                    )
-                    _db.add(_u)
-                else:
-                    _u.last_login_at = _now
-                _db.commit()
-
-            request.session["user_sub"] = "dev-admin-sub"
-            request.session["user_email"] = "dev@example.com"
-            request.session["user_name"] = "DEV Admin"
-            request.session["user_roles"] = ["admin", "sender", "viewer"]
-
-            # bootstrap 캐시 무효화
-            global _bootstrap_cached
-            _bootstrap_cached = True
-        except Exception as exc:
-            logger.warning("dev_autologin failed: %s", exc)
-
-    return await call_next(request)
-
-
 # ── 세션 미들웨어 등록 (반드시 마지막 — outermost 보장) ───────────────────────
 # Starlette의 add_middleware는 insert(0)이므로 가장 마지막에 등록한 것이
 # 가장 바깥쪽(첫 실행)에서 동작한다. SessionMiddleware가 outermost여야
