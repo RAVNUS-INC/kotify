@@ -10,7 +10,7 @@ import asyncio
 import fcntl
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -26,10 +26,6 @@ _BACKOFF_10_PLUS = 900  # 10+
 
 # 메인 루프 sleep 간격 (초)
 _TICK = 5
-
-# 발송 후 타임아웃 (초)
-_TIMEOUT_SECONDS = 3600  # 1시간
-
 
 def _backoff_interval(poll_count: int) -> int:
     """poll_count 기준 다음 폴링까지 대기 시간(초)를 반환한다."""
@@ -168,7 +164,7 @@ class Poller:
         now = _now()
 
         # 미완료 메시지가 있는 ncp_requests 조회
-        final_statuses = ("COMPLETED", "TIMEOUT", "UNKNOWN")
+        final_statuses = ("COMPLETED", "UNKNOWN")
         stmt = (
             select(NcpRequest)
             .join(Message, Message.ncp_request_id == NcpRequest.id)
@@ -206,7 +202,7 @@ class Poller:
         force = campaign_id in force_ids
 
         # 해당 ncp_request의 messages 조회
-        final_statuses = ("COMPLETED", "TIMEOUT", "UNKNOWN")
+        final_statuses = ("COMPLETED", "UNKNOWN")
         messages = list(
             db.execute(
                 select(Message).where(
@@ -217,20 +213,6 @@ class Poller:
         )
         if not messages:
             return
-
-        # 타임아웃 체크: 발송 시점 + 1시간 경과
-        sent_at = _parse_dt(ncp_req.sent_at)
-        if sent_at:
-            # timezone-aware 비교
-            if sent_at.tzinfo is None:
-                sent_at = sent_at.replace(tzinfo=UTC)
-            if now - sent_at > timedelta(seconds=_TIMEOUT_SECONDS):
-                for msg in messages:
-                    msg.status = "TIMEOUT"
-                    msg.last_polled_at = now.isoformat()
-                db.flush()
-                await self._update_campaign(db, campaign_id)
-                return
 
         # Backoff 체크: 최소 poll_count 기준
         min_poll_count = min(msg.poll_count for msg in messages)
@@ -309,7 +291,7 @@ class Poller:
         fail_count = db.execute(
             select(_func.count()).select_from(Message).where(
                 Message.campaign_id == campaign_id,
-                Message.status.in_(("COMPLETED", "TIMEOUT", "UNKNOWN")),
+                Message.status.in_(("COMPLETED", "UNKNOWN")),
                 Message.result_status != "success",
             )
         ).scalar_one()
@@ -318,7 +300,7 @@ class Poller:
         pending_count = db.execute(
             select(_func.count()).select_from(Message).where(
                 Message.campaign_id == campaign_id,
-                Message.status.notin_(("COMPLETED", "TIMEOUT", "UNKNOWN")),
+                Message.status.notin_(("COMPLETED", "UNKNOWN")),
             )
         ).scalar_one()
 

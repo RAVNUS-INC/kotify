@@ -59,8 +59,6 @@
       <td>
         {% if msg.result_status == "success" %}
         <span class="badge badge-success">성공</span>
-        {% elif msg.status == "TIMEOUT" %}
-        <span class="badge badge-fail">타임아웃</span>
         {% elif msg.status == "UNKNOWN" %}
         <span class="badge" style="background:var(--bg-elevated);color:var(--text-muted)">알수없음</span>
         {% elif msg.status in ("PENDING", "READY", "PROCESSING") %}

@@ -83,7 +83,7 @@ class TestProgressStates:
         campaign = _make_campaign(state=state)
         assert campaign.state in self._ACTIVE_STATES
 
-    @pytest.mark.parametrize("state", ["COMPLETED", "FAILED", "TIMEOUT"])
+    @pytest.mark.parametrize("state", ["COMPLETED", "FAILED"])
     def test_final_states_no_poll(self, state: str):
         """최종 상태는 폴링 대상이 아니어야 한다."""
         campaign = _make_campaign(state=state)

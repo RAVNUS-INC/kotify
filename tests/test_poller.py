@@ -1,7 +1,7 @@
 """Poller.run_once 동작 검증."""
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -161,80 +161,6 @@ class TestPollerRunOnce:
         )
         await poller.run_once()
         ncp_mock.list_by_request_id.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_run_once_timeout_messages(
-        self, session_factory, sample_user, sample_caller
-    ):
-        """발송 후 1시간 초과된 메시지는 TIMEOUT 처리."""
-        from app.models import Campaign, Message, NcpRequest
-
-        two_hours_ago = (
-            datetime.now(UTC) - timedelta(hours=2)
-        ).isoformat()
-
-        setup_session = session_factory()
-        try:
-            campaign = Campaign(
-                created_by=sample_user.sub,
-                caller_number=sample_caller.number,
-                message_type="SMS",
-                content="오래된 캠페인",
-                total_count=1,
-                ok_count=0,
-                fail_count=0,
-                pending_count=1,
-                state="DISPATCHED",
-                created_at=two_hours_ago,
-            )
-            setup_session.add(campaign)
-            setup_session.flush()
-
-            ncp_req = NcpRequest(
-                campaign_id=campaign.id,
-                chunk_index=0,
-                request_id="REQ-OLD",
-                request_time=two_hours_ago,
-                http_status=202,
-                status_code="202",
-                status_name="success",
-                sent_at=two_hours_ago,
-            )
-            setup_session.add(ncp_req)
-            setup_session.flush()
-
-            msg = Message(
-                campaign_id=campaign.id,
-                ncp_request_id=ncp_req.id,
-                to_number="01099998888",
-                to_number_raw="01099998888",
-                message_id="MSG-OLD",
-                status="PENDING",
-                poll_count=5,
-            )
-            setup_session.add(msg)
-            setup_session.flush()
-            msg_id = msg.id
-            setup_session.commit()
-        finally:
-            setup_session.close()
-
-        ncp_client = MagicMock()
-        ncp_client.list_by_request_id = AsyncMock()
-
-        poller = self._make_poller(session_factory, ncp_client)
-        await poller.run_once()
-
-        verify_session = session_factory()
-        try:
-            updated_msg = verify_session.get(Message, msg_id)
-            assert updated_msg is not None
-            assert updated_msg.status == "TIMEOUT"
-        finally:
-            verify_session.close()
-
-        # 타임아웃이면 NCP 조회 없이 처리
-        ncp_client.list_by_request_id.assert_not_called()
 
     def test_force_refresh_queue(self, session_factory):
         """강제 새로고침 큐 동작 확인."""

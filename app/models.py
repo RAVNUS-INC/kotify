@@ -139,7 +139,7 @@ class Message(Base):
     to_number: Mapped[str] = mapped_column(Text, nullable=False)  # 정규화 후 숫자만
     to_number_raw: Mapped[str] = mapped_column(Text, nullable=False)  # 사용자 원본
     message_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # NCP messageId
-    # PENDING | READY | PROCESSING | COMPLETED | TIMEOUT | UNKNOWN
+    # PENDING | READY | PROCESSING | COMPLETED | UNKNOWN
     status: Mapped[str] = mapped_column(Text, nullable=False, default="PENDING")
     result_status: Mapped[str | None] = mapped_column(Text, nullable=True)   # success | fail
     result_code: Mapped[str | None] = mapped_column(Text, nullable=True)
