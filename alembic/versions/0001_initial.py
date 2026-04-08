@@ -84,7 +84,8 @@ def upgrade() -> None:
         sa.Column("key", sa.Text, primary_key=True),
         sa.Column("value", sa.Text, nullable=False),
         sa.Column("is_secret", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("updated_by", sa.Text, sa.ForeignKey("users.sub"), nullable=True),
+        # updated_by는 'setup', 'system' 같은 비-user 출처도 허용 — FK 제거
+        sa.Column("updated_by", sa.Text, nullable=True),
         sa.Column("updated_at", sa.Text, nullable=False),
     )
 
