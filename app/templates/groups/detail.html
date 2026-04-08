@@ -79,7 +79,7 @@
           <td><input type="checkbox" name="contact_ids" value="{{ m.id }}"></td>
           {% endif %}
           <td><a href="/contacts/{{ m.id }}">{{ m.name }}</a></td>
-          <td class="mono">{{ m.phone or "—" }}</td>
+          <td class="mono">{{ m.phone|phone_fmt or "—" }}</td>
           <td class="text-muted">{{ m.email or "—" }}</td>
           <td class="text-muted">{{ m.department or "—" }}</td>
         </tr>
@@ -136,7 +136,7 @@
       <select name="contact_ids" multiple size="10" id="contact-select">
         {% for c in all_contacts %}
         {% if c.id not in member_ids %}
-        <option value="{{ c.id }}">{{ c.name }}{% if c.phone %} ({{ c.phone }}){% endif %}{% if c.department %} · {{ c.department }}{% endif %}</option>
+        <option value="{{ c.id }}">{{ c.name }}{% if c.phone %} ({{ c.phone|phone_fmt }}){% endif %}{% if c.department %} · {{ c.department }}{% endif %}</option>
         {% endif %}
         {% endfor %}
       </select>

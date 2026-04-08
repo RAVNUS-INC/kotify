@@ -50,3 +50,49 @@ def kst_dt(value: str | None) -> str:
 
 
 templates.env.filters["kst_dt"] = kst_dt
+
+
+def phone_fmt(value: str | None) -> str:
+    """전화번호를 표시용으로 포맷팅한다.
+
+    입력은 정규화된 숫자만 (예: '01012345678', '0212345678').
+    출력은 하이픈 포맷:
+    - 휴대폰 11자리: 010-1234-5678
+    - 휴대폰 10자리: 011-123-4567
+    - 서울 02 9-10자리: 02-1234-5678 / 02-123-4567
+    - 그 외 지역번호 10-11자리: 031-1234-5678
+    - 매치 안 되면 원본 반환
+
+    Args:
+        value: 정규화된 전화번호 문자열 또는 None.
+
+    Returns:
+        하이픈이 포함된 표시용 문자열.
+    """
+    if not value:
+        return ""
+    digits = "".join(c for c in value if c.isdigit())
+    if not digits:
+        return value
+    # 휴대폰 (010, 011, 016, 017, 018, 019)
+    if digits.startswith("01") and len(digits) == 11:
+        return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+    if digits.startswith("01") and len(digits) == 10:
+        return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+    # 서울 02
+    if digits.startswith("02") and len(digits) == 10:
+        return f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
+    if digits.startswith("02") and len(digits) == 9:
+        return f"{digits[:2]}-{digits[2:5]}-{digits[5:]}"
+    # 지역번호 03x ~ 06x (10~11자리)
+    if len(digits) == 11:
+        return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+    if len(digits) == 10:
+        return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+    # 인터넷 070, 050x 등
+    if digits.startswith("070") and len(digits) == 11:
+        return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+    return value
+
+
+templates.env.filters["phone_fmt"] = phone_fmt

@@ -14,7 +14,7 @@
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
     <div>
       <div class="text-muted" style="margin-bottom:2px">발신번호</div>
-      <div class="mono" style="font-size:14px;font-weight:600">{{ campaign.caller_number }}</div>
+      <div class="mono" style="font-size:14px;font-weight:600">{{ campaign.caller_number|phone_fmt }}</div>
     </div>
     <div>
       <div class="text-muted" style="margin-bottom:2px">유형</div>

@@ -13,7 +13,7 @@
   <tbody>
     {% for msg in messages %}
     <tr>
-      <td class="mono">{{ msg.to_number }}</td>
+      <td class="mono">{{ msg.to_number|phone_fmt }}</td>
       <td class="mono text-muted">{{ msg.to_number_raw }}</td>
       <td>
         {% if msg.result_status == "success" %}

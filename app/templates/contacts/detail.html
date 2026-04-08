@@ -33,7 +33,7 @@
   <table style="width:auto;min-width:320px">
     <tbody>
       <tr><th style="width:100px;font-weight:600;background:var(--bg-elevated)">이름</th><td>{{ contact.name }}</td></tr>
-      <tr><th style="background:var(--bg-elevated)">전화번호</th><td class="mono">{{ contact.phone or "—" }}</td></tr>
+      <tr><th style="background:var(--bg-elevated)">전화번호</th><td class="mono">{{ contact.phone|phone_fmt or "—" }}</td></tr>
       <tr><th style="background:var(--bg-elevated)">이메일</th><td>{{ contact.email or "—" }}</td></tr>
       <tr><th style="background:var(--bg-elevated)">부서</th><td>{{ contact.department or "—" }}</td></tr>
       <tr><th style="background:var(--bg-elevated)">메모</th><td>{{ contact.notes or "—" }}</td></tr>

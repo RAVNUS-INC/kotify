@@ -69,7 +69,7 @@
       {% for c in contacts %}
       <tr>
         <td><a href="/contacts/{{ c.id }}">{{ c.name }}</a></td>
-        <td class="mono">{{ c.phone or "—" }}</td>
+        <td class="mono">{{ c.phone|phone_fmt or "—" }}</td>
         <td class="text-muted">{{ c.email or "—" }}</td>
         <td class="text-muted">{{ c.department or "—" }}</td>
         <td>

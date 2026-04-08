@@ -56,7 +56,7 @@
     <tbody>
       {% for c in callers %}
       <tr>
-        <td class="mono">{{ c.number }}</td>
+        <td class="mono">{{ c.number|phone_fmt }}</td>
         <td>{{ c.label }}</td>
         <td>
           {% if c.active %}

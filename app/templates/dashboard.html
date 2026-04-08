@@ -50,7 +50,7 @@
       {% for c in recent_campaigns %}
       <tr>
         <td><a href="/campaigns/{{ c.id }}">#{{ c.id }}</a></td>
-        <td class="mono">{{ c.caller_number }}</td>
+        <td class="mono">{{ c.caller_number|phone_fmt }}</td>
         <td>
           {% if c.message_type == "SMS" %}
           <span class="badge badge-success">SMS</span>

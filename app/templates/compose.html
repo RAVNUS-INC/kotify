@@ -21,7 +21,7 @@
         <option value="{{ c.id }}"
           {% if preserved_caller_id and c.id == preserved_caller_id %}selected
           {% elif not preserved_caller_id and default_caller and c.id == default_caller.id %}selected{% endif %}>
-          {{ c.label }} ({{ c.number }})
+          {{ c.label }} ({{ c.number|phone_fmt }})
         </option>
         {% endfor %}
       </select>
@@ -92,7 +92,7 @@
         {% if contacts %}
         <select name="contact_ids" multiple size="10" id="contact-select">
           {% for c in contacts %}
-          <option value="{{ c.id }}">{{ c.name }} ({{ c.phone or "번호없음" }}{% if c.department %} · {{ c.department }}{% endif %})</option>
+          <option value="{{ c.id }}">{{ c.name }} ({{ c.phone|phone_fmt or "번호없음" }}{% if c.department %} · {{ c.department }}{% endif %})</option>
           {% endfor %}
         </select>
         {% else %}
