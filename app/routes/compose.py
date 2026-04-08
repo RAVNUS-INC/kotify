@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,12 +13,23 @@ from app.db import get_db
 from app.models import Caller, User
 from app.security.csrf import verify_csrf
 from app.services import audit
-from app.services.compose import MAX_RECIPIENTS_PER_CAMPAIGN, validate_message, validate_phone_list
+from app.services.compose import (
+    MAX_RECIPIENTS_PER_CAMPAIGN,
+    resolve_recipients,
+    validate_message,
+)
 from app.web import templates
 
 router = APIRouter()
 
 _sender_dep = require_role("sender", "admin")
+
+
+def _parse_roles(user: User) -> list[str]:
+    try:
+        return json.loads(user.roles)
+    except (json.JSONDecodeError, TypeError):
+        return []
 
 
 @router.get("/compose", response_class=HTMLResponse)
@@ -27,6 +38,7 @@ async def compose_page(
     db: Session = Depends(get_db),
     user: User = Depends(_sender_dep),
     _: None = Depends(require_setup_complete),
+    group_id: int = Query(0),
 ) -> HTMLResponse:
     """발송 작성 화면."""
     callers = list(
@@ -36,20 +48,28 @@ async def compose_page(
     )
     default_caller = next((c for c in callers if c.is_default), callers[0] if callers else None)
 
-    try:
-        user_roles = json.loads(user.roles)
-    except (json.JSONDecodeError, TypeError):
-        user_roles = []
+    # 그룹/연락처 드롭다운용 데이터
+    from app.services.contacts import list_contacts
+    from app.services.groups import get_group_size, list_groups
+    groups_raw, _ = list_groups(db, per_page=500)
+    groups = [
+        {"id": g.id, "name": g.name, "member_count": get_group_size(db, g.id)}
+        for g in groups_raw
+    ]
+    contacts, _ = list_contacts(db, per_page=1000)
 
     return templates.TemplateResponse(
         request,
         "compose.html",
         {
             "user": user,
-            "user_roles": user_roles,
+            "user_roles": _parse_roles(user),
             "callers": callers,
             "default_caller": default_caller,
             "preview": None,
+            "groups": groups,
+            "contacts": contacts,
+            "preselect_group_id": group_id,
         },
     )
 
@@ -62,11 +82,20 @@ async def compose_preview(
     _csrf: None = Depends(verify_csrf),
     caller_id: int = Form(...),
     content: str = Form(...),
-    recipients_text: str = Form(...),
+    recipients_text: str = Form(""),
+    source: str = Form("manual"),
 ) -> HTMLResponse:
     """HTMX — 미리보기 (번호 검증 + byte 길이 + SMS/LMS 판정)."""
-    # 번호 검증
-    valid_numbers, invalid_numbers = validate_phone_list(recipients_text)
+    # form에서 다중 값 추출
+    form_data = await request.form()
+    raw_group_ids = form_data.getlist("group_ids")
+    raw_contact_ids = form_data.getlist("contact_ids")
+    group_ids = [int(v) for v in raw_group_ids if v]
+    contact_ids = [int(v) for v in raw_contact_ids if v]
+
+    valid_numbers, invalid_numbers, _ = resolve_recipients(
+        db, source, recipients_text, group_ids, contact_ids
+    )
     phone_error = None
 
     # 메시지 검증
@@ -105,10 +134,18 @@ async def compose_send(
     _csrf: None = Depends(verify_csrf),
     caller_id: int = Form(...),
     content: str = Form(...),
-    recipients_text: str = Form(...),
+    recipients_text: str = Form(""),
+    source: str = Form("manual"),
 ) -> RedirectResponse:
     """실제 발송 처리."""
     from app.services.compose import dispatch_campaign
+
+    # form에서 다중 값 추출
+    form_data = await request.form()
+    raw_group_ids = form_data.getlist("group_ids")
+    raw_contact_ids = form_data.getlist("contact_ids")
+    group_ids = [int(v) for v in raw_group_ids if v]
+    contact_ids = [int(v) for v in raw_contact_ids if v]
 
     # 발신번호 확인
     caller = db.get(Caller, caller_id)
@@ -123,8 +160,10 @@ async def compose_send(
         db.commit()
         return RedirectResponse("/compose?error=invalid_caller", status_code=303)
 
-    # 번호 검증
-    valid_numbers, invalid_numbers = validate_phone_list(recipients_text)
+    # 수신자 해석
+    valid_numbers, invalid_numbers, marking_ids = resolve_recipients(
+        db, source, recipients_text, group_ids, contact_ids
+    )
 
     if invalid_numbers:
         audit.log(
@@ -175,6 +214,13 @@ async def compose_send(
             recipients=valid_numbers,
             message_type=msg_result["message_type"],
         )
+
+        # 연락처 last_sent_at 업데이트
+        if marking_ids:
+            from app.services.contacts import bulk_mark_sent
+            bulk_mark_sent(db, marking_ids, channel="sms")
+            db.commit()
+
         return RedirectResponse(f"/campaigns/{campaign.id}", status_code=303)
     except ValueError as exc:
         return RedirectResponse(f"/compose?error={exc}", status_code=303)

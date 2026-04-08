@@ -23,15 +23,65 @@
       </select>
     </div>
 
+    <!-- 수신자 선택 방식 -->
     <div class="form-group">
-      <label for="recipients_text">수신자 번호 <span class="text-muted">(한 줄에 한 번호 또는 콤마 구분)</span></label>
-      <textarea name="recipients_text" id="recipients_text" rows="6"
-        placeholder="010-1234-5678&#10;01087654321&#10;+82-10-9999-8888"
-        hx-post="/compose/preview"
-        hx-trigger="change delay:800ms"
-        hx-target="#preview-result"
-        hx-include="#compose-form"
-        hx-swap="innerHTML"></textarea>
+      <label>수신자 선택 방식</label>
+      <div class="flex" style="gap:1.25rem;flex-wrap:wrap;margin-top:0.25rem">
+        <label style="font-weight:normal"><input type="radio" name="source" value="manual" {% if preselect_group_id == 0 %}checked{% endif %} onchange="toggleSource()"> 직접 입력</label>
+        <label style="font-weight:normal"><input type="radio" name="source" value="groups" {% if preselect_group_id != 0 %}checked{% endif %} onchange="toggleSource()"> 그룹 선택</label>
+        <label style="font-weight:normal"><input type="radio" name="source" value="contacts" onchange="toggleSource()"> 개별 연락처</label>
+      </div>
+    </div>
+
+    <!-- 직접 입력 -->
+    <div id="source-manual" class="source-section" {% if preselect_group_id != 0 %}style="display:none"{% endif %}>
+      <div class="form-group">
+        <label for="recipients_text">수신자 번호 <span class="text-muted">(한 줄에 한 번호 또는 콤마 구분)</span></label>
+        <textarea name="recipients_text" id="recipients_text" rows="6"
+          placeholder="010-1234-5678&#10;01087654321&#10;+82-10-9999-8888"
+          hx-post="/compose/preview"
+          hx-trigger="change delay:800ms"
+          hx-target="#preview-result"
+          hx-include="#compose-form"
+          hx-swap="innerHTML"></textarea>
+      </div>
+    </div>
+
+    <!-- 그룹 선택 -->
+    <div id="source-groups" class="source-section" {% if preselect_group_id == 0 %}style="display:none"{% endif %}>
+      <div class="form-group">
+        <label>그룹 선택 <span class="text-muted">(Ctrl+클릭으로 다중 선택)</span></label>
+        {% if groups %}
+        <select name="group_ids" multiple size="6"
+          style="width:100%;border:1px solid #ccc;border-radius:4px;padding:0.25rem">
+          {% for g in groups %}
+          <option value="{{ g.id }}" {% if g.id == preselect_group_id %}selected{% endif %}>{{ g.name }} ({{ g.member_count }}명)</option>
+          {% endfor %}
+        </select>
+        {% else %}
+        <div class="alert alert-info">등록된 그룹이 없습니다. <a href="/groups/new">새 그룹 만들기</a></div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 개별 연락처 -->
+    <div id="source-contacts" class="source-section" style="display:none">
+      <div class="form-group">
+        <label>개별 연락처 <span class="text-muted">(Ctrl+클릭으로 다중 선택)</span></label>
+        <input type="text" id="contact-filter" placeholder="이름/전화번호 검색..."
+          onkeyup="filterContacts(this.value)"
+          style="margin-bottom:0.4rem">
+        {% if contacts %}
+        <select name="contact_ids" multiple size="10" id="contact-select"
+          style="width:100%;border:1px solid #ccc;border-radius:4px;padding:0.25rem">
+          {% for c in contacts %}
+          <option value="{{ c.id }}">{{ c.name }} ({{ c.phone or "번호없음" }}{% if c.department %} · {{ c.department }}{% endif %})</option>
+          {% endfor %}
+        </select>
+        {% else %}
+        <div class="alert alert-info">등록된 연락처가 없습니다. <a href="/contacts/new">연락처 추가</a></div>
+        {% endif %}
+      </div>
     </div>
 
     <div class="form-group">
@@ -66,4 +116,22 @@
     </div>
   </form>
 </div>
+
+<script>
+function toggleSource() {
+  var source = document.querySelector('input[name="source"]:checked').value;
+  document.getElementById('source-manual').style.display = source === 'manual' ? '' : 'none';
+  document.getElementById('source-groups').style.display = source === 'groups' ? '' : 'none';
+  document.getElementById('source-contacts').style.display = source === 'contacts' ? '' : 'none';
+}
+function filterContacts(query) {
+  query = query.toLowerCase();
+  var select = document.getElementById('contact-select');
+  if (!select) return;
+  for (var i = 0; i < select.options.length; i++) {
+    var opt = select.options[i];
+    opt.style.display = opt.text.toLowerCase().includes(query) ? '' : 'none';
+  }
+}
+</script>
 {% endblock %}

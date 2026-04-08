@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}{{ group.name }} — 그룹 — SMS 발송 시스템{% endblock %}
+{% block content %}
+<h1 class="page-title">{{ group.name }}</h1>
+
+{% if request.query_params.get("created") %}
+<div class="alert alert-success">그룹이 생성되었습니다.</div>
+{% elif request.query_params.get("updated") %}
+<div class="alert alert-success">그룹이 수정되었습니다.</div>
+{% elif request.query_params.get("added") %}
+<div class="alert alert-success">{{ request.query_params.get("added") }}명이 추가되었습니다.</div>
+{% elif request.query_params.get("removed") %}
+<div class="alert alert-success">{{ request.query_params.get("removed") }}명이 제거되었습니다.</div>
+{% endif %}
+
+<div class="flex" style="justify-content:flex-end;margin-bottom:0.75rem">
+  {% if "sender" in user_roles or "admin" in user_roles %}
+  <a href="/groups/{{ group.id }}/edit" class="btn btn-secondary btn-sm">편집</a>
+  <a href="/compose?group_id={{ group.id }}" class="btn btn-primary btn-sm">이 그룹으로 발송</a>
+  {% endif %}
+  {% if "admin" in user_roles %}
+  <form action="/groups/{{ group.id }}/delete" method="post" style="display:inline"
+    onsubmit="return confirm('그룹을 삭제하시겠습니까?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+    <button type="submit" class="btn btn-danger btn-sm">삭제</button>
+  </form>
+  {% endif %}
+  <a href="/groups" class="btn btn-secondary btn-sm">목록으로</a>
+</div>
+
+<!-- 그룹 정보 -->
+<div class="card">
+  <div class="card-title">그룹 정보</div>
+  <table style="width:auto">
+    <tbody>
+      <tr><th style="width:100px">그룹명</th><td>{{ group.name }}</td></tr>
+      <tr><th>설명</th><td>{{ group.description or "—" }}</td></tr>
+      <tr><th>멤버 수</th><td>{{ member_total }}명</td></tr>
+      <tr><th>생성일</th><td class="text-muted">{{ group.created_at[:10] }}</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 현재 멤버 목록 -->
+<div class="card">
+  <div class="card-title">멤버 목록 ({{ member_total }}명)</div>
+  {% if members %}
+  <form action="/groups/{{ group.id }}/members/remove" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+    <table>
+      <thead>
+        <tr>
+          {% if "sender" in user_roles or "admin" in user_roles %}
+          <th style="width:36px"><input type="checkbox" id="check-all" onclick="toggleAll(this)"></th>
+          {% endif %}
+          <th>이름</th>
+          <th>전화번호</th>
+          <th>이메일</th>
+          <th>부서</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in members %}
+        <tr>
+          {% if "sender" in user_roles or "admin" in user_roles %}
+          <td><input type="checkbox" name="contact_ids" value="{{ m.id }}"></td>
+          {% endif %}
+          <td><a href="/contacts/{{ m.id }}">{{ m.name }}</a></td>
+          <td class="mono">{{ m.phone or "—" }}</td>
+          <td class="text-muted">{{ m.email or "—" }}</td>
+          <td class="text-muted">{{ m.department or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if "sender" in user_roles or "admin" in user_roles %}
+    <div style="margin-top:0.75rem">
+      <button type="submit" class="btn btn-danger btn-sm"
+        onclick="return confirm('선택한 멤버를 제거하시겠습니까?')">선택 제거</button>
+    </div>
+    {% endif %}
+  </form>
+
+  {% if member_total_pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}">이전</a>
+    {% endif %}
+    {% for p in range(1, member_total_pages + 1) %}
+    <a href="?page={{ p }}" {% if p == page %}class="active"{% endif %}>{{ p }}</a>
+    {% endfor %}
+    {% if page < member_total_pages %}
+    <a href="?page={{ page + 1 }}">다음</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <p class="text-muted">멤버가 없습니다.</p>
+  {% endif %}
+</div>
+
+<!-- 멤버 추가 -->
+{% if "sender" in user_roles or "admin" in user_roles %}
+<div class="card">
+  <div class="card-title">멤버 추가</div>
+  <div class="form-group">
+    <input type="text" id="contact-search" placeholder="이름/전화번호/이메일 검색..."
+      onkeyup="filterContacts(this.value)" style="margin-bottom:0.5rem">
+  </div>
+  <form action="/groups/{{ group.id }}/members/add" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+    <select name="contact_ids" multiple size="10" id="contact-select"
+      style="width:100%;border:1px solid #ccc;border-radius:4px;padding:0.25rem">
+      {% for c in all_contacts %}
+      {% if c.id not in member_ids %}
+      <option value="{{ c.id }}">{{ c.name }}{% if c.phone %} ({{ c.phone }}){% endif %}{% if c.department %} · {{ c.department }}{% endif %}</option>
+      {% endif %}
+      {% endfor %}
+    </select>
+    <div class="form-hint">Ctrl+클릭 또는 Shift+클릭으로 다중 선택</div>
+    <div style="margin-top:0.75rem">
+      <button type="submit" class="btn btn-primary btn-sm">선택 추가</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<script>
+function toggleAll(cb) {
+  document.querySelectorAll('input[name="contact_ids"]').forEach(function(el) {
+    el.checked = cb.checked;
+  });
+}
+function filterContacts(query) {
+  query = query.toLowerCase();
+  var select = document.getElementById('contact-select');
+  if (!select) return;
+  for (var i = 0; i < select.options.length; i++) {
+    var opt = select.options[i];
+    opt.style.display = opt.text.toLowerCase().includes(query) ? '' : 'none';
+  }
+}
+</script>
+{% endblock %}

@@ -6,6 +6,10 @@
     <a href="/compose" {% if request.url.path == "/compose" %}class="active"{% endif %}>새 발송</a>
     {% endif %}
     <a href="/campaigns" {% if request.url.path.startswith("/campaigns") %}class="active"{% endif %}>발송 이력</a>
+    {% if "viewer" in user_roles or "sender" in user_roles or "admin" in user_roles %}
+    <a href="/contacts" {% if request.url.path.startswith("/contacts") %}class="active"{% endif %}>주소록</a>
+    <a href="/groups" {% if request.url.path.startswith("/groups") %}class="active"{% endif %}>그룹</a>
+    {% endif %}
     {% if "admin" in user_roles %}
     <div class="nav-dropdown">
       <a href="/admin/settings" {% if request.url.path.startswith("/admin") %}class="active"{% endif %}>관리 ▾</a>

@@ -393,6 +393,52 @@ async def dispatch_campaign(
     return campaign
 
 
+def resolve_recipients(
+    db: Session,
+    source: str,
+    recipients_text: str | None,
+    group_ids: list[int] | None,
+    contact_ids: list[int] | None,
+) -> tuple[list[str], list[str], list[int]]:
+    """수신자 출처를 펼쳐서 (valid_phones, invalid_originals, contact_ids_for_marking) 반환.
+
+    Args:
+        db: SQLAlchemy 세션.
+        source: 'manual' | 'groups' | 'contacts'
+        recipients_text: manual 모드일 때 수신자 텍스트.
+        group_ids: groups 모드일 때 그룹 ID 목록.
+        contact_ids: contacts 모드일 때 연락처 ID 목록.
+
+    Returns:
+        (valid_phones, invalid_originals, contact_ids_for_marking) 튜플.
+    """
+    from app.services.groups import expand_groups_to_contacts
+
+    if source == "groups":
+        contacts = expand_groups_to_contacts(db, group_ids or [])
+        phones = [c.phone for c in contacts if c.phone]
+        marking_ids = [c.id for c in contacts if c.phone]
+        return phones, [], marking_ids
+
+    if source == "contacts":
+        from sqlalchemy import select as _select
+
+        from app.models import Contact as _Contact
+        ids = contact_ids or []
+        if not ids:
+            return [], [], []
+        rows = list(
+            db.execute(_select(_Contact).where(_Contact.id.in_(ids))).scalars().all()
+        )
+        phones = [c.phone for c in rows if c.phone]
+        marking_ids = [c.id for c in rows if c.phone]
+        return phones, [], marking_ids
+
+    # manual (default)
+    valid, invalid = parse_phone_list(recipients_text or "")
+    return valid, invalid, []
+
+
 def _record_failed_chunk(
     db: Session,
     campaign_id: int,

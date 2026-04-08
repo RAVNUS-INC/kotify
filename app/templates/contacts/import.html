@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}CSV 가져오기 — 주소록 — SMS 발송 시스템{% endblock %}
+{% block content %}
+<h1 class="page-title">연락처 CSV 가져오기</h1>
+
+<!-- 결과 표시 -->
+{% if result is not none %}
+<div class="card">
+  <div class="card-title">가져오기 결과</div>
+  <table style="width:auto">
+    <tbody>
+      <tr><th>새로 추가</th><td><strong>{{ result.created }}</strong>건</td></tr>
+      <tr><th>업데이트</th><td><strong>{{ result.updated }}</strong>건</td></tr>
+      <tr><th>건너뜀</th><td><strong>{{ result.skipped }}</strong>건</td></tr>
+      {% if result.errors %}
+      <tr><th>오류</th><td><strong style="color:#dc2626">{{ result.errors | length }}</strong>건</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  {% if result.errors %}
+  <div class="alert alert-error" style="margin-top:0.75rem">
+    <strong>처리 오류:</strong><br>
+    {% for e in result.errors %}
+    <div>• {{ e }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if invalid_rows %}
+  <div style="margin-top:0.75rem">
+    <strong>유효하지 않은 행 ({{ invalid_rows | length }}건):</strong>
+    <table style="margin-top:0.5rem">
+      <thead><tr><th>행 번호</th><th>오류</th><th>원본 데이터</th></tr></thead>
+      <tbody>
+        {% for r in invalid_rows %}
+        <tr>
+          <td>{{ r.row_number }}</td>
+          <td class="err">{{ r.error }}</td>
+          <td class="mono" style="font-size:11px">{{ r.raw_data }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="flex" style="margin-top:1rem">
+    <a href="/contacts" class="btn btn-primary btn-sm">주소록으로 이동</a>
+    <a href="/contacts/import" class="btn btn-secondary btn-sm">다시 가져오기</a>
+  </div>
+</div>
+{% endif %}
+
+<!-- 업로드 폼 -->
+<div class="card">
+  <div class="card-title">CSV 파일 업로드</div>
+
+  <div class="alert alert-info" style="margin-bottom:1rem">
+    <strong>CSV 형식 안내</strong><br>
+    첫 번째 행은 헤더여야 합니다. 지원 열: <code>name, phone, email, department, notes</code><br>
+    <strong>필수:</strong> name + (phone 또는 email 중 하나 이상)<br>
+    예시: <code>name,phone,email,department,notes</code><br>
+    <code>홍길동,010-1234-5678,hong@example.com,마케팅팀,VIP</code>
+  </div>
+
+  <form action="/contacts/import" method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
+    <div class="form-group">
+      <label for="csv_file">CSV 파일 선택</label>
+      <input type="file" name="csv_file" id="csv_file" accept=".csv,text/csv" required>
+    </div>
+
+    <div class="form-group">
+      <label>중복 처리 방식 (전화번호 기준)</label>
+      <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.25rem">
+        <label style="font-weight:normal"><input type="radio" name="mode" value="skip" checked> 건너뜀 — 이미 있으면 무시</label>
+        <label style="font-weight:normal"><input type="radio" name="mode" value="update"> 업데이트 — 이미 있으면 덮어씀</label>
+        <label style="font-weight:normal"><input type="radio" name="mode" value="create"> 항상 새로 추가</label>
+      </div>
+    </div>
+
+    <div class="flex" style="margin-top:1rem">
+      <button type="submit" class="btn btn-primary">가져오기 실행</button>
+      <a href="/contacts" class="btn btn-secondary">취소</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{% if group %}그룹 편집{% else %}새 그룹{% endif %} — SMS 발송 시스템{% endblock %}
+{% block content %}
+<h1 class="page-title">{% if group %}그룹 편집{% else %}새 그룹 만들기{% endif %}</h1>
+
+<div class="card">
+  <form action="{{ action }}" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
+    <div class="form-group">
+      <label for="name">그룹명 <span style="color:#dc2626">*</span></label>
+      <input type="text" name="name" id="name" value="{{ group.name if group else '' }}"
+        placeholder="예: VIP 고객, 마케팅팀" required>
+    </div>
+
+    <div class="form-group">
+      <label for="description">설명</label>
+      <textarea name="description" id="description" rows="2"
+        placeholder="그룹에 대한 간단한 설명">{{ group.description if group else '' }}</textarea>
+    </div>
+
+    <div class="flex" style="margin-top:1rem">
+      <button type="submit" class="btn btn-primary">저장</button>
+      <a href="{% if group %}/groups/{{ group.id }}{% else %}/groups{% endif %}"
+         class="btn btn-secondary">취소</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

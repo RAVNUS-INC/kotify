@@ -162,6 +162,65 @@ class Message(Base):
     )
 
 
+class Contact(Base):
+    """주소록 연락처."""
+
+    __tablename__ = "contacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    phone: Mapped[str | None] = mapped_column(Text, nullable=True)  # 정규화된 형태
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    department: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    last_sent_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_sent_channel: Mapped[str | None] = mapped_column(Text, nullable=True)  # sms, email
+    created_by: Mapped[str] = mapped_column(Text, ForeignKey("users.sub"), nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("idx_contacts_phone", "phone"),
+        Index("idx_contacts_email", "email"),
+        Index("idx_contacts_department", "department"),
+        Index("idx_contacts_name", "name"),
+        Index("idx_contacts_active", "active"),
+    )
+
+
+class ContactGroup(Base):
+    """연락처 그룹."""
+
+    __tablename__ = "contact_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(Text, ForeignKey("users.sub"), nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ContactGroupMember(Base):
+    """그룹 멤버십 (N:N)."""
+
+    __tablename__ = "contact_group_members"
+
+    group_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("contact_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    contact_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True
+    )
+    added_by: Mapped[str | None] = mapped_column(Text, nullable=True)  # FK 없음 (system 액션 등 허용)
+    added_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("idx_cgm_contact_id", "contact_id"),
+    )
+
+
 class AuditLog(Base):
     """감사 로그 — 모든 중요 액션을 기록한다."""
 
