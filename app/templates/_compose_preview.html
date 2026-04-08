@@ -1,4 +1,4 @@
-<div class="card" style="border-color: {% if can_send %}var(--primary-border){% elif msg_error or not msg_ok %}#fca5a5{% else %}var(--border){% endif %}">
+<div class="card" style="border-color: {% if can_send %}var(--border-strong){% elif msg_error or not msg_ok %}#fca5a5{% else %}var(--border){% endif %}">
   {% if phone_error == "stub" %}
   <div class="alert alert-warning" role="alert">
     전화번호 검증 모듈(phone.py)이 아직 구현되지 않았습니다 (stub). 번호 검증을 사용할 수 없습니다.
