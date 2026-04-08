@@ -77,8 +77,10 @@ def list_contacts(
     active_only: bool = False,
     page: int = 1,
     per_page: int = 50,
+    sort: str = "name",
+    order: str = "asc",
 ) -> tuple[list[Contact], int]:
-    """연락처 목록 (검색, 필터, 페이지네이션).
+    """연락처 목록 (검색, 필터, 페이지네이션, H5 정렬).
 
     Returns:
         (contacts, total_count) 튜플.
@@ -105,9 +107,17 @@ def list_contacts(
     count_q = select(func.count()).select_from(q.subquery())
     total = db.execute(count_q).scalar_one()
 
+    # H5: 정렬 컬럼 허용 목록
+    _sort_cols = {
+        "name": Contact.name,
+        "last_sent_at": Contact.last_sent_at,
+    }
+    sort_col = _sort_cols.get(sort, Contact.name)
+    sort_expr = sort_col.asc() if order == "asc" else sort_col.desc()
+
     offset = (page - 1) * per_page
     contacts = list(
-        db.execute(q.order_by(Contact.name).offset(offset).limit(per_page)).scalars().all()
+        db.execute(q.order_by(sort_expr).offset(offset).limit(per_page)).scalars().all()
     )
     return contacts, total
 

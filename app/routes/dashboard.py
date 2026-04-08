@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, User
+from app.models import Caller, Campaign, Contact, User
 from app.web import templates
 
 router = APIRouter()
@@ -85,6 +85,30 @@ async def dashboard(
         )
     ).scalar_one() or 0
 
+    # C1: 시작 체크리스트용 플래그
+    has_callers = db.execute(
+        select(func.count(Caller.id)).where(Caller.active == 1)
+    ).scalar_one() or 0
+
+    has_contacts = db.execute(
+        select(func.count(Contact.id))
+    ).scalar_one() or 0
+
+    # H1: 최근 24시간 실패율
+    one_day_ago_utc = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+    recent_ok = db.execute(
+        select(func.sum(Campaign.ok_count)).where(
+            Campaign.created_at >= one_day_ago_utc
+        )
+    ).scalar_one() or 0
+    recent_fail = db.execute(
+        select(func.sum(Campaign.fail_count)).where(
+            Campaign.created_at >= one_day_ago_utc
+        )
+    ).scalar_one() or 0
+    total_recent = recent_ok + recent_fail
+    fail_rate_24h = round(recent_fail / total_recent * 100, 1) if total_recent > 0 else 0
+
     try:
         user_roles = json.loads(user.roles)
     except (json.JSONDecodeError, TypeError):
@@ -101,5 +125,9 @@ async def dashboard(
             "month_count": month_count,
             "month_recipients": month_recipients,
             "pending_count": pending_count,
+            "has_callers": has_callers,
+            "has_contacts": has_contacts,
+            "fail_rate_24h": fail_rate_24h,
+            "recent_fail": recent_fail,
         },
     )

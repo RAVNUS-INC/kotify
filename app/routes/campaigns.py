@@ -1,11 +1,13 @@
 """캠페인 이력 라우트."""
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -39,9 +41,19 @@ async def campaigns_list(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     page: int = Query(1, ge=1),
+    sort: str = Query("created_at"),
+    order: str = Query("desc"),
 ) -> HTMLResponse:
     """캠페인 목록. viewer는 본인 것만, admin은 전체."""
-    stmt = select(Campaign).order_by(Campaign.created_at.desc())
+    # H5: 정렬 컬럼 허용 목록
+    _sort_cols = {
+        "created_at": Campaign.created_at,
+        "ok_count": Campaign.ok_count,
+        "fail_count": Campaign.fail_count,
+    }
+    sort_col = _sort_cols.get(sort, Campaign.created_at)
+    sort_expr = sort_col.desc() if order != "asc" else sort_col.asc()
+    stmt = select(Campaign).order_by(sort_expr)
 
     if not _is_admin(user):
         stmt = stmt.where(Campaign.created_by == user.sub)
@@ -91,6 +103,8 @@ async def campaigns_list(
             "date_from": date_from,
             "date_to": date_to,
             "is_admin": _is_admin(user),
+            "sort": sort,
+            "order": order,
         },
     )
 
@@ -103,7 +117,7 @@ async def campaign_detail(
     user: User = Depends(require_user),
     _: None = Depends(require_setup_complete),
 ) -> HTMLResponse:
-    """캠페인 상세."""
+    """캠페인 상세. H14: 첫 페이지 수신자를 미리 fetch하여 더블 깜박임 제거."""
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(status_code=404, detail="캠페인을 찾을 수 없습니다.")
@@ -115,6 +129,22 @@ async def campaign_detail(
     except (json.JSONDecodeError, TypeError):
         user_roles = []
 
+    # H14: 첫 페이지 수신자 미리 로드 (HTMX는 폴링에만 갱신)
+    per_page = 50
+    first_page_messages = list(
+        db.execute(
+            select(Message)
+            .where(Message.campaign_id == campaign_id)
+            .order_by(Message.id)
+            .limit(per_page)
+        ).scalars().all()
+    )
+    total_recipients = db.execute(
+        select(func.count()).select_from(
+            select(Message).where(Message.campaign_id == campaign_id).subquery()
+        )
+    ).scalar_one()
+
     return templates.TemplateResponse(
         request,
         "campaigns/detail.html",
@@ -123,6 +153,9 @@ async def campaign_detail(
             "user_roles": user_roles,
             "campaign": campaign,
             "is_admin": _is_admin(user),
+            "first_page_messages": first_page_messages,
+            "total_recipients": total_recipients,
+            "per_page": per_page,
         },
     )
 
@@ -156,6 +189,7 @@ async def campaign_recipients(
     user: User = Depends(require_user),
     _: None = Depends(require_setup_complete),
     page: int = Query(1, ge=1),
+    status: str | None = Query(None),
 ) -> HTMLResponse:
     """HTMX fragment — 수신자 결과 테이블 (페이지네이션 50건)."""
     campaign = db.get(Campaign, campaign_id)
@@ -167,8 +201,14 @@ async def campaign_recipients(
     per_page = 50
     offset = (page - 1) * per_page
 
-    # #15: COUNT 쿼리 + limit/offset으로 OOM 방지
+    # C2: status 필터 적용
     base_stmt = select(Message).where(Message.campaign_id == campaign_id)
+    if status == "success":
+        base_stmt = base_stmt.where(Message.result_status == "success")
+    elif status == "fail":
+        base_stmt = base_stmt.where(Message.result_status == "fail")
+    elif status == "pending":
+        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "READY", "PROCESSING"]))
 
     total_count = db.execute(
         select(func.count()).select_from(base_stmt.subquery())
@@ -180,6 +220,11 @@ async def campaign_recipients(
         ).scalars().all()
     )
 
+    try:
+        user_roles = json.loads(user.roles)
+    except (json.JSONDecodeError, TypeError):
+        user_roles = []
+
     return templates.TemplateResponse(
         request,
         "campaigns/_recipients.html",
@@ -189,7 +234,58 @@ async def campaign_recipients(
             "page": page,
             "per_page": per_page,
             "total_count": total_count,
+            "status_filter": status,
+            "user_roles": user_roles,
         },
+    )
+
+
+@router.get("/{campaign_id}/export")
+async def campaign_export(
+    campaign_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    _: None = Depends(require_setup_complete),
+    status: str | None = Query(None),
+) -> StreamingResponse:
+    """C2: 수신자 CSV 다운로드 (status=fail 등 필터 지원)."""
+    campaign = db.get(Campaign, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404)
+    if not _can_access_campaign(user, campaign):
+        raise HTTPException(status_code=403)
+
+    base_stmt = select(Message).where(Message.campaign_id == campaign_id)
+    if status == "success":
+        base_stmt = base_stmt.where(Message.result_status == "success")
+    elif status == "fail":
+        base_stmt = base_stmt.where(Message.result_status == "fail")
+    elif status == "pending":
+        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "READY", "PROCESSING"]))
+
+    messages = list(db.execute(base_stmt.order_by(Message.id)).scalars().all())
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["번호(정규화)", "원본입력", "상태", "결과코드", "결과메시지", "완료시각"])
+    for msg in messages:
+        writer.writerow([
+            msg.to_number,
+            msg.to_number_raw,
+            msg.result_status or msg.status,
+            msg.result_code or "",
+            msg.result_message or "",
+            msg.complete_time or "",
+        ])
+
+    fname_suffix = f"_{status}" if status else ""
+    filename = f"campaign_{campaign_id}{fname_suffix}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 

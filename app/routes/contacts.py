@@ -50,6 +50,8 @@ async def contacts_list(
     department: str = Query(""),
     active_only: bool = Query(False),
     page: int = Query(1, ge=1),
+    sort: str = Query("name"),
+    order: str = Query("asc"),
 ) -> HTMLResponse:
     """연락처 목록."""
     per_page = 50
@@ -60,6 +62,8 @@ async def contacts_list(
         active_only=active_only,
         page=page,
         per_page=per_page,
+        sort=sort,
+        order=order,
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
 
@@ -77,6 +81,8 @@ async def contacts_list(
             "search": search,
             "department": department,
             "active_only": active_only,
+            "sort": sort,
+            "order": order,
         },
     )
 

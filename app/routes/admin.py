@@ -164,7 +164,7 @@ async def test_ncp(
 async def callers_list(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(_admin_dep),
+    user: User = Depends(require_role("viewer", "sender", "admin")),
     _: None = Depends(require_setup_complete),
 ) -> HTMLResponse:
     """발신번호 목록."""
@@ -292,10 +292,14 @@ async def caller_delete(
     user: User = Depends(_admin_dep),
     _csrf: None = Depends(verify_csrf),
 ) -> RedirectResponse:
-    """발신번호 삭제."""
+    """발신번호 삭제. H8: 활성 번호는 삭제 불가."""
     caller = db.get(Caller, caller_id)
     if caller is None:
         raise HTTPException(status_code=404)
+
+    # H8: 활성 번호는 삭제 불가 — 먼저 비활성화 후 삭제
+    if caller.active:
+        return RedirectResponse("/admin/callers?error=active_cannot_delete", status_code=303)
 
     audit.log(
         db,
@@ -319,15 +323,20 @@ async def audit_log_page(
     user: User = Depends(_admin_dep),
     _: None = Depends(require_setup_complete),
     page: int = Query(1, ge=1),
+    sort: str = Query("created_at"),
+    order: str = Query("desc"),
 ) -> HTMLResponse:
-    """감사 로그 조회 (페이지네이션 50건)."""
+    """감사 로그 조회 (페이지네이션 50건, H5 정렬)."""
     per_page = 50
     offset = (page - 1) * per_page
+
+    # H5: 정렬
+    sort_expr = AuditLog.created_at.desc() if order != "asc" else AuditLog.created_at.asc()
 
     logs = list(
         db.execute(
             select(AuditLog)
-            .order_by(AuditLog.created_at.desc())
+            .order_by(sort_expr)
             .offset(offset)
             .limit(per_page)
         ).scalars().all()
@@ -353,5 +362,7 @@ async def audit_log_page(
             "page": page,
             "per_page": per_page,
             "total_count": total_count,
+            "sort": sort,
+            "order": order,
         },
     )

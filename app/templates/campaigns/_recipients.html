@@ -1,10 +1,43 @@
+{% set status_filter = status_filter or "" %}
+{# C2: 상태 필터 탭 + CSV 내보내기 #}
+<div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+  <div style="display:flex;gap:4px;flex-wrap:wrap">
+    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1"
+       hx-target="#recipients-table" hx-swap="innerHTML"
+       class="btn btn-sm {% if not status_filter %}btn-primary{% else %}btn-secondary{% endif %}">
+      전체 {{ campaign.total_count }}
+    </a>
+    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1&status=success"
+       hx-target="#recipients-table" hx-swap="innerHTML"
+       class="btn btn-sm {% if status_filter == 'success' %}btn-primary{% else %}btn-secondary{% endif %}">
+      <span class="ok">성공</span> {{ campaign.ok_count }}
+    </a>
+    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1&status=fail"
+       hx-target="#recipients-table" hx-swap="innerHTML"
+       class="btn btn-sm {% if status_filter == 'fail' %}btn-primary{% else %}btn-secondary{% endif %}">
+      <span class="err">실패</span> {{ campaign.fail_count }}
+    </a>
+    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1&status=pending"
+       hx-target="#recipients-table" hx-swap="innerHTML"
+       class="btn btn-sm {% if status_filter == 'pending' %}btn-primary{% else %}btn-secondary{% endif %}">
+      대기 {{ campaign.pending_count }}
+    </a>
+  </div>
+  <div style="display:flex;gap:4px">
+    <a href="/campaigns/{{ campaign.id }}/export{% if status_filter %}?status={{ status_filter }}{% endif %}"
+       class="btn btn-secondary btn-sm">
+      <i data-lucide="download"></i> CSV
+    </a>
+  </div>
+</div>
+
 <div class="table-wrapper">
 <table>
   <colgroup>
     <col style="width: 130px">    <!-- 번호 (정규화) -->
     <col style="width: 130px">    <!-- 원본 입력 -->
     <col style="width: 80px">     <!-- 상태 -->
-    <col>                          <!-- 결과 메시지 -->
+    <col>                          <!-- 결과 (H13: 2-line) -->
     <col style="width: 70px">     <!-- 결과 코드 -->
     <col style="width: 130px">    <!-- 완료 시각 -->
   </colgroup>
@@ -13,7 +46,7 @@
       <th>번호</th>
       <th>원본 입력</th>
       <th>상태</th>
-      <th>결과 메시지</th>
+      <th>결과</th>
       <th class="text-right">결과 코드</th>
       <th>완료 시각</th>
     </tr>
@@ -38,8 +71,13 @@
         <span class="badge">{{ msg.status }}</span>
         {% endif %}
       </td>
-      <td class="text-muted" style="font-size:11px">
-        {{ msg.result_message or describe_ncp(msg.result_code) }}
+      <td style="line-height:1.5">
+        {% set result_msg = msg.result_message or describe_ncp(msg.result_code) %}
+        {% if result_msg %}
+        <span class="{% if msg.result_status == 'fail' %}err{% else %}text-muted{% endif %}" style="font-size:11px;white-space:normal">{{ result_msg }}</span>
+        {% else %}
+        <span class="text-muted" style="font-size:11px">—</span>
+        {% endif %}
       </td>
       <td class="mono text-right text-muted">{{ msg.result_code or "—" }}</td>
       <td class="mono text-muted">{{ msg.complete_time|kst_dt if msg.complete_time else "—" }}</td>
@@ -49,17 +87,24 @@
 </table>
 </div>
 
+{% if not messages %}
+<div class="empty-state" style="padding:20px">
+  <i data-lucide="inbox"></i>
+  <p>해당 조건의 수신자가 없습니다.</p>
+</div>
+{% endif %}
+
 {% if total_count > per_page %}
 <div style="padding:10px 16px;border-top:1px solid var(--border)">
   <div class="pagination">
     {% if page > 1 %}
-    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page - 1 }}"
-       hx-target="#recipients-table" hx-swap="innerHTML">이전</a>
+    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page - 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+       hx-target="#recipients-table" hx-swap="innerHTML">← 이전</a>
     {% endif %}
     <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
     {% if page * per_page < total_count %}
-    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page + 1 }}"
-       hx-target="#recipients-table" hx-swap="innerHTML">다음</a>
+    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page + 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+       hx-target="#recipients-table" hx-swap="innerHTML">다음 →</a>
     {% endif %}
   </div>
 </div>

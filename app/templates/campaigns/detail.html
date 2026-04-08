@@ -2,6 +2,11 @@
 {% block title %}캠페인 #{{ campaign.id }} — kotify{% endblock %}
 {% block page_title %}캠페인 #{{ campaign.id }}{% endblock %}
 {% block page_actions %}
+  {% if campaign.fail_count > 0 and ("sender" in user_roles or "admin" in user_roles) %}
+  <a href="/compose?resend_campaign={{ campaign.id }}&status=fail" class="btn btn-secondary btn-sm">
+    <i data-lucide="refresh-cw"></i> 실패 수신자 재발송
+  </a>
+  {% endif %}
   <a href="/campaigns" class="btn btn-secondary btn-sm">
     <i data-lucide="arrow-left"></i> 목록
   </a>
@@ -54,18 +59,41 @@
 <!-- 진행 현황 (HTMX fragment) -->
 {% include "campaigns/_progress.html" %}
 
-<!-- 수신자 결과 -->
+<!-- 수신자 결과 (H14: 첫 로드는 SSR, HTMX는 폴링에만) -->
 <div class="card" style="padding:0">
   <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
     <span style="font-size:13px;font-weight:700">수신자 결과</span>
   </div>
   <div id="recipients-table"
+    {% if campaign.state in ('DISPATCHING', 'DISPATCHED', 'PARTIAL_FAILED') %}
     hx-get="/campaigns/{{ campaign.id }}/recipients"
-    hx-trigger="load{% if campaign.state in ('DISPATCHING', 'DISPATCHED', 'PARTIAL_FAILED') %}, every 5s{% endif %}"
-    hx-swap="innerHTML">
-    <div style="padding:20px;text-align:center;color:var(--text-muted)">
-      <span class="spinner"></span> 로딩 중...
-    </div>
+    hx-trigger="every 5s"
+    hx-swap="innerHTML"
+    {% endif %}>
+    {% set messages = first_page_messages %}
+    {% set total_count = total_recipients %}
+    {% set page = 1 %}
+    {% set status_filter = "" %}
+    {% set user_roles = user_roles %}
+    {% include "campaigns/_recipients.html" %}
   </div>
 </div>
+
+<script>
+// C3: 진행 중 캠페인 — title 동적 갱신 (% 포함)
+{% if campaign.state in ('DISPATCHING', 'DISPATCHED') %}
+(function() {
+  var baseTitle = document.title;
+  function updateTitle() {
+    var doneEl = document.querySelector('#progress-card .stat-value, #progress-card span[style*="font-size:18px"]');
+    var pctEl = document.querySelector('#progress-card .text-muted');
+    if (pctEl) {
+      var pct = pctEl.textContent.trim();
+      document.title = '[' + pct + '] ' + baseTitle;
+    }
+  }
+  setInterval(updateTitle, 5000);
+})();
+{% endif %}
+</script>
 {% endblock %}

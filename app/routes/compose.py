@@ -87,13 +87,46 @@ async def compose_page(
     user: User = Depends(_sender_dep),
     _: None = Depends(require_setup_complete),
     group_id: int = Query(0),
+    resend_campaign: int = Query(0),
 ) -> HTMLResponse:
-    """발송 작성 화면."""
+    """발송 작성 화면. resend_campaign이 있으면 실패 수신자 + 본문 prefill."""
+    # C2: 재발송 prefill — 실패 수신자 번호 + 본문 자동 채우기
+    prefill_recipients = ""
+    prefill_content = ""
+    if resend_campaign:
+        from sqlalchemy import select as sa_select  # noqa: PLC0415
+
+        from app.models import Campaign, Message  # noqa: PLC0415
+        orig = db.get(Campaign, resend_campaign)
+        if orig and (_is_sender_or_admin(user) or orig.created_by == user.sub):
+            prefill_content = orig.content or ""
+            fail_msgs = list(
+                db.execute(
+                    sa_select(Message).where(
+                        Message.campaign_id == resend_campaign,
+                        Message.result_status == "fail",
+                    )
+                ).scalars().all()
+            )
+            prefill_recipients = "\n".join(msg.to_number_raw for msg in fail_msgs)
+
     return templates.TemplateResponse(
         request,
         "compose.html",
-        _get_compose_context(db, user, group_id=group_id),
+        _get_compose_context(
+            db, user, group_id=group_id,
+            content=prefill_content,
+            recipients_text=prefill_recipients,
+        ),
     )
+
+
+def _is_sender_or_admin(user: User) -> bool:
+    try:
+        roles = set(json.loads(user.roles))
+        return bool(roles & {"sender", "admin"})
+    except (json.JSONDecodeError, TypeError):
+        return False
 
 
 @router.post("/compose/preview", response_class=HTMLResponse)

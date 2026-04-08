@@ -10,12 +10,32 @@
 </div>
 {% endif %}
 
+{% if not callers %}
+<div class="alert alert-warning" role="alert" style="display:flex;align-items:flex-start;gap:10px">
+  <i data-lucide="alert-triangle" style="width:16px;height:16px;flex-shrink:0;margin-top:1px"></i>
+  <div>
+    <strong>발신번호가 등록되어 있지 않습니다.</strong><br>
+    발송을 시작하려면 먼저 발신번호를 등록해야 합니다.
+    {% if "admin" in user_roles %}
+    <a href="/admin/callers" style="color:inherit;text-decoration:underline;margin-left:4px">발신번호 관리 →</a>
+    {% else %}
+    관리자에게 <a href="/admin/callers" style="color:inherit;text-decoration:underline">발신번호 등록</a>을 요청하세요.
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
   <form id="compose-form" action="/compose/send" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
     <div class="form-group">
       <label for="caller_id">발신번호</label>
+      {% if not callers %}
+      <select name="caller_id" id="caller_id" disabled style="opacity:0.5">
+        <option value="">— 발신번호 없음 —</option>
+      </select>
+      {% else %}
       <select name="caller_id" id="caller_id" required>
         {% for c in callers %}
         <option value="{{ c.id }}"
@@ -25,6 +45,7 @@
         </option>
         {% endfor %}
       </select>
+      {% endif %}
     </div>
 
     <!-- 수신자 선택 방식 -->
@@ -45,6 +66,7 @@
           <input type="radio" name="source" value="contacts" onchange="toggleSource()"> 개별 연락처
         </label>
       </div>
+      <div class="form-hint" style="margin-top:4px">다른 모드로 전환해도 입력 내용은 유지됩니다.</div>
     </div>
 
     <!-- 직접 입력 -->
@@ -57,7 +79,7 @@
         <textarea name="recipients_text" id="recipients_text" rows="5"
           placeholder="010-1234-5678&#10;01087654321&#10;+82-10-9999-8888"
           hx-post="/compose/preview"
-          hx-trigger="change delay:800ms"
+          hx-trigger="keyup changed delay:600ms"
           hx-target="#preview-result"
           hx-include="#compose-form"
           hx-swap="innerHTML">{{ recipients_text or "" }}</textarea>
@@ -101,20 +123,25 @@
           </label>
           {% endfor %}
         </div>
-        <div class="form-hint">검색으로 필터링 후 체크. 여러 명 선택 가능.</div>
+        <div class="form-hint">검색으로 필터링 후 체크. 여러 명 선택 가능.
+          {% if contacts|length >= 1000 %}
+          <span class="warn">최대 1,000명까지 표시됩니다. 더 많은 연락처는 그룹 또는 직접 입력을 사용하세요.</span>
+          {% endif %}
+        </div>
         {% else %}
         <div class="alert alert-info">등록된 연락처가 없습니다. <a href="/contacts/new">연락처 추가</a></div>
         {% endif %}
       </div>
     </div>
 
-    <!-- LMS 제목 (90 byte 초과 시 자동 표시) -->
-    <div class="form-group" id="subject-group" style="display:none">
-      <label for="subject-input">제목 <span class="text-muted" style="font-weight:normal">(LMS 전용, 0~40 byte)</span></label>
+    <!-- LMS 제목 (항상 렌더, SMS일 때 disabled + opacity) -->
+    <div class="form-group" id="subject-group" style="opacity:0.4">
+      <label for="subject-input">제목 <span class="text-muted" style="font-weight:normal">(LMS 전용)</span></label>
       <input type="text" name="subject" id="subject-input" maxlength="40"
         placeholder="LMS 메시지 제목 (선택)"
-        value="{{ subject or '' }}">
-      <div class="form-hint">SMS(90 byte 이하)일 때는 제목이 무시됩니다. LMS일 때만 사용됩니다.</div>
+        value="{{ subject or '' }}"
+        disabled>
+      <div class="form-hint">SMS(90 byte 이하)일 때는 비활성됩니다. 90 byte 초과 시 자동 활성됩니다.</div>
     </div>
 
     <!-- 본문 -->
@@ -148,12 +175,61 @@
         미리보기
         <span class="htmx-indicator spinner"></span>
       </button>
-      <button type="submit" class="btn btn-primary" id="send-btn">
+      {% if callers %}
+      <button type="button" class="btn btn-primary" id="send-btn" onclick="openSendModal()">
         <i data-lucide="send"></i>
         발송하기
       </button>
+      {% else %}
+      <button type="button" class="btn btn-primary" disabled title="발신번호를 먼저 등록하세요">
+        <i data-lucide="send"></i>
+        발송하기
+      </button>
+      {% endif %}
     </div>
   </form>
+</div>
+
+<!-- C4: 발송 확인 모달 -->
+<div id="send-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.4);align-items:center;justify-content:center">
+  <div style="background:#fff;border:1px solid var(--border-strong);width:480px;max-width:95vw">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:space-between">
+      <span>발송 확인</span>
+      <button onclick="closeSendModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1">×</button>
+    </div>
+    <div style="padding:16px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <colgroup><col style="width:90px"><col></colgroup>
+        <tbody>
+          <tr>
+            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">발신번호</th>
+            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-caller">—</td>
+          </tr>
+          <tr>
+            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">수신자</th>
+            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-count">—</td>
+          </tr>
+          <tr>
+            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">유형</th>
+            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-type">—</td>
+          </tr>
+          <tr>
+            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary);vertical-align:top">본문</th>
+            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-content">—</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="alert alert-warning" style="margin-top:10px;margin-bottom:0;font-size:11px">
+        발송 후 취소할 수 없습니다. 내용을 확인하고 진행하세요.
+      </div>
+    </div>
+    <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="closeSendModal()" class="btn btn-secondary">취소</button>
+      <button onclick="confirmSend()" class="btn btn-primary">
+        <i data-lucide="send"></i> 예, 발송합니다
+      </button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -175,7 +251,7 @@ function filterContacts(query) {
   }
 }
 
-// ── 본문 byte 카운터 (#U2) ──────────────────────────────────────────────────
+// ── 본문 byte 카운터 + H10 LMS subject 활성/비활성 ──────────────────────────
 function measureEucKrBytes(text) {
   var bytes = 0;
   for (var i = 0; i < text.length; i++) {
@@ -191,12 +267,19 @@ function updateByteCounter() {
   var type = bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과');
   byteCounter.textContent = bytes + ' byte (' + type + ')';
   byteCounter.className = 'byte-counter ' + (bytes > 2000 ? 'err' : (bytes > 90 ? 'warn' : 'ok'));
-  // LMS(>90 byte)일 때 제목 입력란 자동 표시
+  // H10: LMS(>90 byte)일 때 제목 입력란 활성 + opacity 복원, SMS일 때 비활성
   var subjectGroup = document.getElementById('subject-group');
-  if (subjectGroup) {
-    subjectGroup.style.display = bytes > 90 ? '' : 'none';
+  var subjectInput = document.getElementById('subject-input');
+  if (subjectGroup && subjectInput) {
+    if (bytes > 90) {
+      subjectGroup.style.opacity = '1';
+      subjectInput.disabled = false;
+    } else {
+      subjectGroup.style.opacity = '0.4';
+      subjectInput.disabled = true;
+    }
   }
-  // textarea auto-grow — 스크롤 없이 본문 길이만큼 자동 확장
+  // textarea auto-grow
   contentTa.style.height = 'auto';
   contentTa.style.height = (contentTa.scrollHeight + 2) + 'px';
 }
@@ -205,16 +288,43 @@ if (contentTa) {
   updateByteCounter();
 }
 
-// ── 발송 확인 다이얼로그 (#U1) ───────────────────────────────────────────────
-document.getElementById('compose-form').addEventListener('submit', function(e) {
-  var previewCard = document.querySelector('#preview-result .card');
-  // preview 결과에서 valid-count 읽기 (없으면 그냥 통과)
+// ── C4: 발송 확인 모달 ────────────────────────────────────────────────────────
+function openSendModal() {
+  // 미리보기 결과에서 수신자 수 읽기
   var validEl = document.getElementById('current-valid-count');
-  var validCount = validEl ? parseInt(validEl.textContent || '0', 10) : null;
-  if (validCount === null || validCount === 0) return;
-  if (!confirm('수신자 ' + validCount + '명에게 실제로 발송합니다.\n\n발송 후 취소할 수 없습니다. 계속하시겠습니까?')) {
-    e.preventDefault();
-  }
+  var validCount = validEl ? parseInt(validEl.textContent || '0', 10) : 0;
+
+  // 발신번호 선택값 읽기
+  var callerSel = document.getElementById('caller_id');
+  var callerText = callerSel ? callerSel.options[callerSel.selectedIndex].text : '—';
+
+  // 메시지 유형 읽기 (byte counter로 판단)
+  var bytes = contentTa ? measureEucKrBytes(contentTa.value) : 0;
+  var msgType = bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과');
+
+  // 본문 미리보기 (80자 이상이면 말줄임)
+  var content = contentTa ? contentTa.value : '';
+  var contentPreview = content.length > 80 ? content.slice(0, 80) + '…' : content;
+
+  document.getElementById('modal-caller').textContent = callerText;
+  document.getElementById('modal-count').textContent = validCount > 0 ? validCount + '명' : '미리보기 없음 (발송 전 확인 권장)';
+  document.getElementById('modal-type').textContent = msgType;
+  document.getElementById('modal-content').textContent = contentPreview || '(비어있음)';
+
+  var modal = document.getElementById('send-modal');
+  modal.style.display = 'flex';
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+function closeSendModal() {
+  document.getElementById('send-modal').style.display = 'none';
+}
+function confirmSend() {
+  document.getElementById('send-modal').style.display = 'none';
+  document.getElementById('compose-form').submit();
+}
+// ESC로 모달 닫기
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeSendModal();
 });
 </script>
 {% endblock %}

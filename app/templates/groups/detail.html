@@ -181,30 +181,41 @@
 </div>
 {% endif %}
 
-<!-- 멤버 추가 -->
+<!-- 멤버 추가 (H3: checkbox-list 패턴) -->
 {% if "sender" in user_roles or "admin" in user_roles %}
 <div class="card" style="margin-top:20px">
   <div class="card-title">기존 연락처에서 선택</div>
   <div style="margin-bottom:8px">
     <input type="text" id="contact-search" placeholder="이름/전화번호/이메일 검색..."
-      onkeyup="filterContacts(this.value)"
-      style="padding:4px 8px;border:1px solid var(--border-strong);border-radius:var(--radius);font-size:12px;width:100%;max-width:320px">
+      onkeyup="filterContactsAdd(this.value)"
+      class="ctrl" style="width:100%;max-width:320px">
   </div>
   <form action="/groups/{{ group.id }}/members/add" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <div class="form-group">
-      <select name="contact_ids" multiple size="10" id="contact-select">
-        {% for c in all_contacts %}
-        {% if c.id not in member_ids %}
-        <option value="{{ c.id }}">{{ c.name }}{% if c.phone %} ({{ c.phone|phone_fmt }}){% endif %}{% if c.department %} · {{ c.department }}{% endif %}</option>
-        {% endif %}
+      {% set addable = all_contacts | selectattr('id', 'not in', member_ids) | list %}
+      {% if addable %}
+      <div class="checkbox-list" id="add-contact-list" style="max-height:280px;overflow-y:auto">
+        {% for c in addable %}
+        <label class="checkbox-item"
+          data-search="{{ (c.name or '')|lower }} {{ (c.phone or '')|lower }} {{ (c.department or '')|lower }}">
+          <input type="checkbox" name="contact_ids" value="{{ c.id }}">
+          <span class="checkbox-label">{{ c.name }}
+            <span class="text-muted">{{ c.phone|phone_fmt or "" }}{% if c.department %} · {{ c.department }}{% endif %}</span>
+          </span>
+        </label>
         {% endfor %}
-      </select>
-      <div class="form-hint">Ctrl+클릭 또는 Shift+클릭으로 다중 선택</div>
+      </div>
+      <div class="form-hint" style="margin-top:4px">검색으로 필터링 후 체크. 여러 명 선택 가능.</div>
+      {% else %}
+      <div class="alert alert-info">추가 가능한 연락처가 없습니다.</div>
+      {% endif %}
     </div>
+    {% if addable %}
     <button type="submit" class="btn btn-primary btn-sm">
       <i data-lucide="user-plus"></i> 선택 추가
     </button>
+    {% endif %}
   </form>
 </div>
 {% endif %}
@@ -215,14 +226,14 @@ function toggleAll(cb) {
     el.checked = cb.checked;
   });
 }
-function filterContacts(query) {
-  query = query.toLowerCase();
-  var select = document.getElementById('contact-select');
-  if (!select) return;
-  for (var i = 0; i < select.options.length; i++) {
-    var opt = select.options[i];
-    opt.style.display = opt.text.toLowerCase().includes(query) ? '' : 'none';
-  }
+function filterContactsAdd(query) {
+  query = (query || '').toLowerCase().trim();
+  var list = document.getElementById('add-contact-list');
+  if (!list) return;
+  list.querySelectorAll('.checkbox-item').forEach(function(item) {
+    var search = item.getAttribute('data-search') || '';
+    item.style.display = !query || search.includes(query) ? '' : 'none';
+  });
 }
 </script>
 {% endblock %}

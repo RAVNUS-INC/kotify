@@ -63,14 +63,22 @@
       <col style="width: 130px">    <!-- 마지막 발송 -->
       <col style="width: 100px">    <!-- 관리 -->
     </colgroup>
+    {% macro sort_th(label, col, cls="") %}
+    {% set next_order = "asc" if (sort == col and order == "desc") else "desc" %}
+    {% set icon = " ↑" if (sort == col and order == "asc") else (" ↓" if (sort == col and order == "desc") else " ↕") %}
+    <th class="{{ cls }}" style="cursor:pointer">
+      <a href="?sort={{ col }}&order={{ next_order }}&search={{ search }}&department={{ department }}&active_only={{ active_only }}&page=1"
+         style="color:inherit;text-decoration:none">{{ label }}<span style="opacity:0.5;font-size:10px">{{ icon }}</span></a>
+    </th>
+    {% endmacro %}
     <thead>
       <tr>
-        <th>이름</th>
+        {{ sort_th("이름", "name") }}
         <th>전화번호</th>
         <th>이메일</th>
         <th>부서</th>
         <th>상태</th>
-        <th>마지막 발송</th>
+        {{ sort_th("마지막 발송", "last_sent_at") }}
         <th>관리</th>
       </tr>
     </thead>

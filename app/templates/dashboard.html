@@ -10,6 +10,46 @@
 {% endblock %}
 
 {% block content %}
+
+{# C1: 시작 체크리스트 — has_callers/has_contacts 기준 #}
+{% if ("sender" in user_roles or "admin" in user_roles) and (not has_callers or not has_contacts) %}
+<div class="card" style="border-color:var(--border-strong);margin-bottom:16px">
+  <div class="card-title" style="display:flex;align-items:center;gap:6px">
+    <i data-lucide="list-checks" style="width:14px;height:14px"></i>
+    시작 체크리스트
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+      {% if has_callers %}
+      <span style="color:var(--success)"><i data-lucide="check-circle" style="width:13px;height:13px;vertical-align:middle"></i></span>
+      <span style="color:var(--text-muted);text-decoration:line-through">발신번호 등록</span>
+      {% else %}
+      <span style="color:var(--warning)"><i data-lucide="circle" style="width:13px;height:13px;vertical-align:middle"></i></span>
+      <span>발신번호 등록 — <a href="/admin/callers">발신번호 관리 →</a></span>
+      {% endif %}
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+      {% if has_contacts %}
+      <span style="color:var(--success)"><i data-lucide="check-circle" style="width:13px;height:13px;vertical-align:middle"></i></span>
+      <span style="color:var(--text-muted);text-decoration:line-through">연락처 등록</span>
+      {% else %}
+      <span style="color:var(--warning)"><i data-lucide="circle" style="width:13px;height:13px;vertical-align:middle"></i></span>
+      <span>연락처 등록 — <a href="/contacts/new">연락처 추가 →</a> 또는 <a href="/contacts/import">CSV 가져오기 →</a></span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# H1: 최근 24시간 실패율 주의 카드 #}
+{% if fail_rate_24h >= 10 and recent_fail > 0 %}
+<div class="alert alert-warning" style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+  <i data-lucide="alert-triangle" style="width:14px;height:14px;flex-shrink:0"></i>
+  <span>최근 24시간 발송 실패율이 <strong>{{ fail_rate_24h }}%</strong>입니다. (실패 {{ recent_fail }}건)
+  <a href="/campaigns?status=FAILED" style="margin-left:6px">실패 캠페인 확인 →</a></span>
+</div>
+{% endif %}
+
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-value">{{ today_count }}</div>
@@ -23,10 +63,14 @@
     <div class="stat-value">{{ month_recipients }}</div>
     <div class="stat-label">이번 달 발송 성공</div>
   </div>
-  <div class="stat-card">
+  {# C3: 진행 중 stat card → 링크 #}
+  <a href="/campaigns?status=DISPATCHED" class="stat-card" style="text-decoration:none;display:block">
     <div class="stat-value" style="{% if pending_count > 0 %}color:var(--warning){% endif %}">{{ pending_count }}</div>
-    <div class="stat-label">진행 중</div>
-  </div>
+    <div class="stat-label" style="display:flex;align-items:center;gap:4px">
+      진행 중
+      {% if pending_count > 0 %}<i data-lucide="external-link" style="width:10px;height:10px;opacity:0.5"></i>{% endif %}
+    </div>
+  </a>
 </div>
 
 <div class="card">

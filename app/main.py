@@ -1,17 +1,19 @@
 """FastAPI 애플리케이션 엔트리포인트."""
 from __future__ import annotations
 
+import json as _json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy import select as _sa_select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.db import SessionLocal, engine
-from app.models import Base
+from app.models import Base, User
 from app.ncp.client import NCPAuthError
 from app.security.crypto import load_or_create_master_key
 from app.services.poller import Poller
@@ -253,6 +255,23 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             except Exception:
                 user_roles = []
 
+        # C6: 403일 때 첫 번째 admin 이메일 주입
+        first_admin_email = None
+        if exc.status_code == 403:
+            try:
+                with SessionLocal() as _db:
+                    all_users = list(_db.execute(_sa_select(User)).scalars().all())
+                    for _u in all_users:
+                        try:
+                            _roles = _json.loads(_u.roles)
+                        except Exception:
+                            _roles = []
+                        if "admin" in _roles:
+                            first_admin_email = _u.email
+                            break
+            except Exception:
+                pass
+
         return templates.TemplateResponse(
             request,
             "error.html",
@@ -262,6 +281,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 "user_sub": sub,
                 "user_name": user_name,
                 "user_roles": user_roles,
+                "first_admin_email": first_admin_email,
             },
             status_code=exc.status_code,
         )

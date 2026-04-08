@@ -59,6 +59,14 @@
       <col style="width: 90px">     <!-- 상태 -->
       <col style="width: 130px">    <!-- 발송 시각 -->
     </colgroup>
+    {% macro sort_th(label, col, cls="") %}
+    {% set next_order = "asc" if (sort == col and order == "desc") else "desc" %}
+    {% set icon = " ↑" if (sort == col and order == "asc") else (" ↓" if (sort == col and order == "desc") else " ↕") %}
+    <th class="{{ cls }}" style="cursor:pointer">
+      <a href="?sort={{ col }}&order={{ next_order }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&page=1"
+         style="color:inherit;text-decoration:none">{{ label }}<span style="opacity:0.5;font-size:10px">{{ icon }}</span></a>
+    </th>
+    {% endmacro %}
     <thead>
       <tr>
         <th>#</th>
@@ -66,9 +74,9 @@
         <th>발신번호</th>
         <th>유형</th>
         <th class="text-right">수신자</th>
-        <th class="text-right">성공 / 실패 / 대기</th>
+        {{ sort_th("성공 / 실패 / 대기", "ok_count", "text-right") }}
         <th>상태</th>
-        <th>발송 시각</th>
+        {{ sort_th("발송 시각", "created_at") }}
       </tr>
     </thead>
     <tbody>

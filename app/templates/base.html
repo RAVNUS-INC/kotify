@@ -730,6 +730,23 @@
   document.body.addEventListener('htmx:afterSwap', function() {
     if (typeof lucide !== 'undefined') lucide.createIcons();
   });
+
+  // ── H4: flash 쿼리스트링 → JS로 URL 정리 ────────────────────────────────
+  (function() {
+    var flashKeys = ['created','updated','deleted','added','removed',
+      'bulk_added','bulk_created','bulk_skipped_member','bulk_skipped_no_contact',
+      'bulk_invalid','error','success','saved'];
+    var url = new URL(window.location.href);
+    var hasFlash = false;
+    flashKeys.forEach(function(k) {
+      if (url.searchParams.has(k)) { url.searchParams.delete(k); hasFlash = true; }
+    });
+    if (hasFlash) {
+      setTimeout(function() {
+        history.replaceState(null, '', url.toString());
+      }, 800);
+    }
+  })();
 </script>
 </body>
 </html>

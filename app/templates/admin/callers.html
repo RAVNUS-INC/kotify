@@ -11,9 +11,19 @@
 <div class="alert alert-error" role="alert">이미 등록된 번호입니다.</div>
 {% elif request.query_params.get("error") == "invalid_number" %}
 <div class="alert alert-error" role="alert">올바르지 않은 번호 형식입니다.</div>
+{% elif request.query_params.get("error") == "active_cannot_delete" %}
+<div class="alert alert-error" role="alert">활성 번호는 삭제할 수 없습니다. 먼저 비활성화하세요.</div>
 {% endif %}
 
-<!-- 추가 폼 -->
+{% if "admin" not in user_roles %}
+<div class="alert alert-info" role="alert">
+  <i data-lucide="info" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>
+  발신번호 목록을 열람 중입니다. 추가/수정/삭제는 관리자에게 문의하세요.
+</div>
+{% endif %}
+
+<!-- 추가 폼 (admin 전용) -->
+{% if "admin" in user_roles %}
 <div class="card">
   <div class="card-title">발신번호 추가</div>
   <form action="/admin/callers" method="post"
@@ -37,6 +47,7 @@
     숫자 외 문자는 자동 제거됩니다. NCP에 사전 등록된 번호만 정상 발송됩니다.
   </div>
 </div>
+{% endif %}
 
 <!-- 목록 -->
 <div class="card" style="padding:0">
@@ -49,7 +60,7 @@
       <col style="width: 60px">     <!-- 상태 -->
       <col style="width: 60px">     <!-- 기본 -->
       <col style="width: 100px">    <!-- 등록일 -->
-      <col style="width: 180px">    <!-- 관리 -->
+      {% if "admin" in user_roles %}<col style="width: 180px">{% endif %}  <!-- 관리 -->
     </colgroup>
     <thead>
       <tr>
@@ -58,7 +69,7 @@
         <th>상태</th>
         <th>기본</th>
         <th>등록일</th>
-        <th>관리</th>
+        {% if "admin" in user_roles %}<th>관리</th>{% endif %}
       </tr>
     </thead>
     <tbody>
@@ -79,9 +90,11 @@
           {% else %}—{% endif %}
         </td>
         <td class="mono text-muted">{{ c.created_at[:10] }}</td>
+        {% if "admin" in user_roles %}
         <td>
           <div class="flex" style="gap:3px">
-            <form action="/admin/callers/{{ c.id }}/toggle" method="post" style="display:inline">
+            <form action="/admin/callers/{{ c.id }}/toggle" method="post" style="display:inline"
+              {% if not c.active %}onsubmit="return confirm('이 번호를 활성화하시겠습니까?')"{% endif %}>
               <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
               <button type="submit" class="btn btn-secondary btn-sm">
                 {{ "비활성" if c.active else "활성" }}
@@ -92,14 +105,19 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
               <button type="submit" class="btn btn-secondary btn-sm">기본 지정</button>
             </form>
+            {% if not c.active %}
             <form action="/admin/callers/{{ c.id }}/delete" method="post" style="display:inline"
               onsubmit="return confirm('삭제하시겠습니까?')">
               <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
               <button type="submit" class="btn btn-danger btn-sm">삭제</button>
             </form>
+            {% else %}
+            <button class="btn btn-danger btn-sm" disabled title="활성 번호는 삭제할 수 없습니다. 먼저 비활성화하세요.">삭제</button>
+            {% endif %}
             {% endif %}
           </div>
         </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
@@ -109,6 +127,11 @@
   <div class="empty-state">
     <i data-lucide="phone-off"></i>
     <p>등록된 발신번호가 없습니다.</p>
+    {% if "admin" in user_roles %}
+    <p class="text-muted" style="font-size:11px;margin-top:4px">위 폼에서 발신번호를 추가하세요.</p>
+    {% else %}
+    <p class="text-muted" style="font-size:11px;margin-top:4px">관리자에게 발신번호 등록을 요청하세요.</p>
+    {% endif %}
   </div>
   {% endif %}
 </div>
