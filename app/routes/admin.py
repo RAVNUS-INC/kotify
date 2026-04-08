@@ -61,9 +61,9 @@ async def settings_page(
         user_roles = []
 
     return templates.TemplateResponse(
+        request,
         "admin/settings.html",
         {
-            "request": request,
             "user": user,
             "user_roles": user_roles,
             "public_settings": public_settings,
@@ -177,9 +177,9 @@ async def callers_list(
         user_roles = []
 
     return templates.TemplateResponse(
+        request,
         "admin/callers.html",
         {
-            "request": request,
             "user": user,
             "user_roles": user_roles,
             "callers": callers,
@@ -344,9 +344,9 @@ async def audit_log_page(
         user_roles = []
 
     return templates.TemplateResponse(
+        request,
         "admin/audit.html",
         {
-            "request": request,
             "user": user,
             "user_roles": user_roles,
             "logs": logs,

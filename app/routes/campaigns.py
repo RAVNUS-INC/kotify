@@ -71,9 +71,9 @@ async def campaigns_list(
         user_roles = []
 
     return templates.TemplateResponse(
+        request,
         "campaigns/list.html",
         {
-            "request": request,
             "user": user,
             "user_roles": user_roles,
             "campaigns": paginated,
@@ -109,9 +109,9 @@ async def campaign_detail(
         user_roles = []
 
     return templates.TemplateResponse(
+        request,
         "campaigns/detail.html",
         {
-            "request": request,
             "user": user,
             "user_roles": user_roles,
             "campaign": campaign,
@@ -152,9 +152,9 @@ async def campaign_recipients(
     )
 
     return templates.TemplateResponse(
+        request,
         "campaigns/_recipients.html",
         {
-            "request": request,
             "messages": messages,
             "campaign": campaign,
             "page": page,

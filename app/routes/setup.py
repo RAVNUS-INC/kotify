@@ -33,9 +33,9 @@ async def setup_page(
     # 토큰 파일이 없으면 생성 (사용자가 파일에서 읽을 수 있도록)
     generate_setup_token(settings.setup_token_path)
     return templates.TemplateResponse(
+        request,
         "setup.html",
         {
-            "request": request,
             "token": None,  # #10: 토큰을 HTML에 노출하지 않음
             "error": None,
         },

@@ -41,9 +41,9 @@ async def compose_page(
         user_roles = []
 
     return templates.TemplateResponse(
+        request,
         "compose.html",
         {
-            "request": request,
             "user": user,
             "user_roles": user_roles,
             "callers": callers,
@@ -75,7 +75,6 @@ async def compose_preview(
     msg_result = validate_message(content)
 
     context = {
-        "request": request,
         "valid_count": len(valid_numbers),
         "invalid_numbers": invalid_numbers,
         "phone_error": phone_error,
@@ -85,7 +84,7 @@ async def compose_preview(
         "msg_error": msg_result["error"],
         "can_send": phone_error is None and not invalid_numbers and msg_result["ok"] and len(valid_numbers) > 0,
     }
-    return templates.TemplateResponse("_compose_preview.html", context)
+    return templates.TemplateResponse(request, "_compose_preview.html", context)
 
 
 @router.post("/compose/send")

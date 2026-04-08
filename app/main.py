@@ -228,9 +228,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 user_roles = []
 
         return templates.TemplateResponse(
+            request,
             "error.html",
             {
-                "request": request,
                 "status_code": exc.status_code,
                 "detail": exc.detail,
                 "user_sub": sub,
@@ -269,9 +269,9 @@ async def not_implemented_handler(request: Request, exc: NotImplementedError):
                 user_roles = []
 
         return templates.TemplateResponse(
+            request,
             "error.html",
             {
-                "request": request,
                 "status_code": 501,
                 "detail": f"아직 구현되지 않은 기능입니다: {exc}\n위치: {location}",
                 "is_stub_error": True,
@@ -305,9 +305,9 @@ async def ncp_auth_error_handler(request: Request, exc: NCPAuthError):
                 user_roles = []
 
         return templates.TemplateResponse(
+            request,
             "error.html",
             {
-                "request": request,
                 "status_code": 503,
                 "detail": "NCP 인증 오류가 발생했습니다. 관리자에게 설정 점검을 요청하세요.",
                 "is_ncp_auth_error": True,

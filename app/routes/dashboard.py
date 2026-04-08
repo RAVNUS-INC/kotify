@@ -65,9 +65,9 @@ async def dashboard(
         user_roles = []
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "user": user,
             "user_roles": user_roles,
             "recent_campaigns": recent_campaigns,
