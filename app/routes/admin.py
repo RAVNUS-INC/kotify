@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_role, require_setup_complete
 from app.db import get_db
 from app.models import AuditLog, Caller, User
+from app.security.csrf import verify_csrf
 from app.security.settings_store import SettingsStore
 from app.services import audit
 
@@ -77,6 +78,7 @@ async def settings_save(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
     keycloak_issuer: str = Form(""),
     keycloak_client_id: str = Form(""),
     keycloak_client_secret: str = Form(""),
@@ -112,6 +114,10 @@ async def settings_save(
     audit.log(db, actor_sub=user.sub, action=audit.SETTINGS_UPDATE)
     db.commit()
 
+    # NCP 설정 변경 가능성이 있으므로 클라이언트 재초기화 (#28)
+    from app.main import reset_ncp_client
+    reset_ncp_client()
+
     return RedirectResponse("/admin/settings?saved=1", status_code=303)
 
 
@@ -120,6 +126,7 @@ async def test_ncp(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
     """HTMX — 현재 저장된 NCP 키로 인증 테스트."""
     from app.ncp.client import NCPAuthError, NCPClient
@@ -138,10 +145,17 @@ async def test_ncp(
         return HTMLResponse('<span class="ok">✓ NCP 인증 성공</span>')
     except NotImplementedError:
         return HTMLResponse('<span class="warn">⚠ signature.py 미구현 (stub)</span>')
-    except NCPAuthError as exc:
+    except (NCPAuthError,) as exc:
+        # #7: 인증 실패는 명확히 에러로 표시
         return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
-    except Exception:
+    except Exception as exc:
+        from app.ncp.client import NCPError, NCPForbidden
+        if isinstance(exc, (NCPAuthError, NCPForbidden)):
+            return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
+        # 404 등 → 인증 통과 (requestId 없음)
         return HTMLResponse('<span class="ok">✓ NCP 인증 성공 (requestId 없음 응답)</span>')
+    finally:
+        await client.aclose()
 
 
 # ── 발신번호 ─────────────────────────────────────────────────────────────────
@@ -179,6 +193,7 @@ async def caller_create(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
     number: str = Form(...),
     label: str = Form(...),
 ) -> RedirectResponse:
@@ -222,6 +237,7 @@ async def caller_toggle(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
 ) -> RedirectResponse:
     """발신번호 활성/비활성 토글."""
     caller = db.get(Caller, caller_id)
@@ -246,6 +262,7 @@ async def caller_set_default(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
 ) -> RedirectResponse:
     """기본 발신번호 지정 — 다른 기본은 자동 해제."""
     caller = db.get(Caller, caller_id)
@@ -274,6 +291,7 @@ async def caller_delete(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
 ) -> RedirectResponse:
     """발신번호 삭제."""
     caller = db.get(Caller, caller_id)
@@ -316,11 +334,10 @@ async def audit_log_page(
         ).scalars().all()
     )
 
-    all_logs_count = db.execute(
-        select(AuditLog.id)
-    )
-    all_logs = list(db.execute(select(AuditLog)).scalars().all())
-    total_count = len(all_logs)
+    # #14: COUNT 쿼리로 OOM 방지 (전체 조회 대신)
+    total_count = db.execute(
+        select(func.count()).select_from(select(AuditLog).subquery())
+    ).scalar_one()
 
     try:
         user_roles = json.loads(user.roles)

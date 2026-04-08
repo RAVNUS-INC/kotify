@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>초기 설정 — SMS 발송 시스템</title>
+  <meta name="csrf-token" content="{{ csrf_token(request) }}">
   <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -100,6 +101,7 @@
 
   <!-- 최종 저장 -->
   <form action="/setup/complete" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <input type="hidden" name="token" id="final-token" value="{{ token }}">
 
     <div class="form-group">
@@ -134,5 +136,11 @@
     <button type="submit" class="btn btn-primary" style="width:100%;margin-top:1rem">설정 완료 및 로그인</button>
   </form>
 </div>
+  <script>
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+      var token = document.querySelector('meta[name="csrf-token"]');
+      if (token) { evt.detail.headers['X-CSRF-Token'] = token.content; }
+    });
+  </script>
 </body>
 </html>

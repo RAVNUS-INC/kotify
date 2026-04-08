@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -70,6 +71,10 @@ def validate_message(
         }
 
 
+# 청크 크기 (NCP 제약: 단일 호출 최대 100건)
+CHUNK_SIZE = 100
+
+
 async def dispatch_campaign(
     db: Session,
     ncp_client: "NCPClient",
@@ -85,11 +90,12 @@ async def dispatch_campaign(
     알고리즘:
     1. 발송 전 정책 검증 (번호 유효성, 발신번호 활성 여부)
     2. Campaign INSERT (state=DISPATCHING)
-    3. ncp_client.send_sms 청크 자동 처리
-    4. 각 청크 응답을 ncp_requests에 저장
+    3. dispatch_campaign이 청크 분할 전담 (CHUNK_SIZE=100)
+    4. 각 청크마다 ncp_client.send_sms (단일 호출 = 단일 청크)
     5. 각 청크 직후 list_by_request_id 호출 → messages 테이블 채움
-    6. campaign state=DISPATCHED, 카운터 업데이트
-    7. 감사 로그 기록
+    6. 청크마다 db.commit() (부분 실패 시 성공 청크 영구 보존)
+    7. campaign state=DISPATCHED, 카운터 업데이트
+    8. 감사 로그 기록
 
     Args:
         db: SQLAlchemy 세션.
@@ -108,6 +114,8 @@ async def dispatch_campaign(
         ValueError: 번호 검증 실패 또는 발신번호 미등록.
         NotImplementedError: signature.py stub 미구현 시 전파.
     """
+    from app.ncp.client import NCPAuthError, NCPBadRequest, NCPRateLimited, NCPServerError
+
     # 1. 발신번호 활성 여부 검증 (UI 우회 방지)
     caller = db.execute(
         select(Caller).where(
@@ -141,29 +149,25 @@ async def dispatch_campaign(
     )
     db.add(campaign)
     db.flush()  # campaign.id 확보
+    db.commit()  # Campaign을 먼저 커밋 (청크 실패 시에도 Campaign 기록 유지)
 
-    # 4. 청크 단위 발송
-    chunk_size = 100
-    chunks = [recipients[i : i + chunk_size] for i in range(0, len(recipients), chunk_size)]
+    # 4. 청크 단위 발송 — dispatch_campaign이 청크 분할 전담 (#2)
+    chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
 
     failed_chunks: list[int] = []
-    ncp_request_records: list[NcpRequest] = []
+    failed_chunk_sizes: list[int] = []
 
     for chunk_idx, chunk in enumerate(chunks):
         sent_at = _now_iso()
         try:
-            # send_sms는 내부적으로 청크 분할하지 않고 전체를 보내므로
-            # 여기서는 chunk(=100건 이하)를 한 번씩 호출
-            send_responses = await ncp_client.send_sms(
+            # send_sms는 단일 청크(≤100건)만 처리 (#2)
+            send_resp = await ncp_client.send_sms(
                 from_number=caller_number,
                 content=content,
                 to_numbers=chunk,
                 message_type=message_type,  # type: ignore[arg-type]
                 subject=subject,
             )
-            # send_sms는 청크 분할을 자동으로 하지만
-            # 여기선 이미 chunk=100건이라 응답이 1개
-            send_resp = send_responses[0] if send_responses else None
 
             ncp_req = NcpRequest(
                 campaign_id=campaign.id,
@@ -178,26 +182,26 @@ async def dispatch_campaign(
             )
             db.add(ncp_req)
             db.flush()
-            ncp_request_records.append(ncp_req)
 
             # 5. messageId 수집 (발송 직후 1회 list 호출)
             if send_resp and send_resp.request_id:
                 try:
                     list_resp = await ncp_client.list_by_request_id(send_resp.request_id)
-                    # to_number → message_id 매핑
-                    msg_map: dict[str, str] = {
-                        item.to: item.message_id for item in list_resp.messages
-                    }
-                    msg_status_map: dict[str, str] = {
-                        item.to: item.status for item in list_resp.messages
-                    }
+                    # to_number → (message_id, status) 매핑 (#19: 같은 번호 여러 개 대응)
+                    msg_by_to: dict[str, list[tuple[str, str]]] = {}
+                    for item in list_resp.messages:
+                        msg_by_to.setdefault(item.to, []).append(
+                            (item.message_id, item.status)
+                        )
                 except Exception:
-                    msg_map = {}
-                    msg_status_map = {}
+                    msg_by_to = {}
 
                 for to_num in chunk:
-                    message_id = msg_map.get(to_num)
-                    status = msg_status_map.get(to_num, "PENDING")
+                    entries = msg_by_to.get(to_num, [])
+                    if entries:
+                        message_id, status = entries.pop(0)
+                    else:
+                        message_id, status = None, "PENDING"
                     msg = Message(
                         campaign_id=campaign.id,
                         ncp_request_id=ncp_req.id,
@@ -235,17 +239,16 @@ async def dispatch_campaign(
                     db.add(msg)
 
             db.flush()
+            db.commit()  # 청크 단위 커밋 (#4/#12)
 
-        except Exception as exc:
-            # 청크 실패: error_body에 기록, messages는 UNKNOWN
-            from app.ncp.client import NCPAuthError
-
+        except NCPBadRequest as exc:
+            # 400: 요청 오류 — 재시도 불가 (#32)
             ncp_req = NcpRequest(
                 campaign_id=campaign.id,
                 chunk_index=chunk_idx,
                 request_id=None,
                 request_time=None,
-                http_status=None,
+                http_status=400,
                 status_code=None,
                 status_name="fail",
                 error_body=str(exc),
@@ -253,8 +256,8 @@ async def dispatch_campaign(
             )
             db.add(ncp_req)
             db.flush()
-            ncp_request_records.append(ncp_req)
             failed_chunks.append(chunk_idx)
+            failed_chunk_sizes.append(len(chunk))
 
             for to_num in chunk:
                 msg = Message(
@@ -274,8 +277,78 @@ async def dispatch_campaign(
                 )
                 db.add(msg)
             db.flush()
+            db.commit()  # 실패 청크도 즉시 커밋
+
+        except NCPRateLimited as exc:
+            # 429: 30초 대기 후 1회 재시도 (#32)
+            await asyncio.sleep(30)
+            try:
+                send_resp = await ncp_client.send_sms(
+                    from_number=caller_number,
+                    content=content,
+                    to_numbers=chunk,
+                    message_type=message_type,  # type: ignore[arg-type]
+                    subject=subject,
+                )
+                ncp_req = NcpRequest(
+                    campaign_id=campaign.id,
+                    chunk_index=chunk_idx,
+                    request_id=send_resp.request_id,
+                    request_time=send_resp.request_time,
+                    http_status=202,
+                    status_code=send_resp.status_code,
+                    status_name=send_resp.status_name,
+                    error_body=None,
+                    sent_at=sent_at,
+                )
+                db.add(ncp_req)
+                db.flush()
+                for to_num in chunk:
+                    msg = Message(
+                        campaign_id=campaign.id,
+                        ncp_request_id=ncp_req.id,
+                        to_number=to_num,
+                        to_number_raw=to_num,
+                        message_id=None,
+                        status="PENDING",
+                        result_status=None,
+                        result_code=None,
+                        result_message=None,
+                        telco_code=None,
+                        complete_time=None,
+                        last_polled_at=None,
+                        poll_count=0,
+                    )
+                    db.add(msg)
+                db.flush()
+                db.commit()
+            except Exception as retry_exc:
+                db.rollback()
+                _record_failed_chunk(
+                    db, campaign.id, chunk_idx, chunk, sent_at, str(retry_exc)
+                )
+                db.commit()
+                failed_chunks.append(chunk_idx)
+                failed_chunk_sizes.append(len(chunk))
+
+        except NCPServerError as exc:
+            # 5xx: 즉시 다음 청크로 (#32)
+            db.rollback()
+            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, str(exc))
+            db.commit()
+            failed_chunks.append(chunk_idx)
+            failed_chunk_sizes.append(len(chunk))
+
+        except Exception as exc:
+            # 기타 실패: error_body에 기록, messages는 UNKNOWN
+            db.rollback()
+            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, str(exc))
+            db.commit()
+            failed_chunks.append(chunk_idx)
+            failed_chunk_sizes.append(len(chunk))
 
             # NCPAuthError는 전파
+            from app.ncp.client import NCPAuthError
             if isinstance(exc, NCPAuthError):
                 raise
 
@@ -288,7 +361,9 @@ async def dispatch_campaign(
     else:
         campaign.state = "PARTIAL_FAILED"
 
-    campaign.pending_count = len(recipients) - len(failed_chunks) * chunk_size
+    # #13: pending_count는 실패 청크의 실제 건수 기반으로 계산
+    failed_recipients = sum(failed_chunk_sizes)
+    campaign.pending_count = len(recipients) - failed_recipients
     if campaign.pending_count < 0:
         campaign.pending_count = 0
 
@@ -310,3 +385,46 @@ async def dispatch_campaign(
 
     db.commit()
     return campaign
+
+
+def _record_failed_chunk(
+    db: Session,
+    campaign_id: int,
+    chunk_idx: int,
+    chunk: list[str],
+    sent_at: str,
+    error_body: str,
+) -> None:
+    """실패 청크의 NcpRequest + Message 레코드를 기록한다."""
+    ncp_req = NcpRequest(
+        campaign_id=campaign_id,
+        chunk_index=chunk_idx,
+        request_id=None,
+        request_time=None,
+        http_status=None,
+        status_code=None,
+        status_name="fail",
+        error_body=error_body,
+        sent_at=sent_at,
+    )
+    db.add(ncp_req)
+    db.flush()
+
+    for to_num in chunk:
+        msg = Message(
+            campaign_id=campaign_id,
+            ncp_request_id=ncp_req.id,
+            to_number=to_num,
+            to_number_raw=to_num,
+            message_id=None,
+            status="UNKNOWN",
+            result_status=None,
+            result_code=None,
+            result_message=None,
+            telco_code=None,
+            complete_time=None,
+            last_polled_at=None,
+            poll_count=0,
+        )
+        db.add(msg)
+    db.flush()

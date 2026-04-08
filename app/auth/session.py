@@ -8,6 +8,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from app.config import settings
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
     from sqlalchemy.orm import Session
@@ -49,5 +51,5 @@ def add_session_middleware(app: "FastAPI", secret_key: str) -> None:
         session_cookie="sms_session",
         max_age=60 * 60 * 8,  # 8시간
         same_site="lax",
-        https_only=False,  # 개발 환경 허용 (운영에서는 True로 변경 권장)
+        https_only=not settings.dev_mode,  # 운영: HTTPS 전용, 개발: HTTP 허용
     )

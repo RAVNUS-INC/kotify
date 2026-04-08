@@ -51,6 +51,8 @@ def get_oauth_client(db: "Session") -> OAuth | None:
 def parse_user_from_claims(claims: dict) -> dict:
     """ID 토큰 클레임에서 사용자 정보를 추출한다.
 
+    realm_access.roles와 resource_access.<client_id>.roles를 모두 읽는다 (#20).
+
     Args:
         claims: Keycloak ID 토큰 클레임 딕셔너리.
 
@@ -62,12 +64,20 @@ def parse_user_from_claims(claims: dict) -> dict:
     name: str = claims.get("name", claims.get("preferred_username", ""))
 
     # Keycloak realm_access.roles 에서 역할 추출
-    realm_access: dict = claims.get("realm_access", {})
-    roles: list[str] = realm_access.get("roles", [])
+    realm_roles: list[str] = claims.get("realm_access", {}).get("roles", [])
+
+    # resource_access.<client_id>.roles 도 읽기 (#20)
+    client_id = claims.get("azp", "")
+    client_roles: list[str] = (
+        claims.get("resource_access", {}).get(client_id, {}).get("roles", [])
+    )
+
+    # 합집합 후 정렬
+    all_roles = sorted(set(realm_roles + client_roles))
 
     # 관심 역할만 필터 (시스템 정의 역할)
     system_roles = {"viewer", "sender", "admin"}
-    filtered_roles = [r for r in roles if r in system_roles]
+    filtered_roles = [r for r in all_roles if r in system_roles]
 
     # 역할이 없으면 기본값 viewer
     if not filtered_roles:

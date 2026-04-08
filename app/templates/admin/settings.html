@@ -19,6 +19,7 @@
 </div>
 
 <form action="/admin/settings" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
   <!-- Keycloak -->
   <div class="card">
     <div class="card-title">Keycloak 설정</div>

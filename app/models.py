@@ -54,9 +54,8 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(Text, primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     is_secret: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    updated_by: Mapped[str | None] = mapped_column(
-        Text, ForeignKey("users.sub"), nullable=True
-    )
+    # FK 없음 — "setup", user.sub, 또는 None 등 다양한 출처를 허용하는 메타데이터 컬럼
+    updated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 

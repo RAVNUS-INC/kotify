@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}SMS 발송 시스템{% endblock %}</title>
+  <meta name="csrf-token" content="{{ csrf_token(request) }}">
   <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -124,5 +125,11 @@
   <div class="container">
     {% block content %}{% endblock %}
   </div>
+  <script>
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+      var token = document.querySelector('meta[name="csrf-token"]');
+      if (token) { evt.detail.headers['X-CSRF-Token'] = token.content; }
+    });
+  </script>
 </body>
 </html>

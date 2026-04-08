@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session, sessionmaker
 # 개발 모드 강제 (테스트 중 var/ 디렉토리 사용)
 os.environ.setdefault("SMS_DEV_MODE", "true")
 
+# CSRF 검증 우회 — 테스트 전용. 운영 환경에서 절대 설정 금지.
+os.environ.setdefault("SMS_DISABLE_CSRF", "1")
+
 from app.db import Base
 from app.models import AuditLog, Caller, Campaign, Message, NcpRequest, Setting, User
 
@@ -88,15 +91,13 @@ def mock_ncp_client():
     client = MagicMock()
 
     async def fake_send_sms(from_number, content, to_numbers, message_type="SMS", subject=None):
-        return [
-            SendResponse(
-                request_id=f"REQ-{i:04d}",
-                request_time="2026-04-08T12:00:00",
-                status_code="202",
-                status_name="success",
-            )
-            for i in range((len(to_numbers) + 99) // 100)
-        ]
+        # send_sms는 단일 청크(≤100건)만 처리 — SendResponse 단일 객체 반환
+        return SendResponse(
+            request_id="REQ-0000",
+            request_time="2026-04-08T12:00:00",
+            status_code="202",
+            status_name="success",
+        )
 
     async def fake_list_by_request_id(request_id):
         return ListResponse(

@@ -11,6 +11,7 @@
 
 <div class="card">
   <form id="compose-form" action="/compose/send" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <div class="form-group">
       <label for="caller_id">발신번호</label>
       <select name="caller_id" id="caller_id" required>

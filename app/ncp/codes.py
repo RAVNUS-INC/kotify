@@ -54,13 +54,15 @@ RESULT_CODE_MAP: dict[str, str] = {
 _UNKNOWN = "알 수 없는 오류 코드"
 
 
-def describe(code: str) -> str:
+def describe(code: str | None) -> str:
     """수신결과 코드를 한글 설명으로 변환한다.
 
     Args:
-        code: NCP result_code 값 (예: ``"0"``, ``"3001"``).
+        code: NCP result_code 값 (예: ``"0"``, ``"3001"``). None이면 ``"-"`` 반환.
 
     Returns:
         한글 설명 문자열. 매핑에 없는 코드면 ``"알 수 없는 오류 코드 (XXXX)"`` 반환.
     """
+    if code is None:
+        return "-"
     return RESULT_CODE_MAP.get(code, f"{_UNKNOWN} ({code})")

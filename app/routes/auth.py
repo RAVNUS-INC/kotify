@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth.oidc import get_oauth_client, parse_user_from_claims
 from app.db import get_db
 from app.models import User
+from app.security.csrf import verify_csrf
 from app.services import audit
 
 router = APIRouter(prefix="/auth")
@@ -60,20 +61,41 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     if not sub:
         return RedirectResponse("/auth/login?error=no_sub", status_code=303)
 
-    # 첫 사용자 → admin 역할 자동 부여
+    # 첫 admin 승격 — setup.first_admin_email과 일치할 때만 (#9)
     from app.security.settings_store import SettingsStore
     store = SettingsStore(db)
     pending_first_admin = store.get("setup.pending_first_admin", "false") == "true"
 
     roles = user_info["roles"]
     if pending_first_admin:
-        if "admin" not in roles:
-            roles = ["admin"] + roles
-        store.set("setup.pending_first_admin", "false", is_secret=False, updated_by=sub)
-        db.flush()
+        first_admin_email = store.get("setup.first_admin_email", "")
+        if first_admin_email and user_info["email"] == first_admin_email:
+            # 이메일 일치 → admin 승격
+            if "admin" not in roles:
+                roles = ["admin"] + roles
+            store.set("setup.pending_first_admin", "false", is_secret=False, updated_by=sub)
+            db.flush()
+        elif first_admin_email:
+            # 이메일 불일치 → 기본 역할(viewer)로 로그인 + 감사 로그 경고
+            audit.log(
+                db,
+                actor_sub=sub,
+                action=audit.LOGIN,
+                detail={
+                    "email": user_info["email"],
+                    "warning": "first_admin_email 불일치 — admin 승격 거부",
+                },
+            )
+        else:
+            # first_admin_email 미설정 → 하위 호환: 첫 로그인 사용자 admin 승격
+            if "admin" not in roles:
+                roles = ["admin"] + roles
+            store.set("setup.pending_first_admin", "false", is_secret=False, updated_by=sub)
+            db.flush()
 
     now = _now_iso()
-    roles_json = json.dumps(roles, ensure_ascii=False)
+    # #21: 매 로그인마다 Keycloak 역할로 덮어쓰기 (역할 회수 가능)
+    roles_json = json.dumps(sorted(set(roles)), ensure_ascii=False)
 
     # users 테이블 upsert
     user = db.get(User, sub)
@@ -90,13 +112,8 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     else:
         user.email = user_info["email"]
         user.name = user_info["name"]
-        # 기존 역할 보존 (DB 역할 우선, Keycloak 역할 병합)
-        try:
-            existing_roles = set(json.loads(user.roles))
-        except (json.JSONDecodeError, TypeError):
-            existing_roles = set()
-        merged = existing_roles | set(roles)
-        user.roles = json.dumps(list(merged), ensure_ascii=False)
+        # #21: 역할을 Keycloak에서 받은 것으로 덮어쓰기 (병합 아님)
+        user.roles = roles_json
         user.last_login_at = now
 
     db.flush()
@@ -112,17 +129,21 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     )
     db.commit()
 
-    # 세션 저장
+    # 세션 저장 — #29: user_roles를 list로 직접 저장
     request.session["user_sub"] = sub
     request.session["user_email"] = user_info["email"]
     request.session["user_name"] = user_info["name"]
-    request.session["user_roles"] = user.roles
+    request.session["user_roles"] = sorted(set(roles))  # list 직접 저장
 
     return RedirectResponse("/", status_code=303)
 
 
 @router.post("/logout")
-async def logout(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+async def logout(
+    request: Request,
+    db: Session = Depends(get_db),
+    _csrf: None = Depends(verify_csrf),
+) -> RedirectResponse:
     """세션 클리어 + Keycloak end_session으로 리다이렉트."""
     sub = request.session.get("user_sub")
 
@@ -141,7 +162,6 @@ async def logout(request: Request, db: Session = Depends(get_db)) -> RedirectRes
             meta = await keycloak.load_server_metadata()
             end_session_url = meta.get("end_session_endpoint", "")
             if end_session_url:
-                from app.config import settings as app_settings
                 from app.security.settings_store import SettingsStore
                 store = SettingsStore(db)
                 public_url = store.get("app.public_url", "")

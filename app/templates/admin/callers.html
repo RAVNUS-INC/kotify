@@ -17,6 +17,7 @@
 <div class="card">
   <div class="card-title">발신번호 추가</div>
   <form action="/admin/callers" method="post" class="flex">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <div class="form-group" style="flex:1;margin-bottom:0">
       <input type="text" name="number" placeholder="02-1234-5678 또는 0212345678" required>
     </div>
@@ -63,16 +64,19 @@
         <td>
           <div class="flex" style="gap:0.4rem">
             <form action="/admin/callers/{{ c.id }}/toggle" method="post" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
               <button type="submit" class="btn btn-secondary btn-sm">
                 {{ "비활성" if c.active else "활성" }}
               </button>
             </form>
             {% if not c.is_default %}
             <form action="/admin/callers/{{ c.id }}/default" method="post" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
               <button type="submit" class="btn btn-secondary btn-sm">기본 지정</button>
             </form>
             <form action="/admin/callers/{{ c.id }}/delete" method="post" style="display:inline"
               onsubmit="return confirm('삭제하시겠습니까?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
               <button type="submit" class="btn btn-danger btn-sm">삭제</button>
             </form>
             {% endif %}

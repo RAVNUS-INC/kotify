@@ -2,10 +2,12 @@
 
 NCP에서 발송 결과를 주기적으로 조회하여 messages 테이블을 갱신한다.
 단일 uvicorn 프로세스 전제 (워커 인스턴스 1개).
+파일 락으로 다중 인스턴스 기동을 방지한다 (#11).
 """
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Callable
@@ -71,9 +73,35 @@ class Poller:
         self._task: asyncio.Task | None = None
         # 강제 새로고침 큐: campaign_id set
         self._force_refresh: set[int] = set()
+        # 파일 락 (#11)
+        self._lock_fd = None
 
     async def start(self) -> None:
-        """메인 폴링 루프를 백그라운드 태스크로 시작한다."""
+        """메인 폴링 루프를 백그라운드 태스크로 시작한다.
+
+        파일 락으로 다중 인스턴스 기동을 방지한다 (#11).
+        """
+        from app.config import settings
+
+        lock_path = settings.data_dir if hasattr(settings, "data_dir") else None
+        # data_dir이 없으면 db_path 부모 디렉토리 사용
+        if lock_path is None:
+            lock_path = settings.db_path.parent
+
+        lock_file = lock_path / "poller.lock"
+        try:
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            self._lock_fd = open(lock_file, "w")  # noqa: WPS515
+            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            logger.warning("다른 폴러 인스턴스가 실행 중입니다. 이 인스턴스는 폴링을 건너뜁니다.")
+            if self._lock_fd:
+                self._lock_fd.close()
+                self._lock_fd = None
+            return
+        except Exception as exc:
+            logger.warning("폴러 파일 락 획득 실패 (계속 진행): %s", exc)
+
         self._running = True
         self._task = asyncio.create_task(self._loop(), name="poller")
         logger.info("폴링 워커 시작")
@@ -87,6 +115,14 @@ class Poller:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        # 파일 락 해제 (#11)
+        if self._lock_fd is not None:
+            try:
+                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                self._lock_fd.close()
+            except Exception:
+                pass
+            self._lock_fd = None
         logger.info("폴링 워커 종료")
 
     def add_force_refresh(self, campaign_id: int) -> None:
@@ -127,7 +163,11 @@ class Poller:
             db.close()
 
     async def _poll_cycle(self, db: Session, ncp_client: object) -> None:
-        """실제 폴링 사이클 구현."""
+        """실제 폴링 사이클 구현.
+
+        각 ncp_request를 독립적으로 처리하고 청크마다 커밋한다 (#4).
+        한 청크 실패해도 다른 청크는 계속 처리된다.
+        """
         now = _now()
 
         # 미완료 메시지가 있는 ncp_requests 조회
@@ -146,89 +186,108 @@ class Poller:
         self._force_refresh.clear()
 
         for ncp_req in ncp_requests:
-            campaign_id = ncp_req.campaign_id
-            force = campaign_id in force_ids
-
-            # 해당 ncp_request의 messages 조회
-            messages = list(
-                db.execute(
-                    select(Message).where(
-                        Message.ncp_request_id == ncp_req.id,
-                        Message.status.notin_(final_statuses),
-                    )
-                ).scalars().all()
-            )
-            if not messages:
+            try:
+                await self._poll_one(db, ncp_req, ncp_client, force_ids, now)
+                db.commit()  # 청크 단위 커밋 (#4)
+            except Exception as exc:
+                db.rollback()
+                logger.warning(
+                    "폴링 청크 실패 (request_id=%s): %s", ncp_req.request_id, exc
+                )
                 continue
 
-            # 타임아웃 체크: 발송 시점 + 1시간 경과
-            sent_at = _parse_dt(ncp_req.sent_at)
-            if sent_at:
-                # timezone-aware 비교
-                if sent_at.tzinfo is None:
-                    sent_at = sent_at.replace(tzinfo=timezone.utc)
-                if now - sent_at > timedelta(seconds=_TIMEOUT_SECONDS):
-                    for msg in messages:
-                        msg.status = "TIMEOUT"
-                        msg.last_polled_at = now.isoformat()
-                    db.flush()
-                    await self._update_campaign(db, campaign_id)
-                    continue
+    async def _poll_one(
+        self,
+        db: Session,
+        ncp_req: NcpRequest,
+        ncp_client: object,
+        force_ids: set[int],
+        now: datetime,
+    ) -> None:
+        """단일 ncp_request의 폴링 처리."""
+        campaign_id = ncp_req.campaign_id
+        force = campaign_id in force_ids
 
-            # Backoff 체크: 최소 poll_count 기준
-            min_poll_count = min(msg.poll_count for msg in messages)
-            backoff_secs = _backoff_interval(min_poll_count)
+        # 해당 ncp_request의 messages 조회
+        final_statuses = ("COMPLETED", "TIMEOUT", "UNKNOWN")
+        messages = list(
+            db.execute(
+                select(Message).where(
+                    Message.ncp_request_id == ncp_req.id,
+                    Message.status.notin_(final_statuses),
+                )
+            ).scalars().all()
+        )
+        if not messages:
+            return
 
-            # 마지막 폴링 시간 체크
-            last_polled_strs = [msg.last_polled_at for msg in messages if msg.last_polled_at]
-            if last_polled_strs and not force:
-                latest_polled = max(_parse_dt(s) for s in last_polled_strs if _parse_dt(s))
-                if latest_polled:
-                    if latest_polled.tzinfo is None:
-                        latest_polled = latest_polled.replace(tzinfo=timezone.utc)
-                    if (now - latest_polled).total_seconds() < backoff_secs:
-                        continue  # 아직 backoff 시간이 안 됨
+        # 타임아웃 체크: 발송 시점 + 1시간 경과
+        sent_at = _parse_dt(ncp_req.sent_at)
+        if sent_at:
+            # timezone-aware 비교
+            if sent_at.tzinfo is None:
+                sent_at = sent_at.replace(tzinfo=timezone.utc)
+            if now - sent_at > timedelta(seconds=_TIMEOUT_SECONDS):
+                for msg in messages:
+                    msg.status = "TIMEOUT"
+                    msg.last_polled_at = now.isoformat()
+                db.flush()
+                await self._update_campaign(db, campaign_id)
+                return
 
-            # NCP 조회
-            try:
-                list_resp = await ncp_client.list_by_request_id(ncp_req.request_id)
-            except Exception as exc:
-                logger.warning("list_by_request_id 실패 (request_id=%s): %s", ncp_req.request_id, exc)
-                raise
+        # Backoff 체크: 최소 poll_count 기준
+        min_poll_count = min(msg.poll_count for msg in messages)
+        backoff_secs = _backoff_interval(min_poll_count)
 
-            # message_id 기준 업데이트
-            msg_by_id: dict[str, Message] = {
-                msg.message_id: msg for msg in messages if msg.message_id
-            }
-            msg_by_to: dict[str, Message] = {
-                msg.to_number: msg for msg in messages
-            }
+        # 마지막 폴링 시간 체크
+        last_polled_strs = [msg.last_polled_at for msg in messages if msg.last_polled_at]
+        if last_polled_strs and not force:
+            latest_polled = max(_parse_dt(s) for s in last_polled_strs if _parse_dt(s))
+            if latest_polled:
+                if latest_polled.tzinfo is None:
+                    latest_polled = latest_polled.replace(tzinfo=timezone.utc)
+                if (now - latest_polled).total_seconds() < backoff_secs:
+                    return  # 아직 backoff 시간이 안 됨
 
-            poll_time = _now().isoformat()
+        # NCP 조회
+        list_resp = await ncp_client.list_by_request_id(ncp_req.request_id)
 
-            for item in list_resp.messages:
-                # message_id 또는 to_number로 매칭
-                msg = msg_by_id.get(item.message_id) or msg_by_to.get(item.to)
-                if msg is None:
-                    continue
+        # message_id 기준 업데이트
+        msg_by_id: dict[str, Message] = {
+            msg.message_id: msg for msg in messages if msg.message_id
+        }
+        # #19: 같은 to_number 여러 개 → list로 관리, pop-on-use
+        msg_by_to: dict[str, list[Message]] = {}
+        for msg in messages:
+            msg_by_to.setdefault(msg.to_number, []).append(msg)
 
-                # message_id 업데이트 (첫 폴링 시 수집)
-                if not msg.message_id and item.message_id:
-                    msg.message_id = item.message_id
+        poll_time = _now().isoformat()
 
-                msg.status = item.status
-                msg.result_status = item.status_name
-                msg.result_code = item.status_code
-                msg.result_message = item.status_message
-                msg.telco_code = item.telco_code
-                msg.complete_time = item.complete_time
-                msg.last_polled_at = poll_time
-                msg.poll_count = (msg.poll_count or 0) + 1
+        for item in list_resp.messages:
+            # message_id 우선 매칭, 없으면 to_number 리스트에서 pop
+            msg = msg_by_id.get(item.message_id)
+            if msg is None:
+                candidates = msg_by_to.get(item.to, [])
+                if candidates:
+                    msg = candidates.pop(0)
+            if msg is None:
+                continue
 
-            db.flush()
-            await self._update_campaign(db, campaign_id)
+            # message_id 업데이트 (첫 폴링 시 수집)
+            if not msg.message_id and item.message_id:
+                msg.message_id = item.message_id
 
-        db.commit()
+            msg.status = item.status
+            msg.result_status = item.status_name
+            msg.result_code = item.status_code
+            msg.result_message = item.status_message
+            msg.telco_code = item.telco_code
+            msg.complete_time = item.complete_time
+            msg.last_polled_at = poll_time
+            msg.poll_count = (msg.poll_count or 0) + 1
+
+        db.flush()
+        await self._update_campaign(db, campaign_id)
 
     async def _update_campaign(self, db: Session, campaign_id: int) -> None:
         """캠페인의 카운터와 state를 재계산하여 업데이트한다."""

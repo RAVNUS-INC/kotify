@@ -17,8 +17,10 @@ class Settings(BaseSettings):
     개발 환경에서는 ``SMS_DEV_MODE=true`` 환경변수를 설정하여 로컬 경로 사용.
     """
 
+    # SPEC §9.2: .env 미사용 — 환경변수 직접 주입 (systemd EnvironmentFile 또는 export)
     model_config = SettingsConfigDict(
         env_prefix="SMS_",
+        env_file=None,
         case_sensitive=False,
     )
 

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import require_role, require_setup_complete
 from app.db import get_db
 from app.models import Caller, User
+from app.security.csrf import verify_csrf
 from app.services.compose import validate_message, validate_phone_list
 
 router = APIRouter()
@@ -58,6 +59,7 @@ async def compose_preview(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_sender_dep),
+    _csrf: None = Depends(verify_csrf),
     caller_id: int = Form(...),
     content: str = Form(...),
     recipients_text: str = Form(...),
@@ -93,6 +95,7 @@ async def compose_send(
     db: Session = Depends(get_db),
     user: User = Depends(_sender_dep),
     _: None = Depends(require_setup_complete),
+    _csrf: None = Depends(verify_csrf),
     caller_id: int = Form(...),
     content: str = Form(...),
     recipients_text: str = Form(...),

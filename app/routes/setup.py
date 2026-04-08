@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import require_setup_mode
 from app.config import settings
 from app.db import get_db
+from app.security.csrf import verify_csrf
 from app.services.setup_service import (
     generate_setup_token,
     verify_setup_token,
@@ -25,13 +26,18 @@ async def setup_page(
     db: Session = Depends(get_db),
     _: None = Depends(require_setup_mode),
 ) -> HTMLResponse:
-    """Setup wizard 페이지."""
-    token = generate_setup_token(settings.setup_token_path)
+    """Setup wizard 페이지.
+
+    토큰은 표시하지 않는다 (#10).
+    사용자가 직접 cat /var/lib/sms/setup.token 으로 읽어 입력.
+    """
+    # 토큰 파일이 없으면 생성 (사용자가 파일에서 읽을 수 있도록)
+    generate_setup_token(settings.setup_token_path)
     return templates.TemplateResponse(
         "setup.html",
         {
             "request": request,
-            "token": token,
+            "token": None,  # #10: 토큰을 HTML에 노출하지 않음
             "error": None,
         },
     )
@@ -43,10 +49,12 @@ async def verify_token(
     token: str = Form(...),
     db: Session = Depends(get_db),
     _: None = Depends(require_setup_mode),
+    _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
-    """HTMX — 토큰 검증."""
+    """HTMX — 토큰 검증. 성공 시 세션에 검증 상태 저장 (#10)."""
     ok = verify_setup_token(settings.setup_token_path, token)
     if ok:
+        request.session["setup_token_verified"] = True
         return HTMLResponse(
             '<span class="ok">✓ 토큰 확인됨. 설정을 진행하세요.</span>'
         )
@@ -60,6 +68,7 @@ async def test_keycloak(
     request: Request,
     issuer: str = Form(...),
     _: None = Depends(require_setup_mode),
+    _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
     """HTMX — Keycloak issuer discovery 테스트."""
     url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
@@ -82,9 +91,10 @@ async def test_ncp(
     secret_key: str = Form(...),
     service_id: str = Form(...),
     _: None = Depends(require_setup_mode),
+    _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
-    """HTMX — NCP 인증 테스트 (발신번호 조회)."""
-    from app.ncp.client import NCPClient
+    """HTMX — NCP 인증 테스트 (#7: 예외 분기 명확화)."""
+    from app.ncp.client import NCPAuthError, NCPClient, NCPError, NCPForbidden
 
     client = NCPClient(
         access_key=access_key,
@@ -99,13 +109,16 @@ async def test_ncp(
         return HTMLResponse(
             '<span class="warn">⚠ signature.py 미구현 (stub). 인증 테스트 불가.</span>'
         )
-    except Exception as exc:
-        # 404는 인증 성공 (requestId 없음)
-        from app.ncp.client import NCPAuthError, NCPError
-        if isinstance(exc, NCPAuthError):
-            return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
-        # 404, 기타 → 인증은 통과
+    except (NCPAuthError, NCPForbidden) as exc:
+        # #7: 인증/권한 실패는 명확히 에러로 표시
+        return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
+    except NCPError:
+        # 404 등 → 인증은 통과 (requestId 없음)
         return HTMLResponse('<span class="ok">✓ NCP 인증 성공 (requestId 없음 응답)</span>')
+    except Exception as exc:
+        return HTMLResponse(f'<span class="err">✗ 연결 실패: {exc}</span>')
+    finally:
+        await client.aclose()
 
 
 @router.post("/setup/complete")
@@ -119,16 +132,28 @@ async def complete_setup(
     ncp_secret_key: str = Form(...),
     ncp_service_id: str = Form(...),
     app_public_url: str = Form(""),
+    first_admin_email: str = Form(""),
     db: Session = Depends(get_db),
     _: None = Depends(require_setup_mode),
+    _csrf: None = Depends(verify_csrf),
 ) -> RedirectResponse:
-    """설정 저장 + setup 완료 처리 → Keycloak 로그인으로 리다이렉트."""
-    if not verify_setup_token(settings.setup_token_path, token):
-        return RedirectResponse("/setup?error=invalid_token", status_code=303)
+    """설정 저장 + setup 완료 처리 → Keycloak 로그인으로 리다이렉트.
 
-    from app.services import setup_service
+    #8: setup_service.complete_setup 위임으로 중복 제거.
+    #10: 세션 검증 상태 또는 form 토큰으로 이중 검증.
+    #9: first_admin_email 저장.
+    """
+    # #10: 세션 검증 상태 확인 (verify-token 단계 우회 방지)
+    session_verified = request.session.get("setup_token_verified", False)
+    if not session_verified:
+        # 세션에 없으면 file-based 재검증
+        if not verify_setup_token(settings.setup_token_path, token):
+            return RedirectResponse("/setup?error=invalid_token", status_code=303)
 
-    settings_payload = {
+    import secrets as _secrets
+    session_secret = _secrets.token_hex(32)
+
+    settings_payload: dict = {
         "keycloak.issuer": (keycloak_issuer, False),
         "keycloak.client_id": (keycloak_client_id, False),
         "keycloak.client_secret": (keycloak_client_secret, True),
@@ -136,13 +161,11 @@ async def complete_setup(
         "ncp.secret_key": (ncp_secret_key, True),
         "ncp.service_id": (ncp_service_id, True),
         "app.public_url": (app_public_url or "", False),
-        # 첫 admin은 콜백에서 처리 (setup_pending_first_admin 플래그)
+        "session.secret": (session_secret, True),
+        # #9: 첫 admin 이메일 저장
+        "setup.first_admin_email": (first_admin_email or "", False),
         "setup.pending_first_admin": ("true", False),
     }
-
-    import secrets as _secrets
-    session_secret = _secrets.token_hex(32)
-    settings_payload["session.secret"] = (session_secret, True)
 
     from app.security.settings_store import SettingsStore
     from app.services.audit import BOOTSTRAP_INIT, log
@@ -158,6 +181,10 @@ async def complete_setup(
     db.commit()
 
     # setup token 삭제
+    from app.services import setup_service
     setup_service.delete_setup_token(settings.setup_token_path)
+
+    # 세션에서 검증 상태 제거
+    request.session.pop("setup_token_verified", None)
 
     return RedirectResponse("/auth/login", status_code=303)

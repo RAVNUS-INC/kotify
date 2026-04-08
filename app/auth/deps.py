@@ -45,11 +45,15 @@ def get_current_user(
 
     email = request.session.get("user_email", "")
     name = request.session.get("user_name", "")
-    roles_raw = request.session.get("user_roles", "[]")
-    try:
-        roles = json.loads(roles_raw) if isinstance(roles_raw, str) else roles_raw
-    except (json.JSONDecodeError, TypeError):
-        roles = []
+    # #29: user_roles는 list로 직접 저장됨 — 타입 안전 처리
+    roles_raw = request.session.get("user_roles", [])
+    if isinstance(roles_raw, list):
+        roles = roles_raw
+    else:
+        try:
+            roles = json.loads(roles_raw)
+        except (json.JSONDecodeError, TypeError):
+            roles = []
 
     roles_json = json.dumps(roles, ensure_ascii=False)
     now = _now_iso()
@@ -155,21 +159,38 @@ def require_setup_complete(
         )
 
 
+def _is_private_network(ip: str) -> bool:
+    """IP 주소가 사설망 또는 루프백인지 확인한다."""
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip)
+        return addr.is_private or addr.is_loopback
+    except ValueError:
+        return False
+
+
+_ALLOWED_SETUP_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
 def require_setup_mode(
     request: Request,
     db: Session = Depends(get_db),
 ) -> None:
-    """부트스트랩이 이미 완료된 경우 404 반환 (setup 라우트 보호용).
+    """부트스트랩이 이미 완료됐거나 외부 IP인 경우 404 반환 (setup 라우트 보호용).
 
     Args:
         request: Starlette Request.
         db: SQLAlchemy 세션.
 
     Raises:
-        HTTPException: 404 — 이미 설정 완료됨.
+        HTTPException: 404 — 이미 설정 완료됨 또는 외부 IP.
     """
     from app.security.settings_store import SettingsStore
 
     store = SettingsStore(db)
     if store.is_bootstrap_completed():
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    client_ip = request.client.host if request.client else None
+    if client_ip and client_ip not in _ALLOWED_SETUP_HOSTS and not _is_private_network(client_ip):
         raise HTTPException(status_code=404, detail="Not Found")

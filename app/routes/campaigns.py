@@ -6,12 +6,13 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
 from app.models import Campaign, Message, User
+from app.security.csrf import verify_csrf
 
 router = APIRouter(prefix="/campaigns")
 templates = Jinja2Templates(directory="app/templates")
@@ -50,17 +51,20 @@ async def campaigns_list(
     if date_from:
         stmt = stmt.where(Campaign.created_at >= date_from)
     if date_to:
-        stmt = stmt.where(Campaign.created_at <= date_to + "Z")
+        # #30: 하루 끝까지 포함하도록 T23:59:59Z 추가
+        stmt = stmt.where(Campaign.created_at <= date_to + "T23:59:59Z")
 
     per_page = 20
     offset = (page - 1) * per_page
-    total = db.execute(
-        select(Campaign.id).where(*stmt.whereclause.clauses if stmt.whereclause is not None else [])
+
+    # #14: COUNT 쿼리로 OOM 방지
+    total_count = db.execute(
+        select(func.count()).select_from(stmt.subquery())
+    ).scalar_one()
+
+    paginated = list(
+        db.execute(stmt.offset(offset).limit(per_page)).scalars().all()
     )
-    # 간단하게 전체 조회 후 count
-    all_campaigns = list(db.execute(stmt).scalars().all())
-    total_count = len(all_campaigns)
-    paginated = all_campaigns[offset : offset + per_page]
 
     try:
         user_roles = json.loads(user.roles)
@@ -135,24 +139,18 @@ async def campaign_recipients(
     per_page = 50
     offset = (page - 1) * per_page
 
+    # #15: COUNT 쿼리 + limit/offset으로 OOM 방지
+    base_stmt = select(Message).where(Message.campaign_id == campaign_id)
+
+    total_count = db.execute(
+        select(func.count()).select_from(base_stmt.subquery())
+    ).scalar_one()
+
     messages = list(
         db.execute(
-            select(Message)
-            .where(Message.campaign_id == campaign_id)
-            .order_by(Message.id)
-            .offset(offset)
-            .limit(per_page)
+            base_stmt.order_by(Message.id).offset(offset).limit(per_page)
         ).scalars().all()
     )
-
-    total = db.execute(
-        select(Message.id).where(Message.campaign_id == campaign_id)
-    )
-    # simpler count
-    all_msgs = list(db.execute(
-        select(Message).where(Message.campaign_id == campaign_id)
-    ).scalars().all())
-    total_count = len(all_msgs)
 
     return templates.TemplateResponse(
         "campaigns/_recipients.html",
@@ -173,6 +171,7 @@ async def campaign_refresh(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
+    _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
     """HTMX — 폴링 강제 트리거."""
     campaign = db.get(Campaign, campaign_id)

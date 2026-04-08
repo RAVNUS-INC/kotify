@@ -6,9 +6,9 @@ signature.py의 make_headers()가 NotImplementedError를 raise하면
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -99,6 +99,9 @@ class ListResponse:
 class NCPClient:
     """NCP SENS SMS v2 API 클라이언트.
 
+    httpx.AsyncClient를 인스턴스 수준에서 재사용한다.
+    lifespan에서 aclose()를 호출해야 한다.
+
     Args:
         access_key: NCP IAM Access Key.
         secret_key: NCP IAM Secret Key.
@@ -109,6 +112,11 @@ class NCPClient:
         self._access_key = access_key
         self._secret_key = secret_key
         self._service_id = service_id
+        self._client = httpx.AsyncClient(base_url=_BASE_URL, timeout=_TIMEOUT)
+
+    async def aclose(self) -> None:
+        """HTTP 클라이언트 연결을 닫는다."""
+        await self._client.aclose()
 
     # ── 내부 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -116,7 +124,9 @@ class NCPClient:
         return _SEND_PATH.format(service_id=self._service_id)
 
     def _list_path(self, request_id: str) -> str:
-        return f"{_LIST_PATH.format(service_id=self._service_id)}?requestId={request_id}"
+        # URL 인코딩으로 특수문자 안전 처리 (#26)
+        safe_id = quote(request_id, safe="")
+        return f"{_LIST_PATH.format(service_id=self._service_id)}?requestId={safe_id}"
 
     @staticmethod
     def _raise_for_status(response: httpx.Response) -> None:
@@ -148,61 +158,62 @@ class NCPClient:
         to_numbers: list[str],
         message_type: Literal["SMS", "LMS"] = "SMS",
         subject: str | None = None,
-    ) -> list[SendResponse]:
-        """SMS/LMS를 발송한다. 100건씩 자동 청크 분할.
+    ) -> SendResponse:
+        """SMS/LMS를 단일 청크(최대 100건)로 발송한다.
+
+        이슈 #2: 청크 분할은 dispatch_campaign이 전담한다.
+        100건 초과 시 ValueError를 raise한다.
 
         Args:
             from_number: 발신번호 (숫자만, 예: ``"0212345678"``).
             content: 메시지 본문.
-            to_numbers: 수신번호 목록 (정규화된 숫자만).
+            to_numbers: 수신번호 목록 (정규화된 숫자만, 최대 100건).
             message_type: ``"SMS"`` 또는 ``"LMS"``.
             subject: LMS 제목 (message_type=LMS 시 권장).
 
         Returns:
-            청크 수만큼의 SendResponse 목록.
+            SendResponse.
 
         Raises:
+            ValueError: 100건 초과.
             NotImplementedError: signature.py가 아직 구현되지 않은 경우.
             NCPAuthError: 인증 실패.
             NCPBadRequest: 요청 오류.
             NCPRateLimited: Rate limit 초과.
             NCPServerError: NCP 서버 오류.
         """
+        if len(to_numbers) > _CHUNK_SIZE:
+            raise ValueError(
+                f"send_sms는 최대 {_CHUNK_SIZE}건을 처리합니다. "
+                f"청크 분할은 dispatch_campaign이 전담합니다. "
+                f"요청 건수: {len(to_numbers)}"
+            )
+
         path = self._send_path()
-        total_chunks = math.ceil(len(to_numbers) / _CHUNK_SIZE)
-        responses: list[SendResponse] = []
 
-        async with httpx.AsyncClient(base_url=_BASE_URL, timeout=_TIMEOUT) as client:
-            for chunk_idx in range(total_chunks):
-                chunk = to_numbers[chunk_idx * _CHUNK_SIZE : (chunk_idx + 1) * _CHUNK_SIZE]
+        body: dict = {
+            "type": message_type,
+            "contentType": "COMM",
+            "countryCode": "82",
+            "from": from_number,
+            "content": content,
+            "messages": [{"to": num} for num in to_numbers],
+        }
+        if subject and message_type == "LMS":
+            body["subject"] = subject
 
-                body: dict = {
-                    "type": message_type,
-                    "contentType": "COMM",
-                    "countryCode": "82",
-                    "from": from_number,
-                    "content": content,
-                    "messages": [{"to": num} for num in chunk],
-                }
-                if subject and message_type == "LMS":
-                    body["subject"] = subject
+        headers = make_headers("POST", path, self._access_key, self._secret_key)
 
-                headers = make_headers("POST", path, self._access_key, self._secret_key)
+        response = await self._client.post(path, json=body, headers=headers)
+        self._raise_for_status(response)
 
-                response = await client.post(path, json=body, headers=headers)
-                self._raise_for_status(response)
-
-                data = response.json()
-                responses.append(
-                    SendResponse(
-                        request_id=data["requestId"],
-                        request_time=data["requestTime"],
-                        status_code=data["statusCode"],
-                        status_name=data["statusName"],
-                    )
-                )
-
-        return responses
+        data = response.json()
+        return SendResponse(
+            request_id=data["requestId"],
+            request_time=data["requestTime"],
+            status_code=data["statusCode"],
+            status_name=data["statusName"],
+        )
 
     async def list_by_request_id(self, request_id: str) -> ListResponse:
         """requestId로 메시지 결과 목록을 조회한다.
@@ -227,9 +238,8 @@ class NCPClient:
 
         headers = make_headers("GET", uri, self._access_key, self._secret_key)
 
-        async with httpx.AsyncClient(base_url=_BASE_URL, timeout=_TIMEOUT) as client:
-            response = await client.get(path, headers=headers)
-            self._raise_for_status(response)
+        response = await self._client.get(path, headers=headers)
+        self._raise_for_status(response)
 
         data = response.json()
 

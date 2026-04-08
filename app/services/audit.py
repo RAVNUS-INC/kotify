@@ -35,6 +35,9 @@ def log(
 ) -> None:
     """감사 로그를 기록한다.
 
+    주의: 이 함수는 db.flush()만 수행한다.
+    호출자가 반드시 db.commit()을 호출해야 감사 로그가 저장됨.
+
     Args:
         db: SQLAlchemy 세션.
         actor_sub: 행위자 users.sub. 시스템 액션이면 None.
