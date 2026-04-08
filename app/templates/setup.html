@@ -55,14 +55,15 @@
         <strong>보안상 토큰은 화면에 표시되지 않습니다.</strong><br>
         CT 콘솔(또는 SSH)에서 다음 명령으로 토큰을 확인한 뒤 아래에 입력하세요:
       </p>
-      <div class="token-box"><code>cat /var/lib/sms/setup.token</code></div>
+      <div class="token-box"><code>cat {{ setup_token_path }}</code></div>
       <p class="form-hint">CT 콘솔에서 실행 → 출력된 32자 hex 문자열을 복사 → 아래 입력란에 붙여넣기</p>
       <div class="form-group" style="margin-top:0.75rem">
         <label for="field-token">Setup Token</label>
-        <input type="text" id="field-token" name="token" placeholder="setup token 붙여넣기" autocomplete="off" required>
+        <input type="text" id="field-token" name="token" placeholder="setup token 붙여넣기" autocomplete="off" required
+               onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('verify-token-btn').click();}">
       </div>
       <div class="btn-row">
-        <button type="button" class="btn btn-secondary"
+        <button type="button" id="verify-token-btn" class="btn btn-secondary"
                 hx-post="/setup/verify-token"
                 hx-target="#token-result"
                 hx-swap="innerHTML"

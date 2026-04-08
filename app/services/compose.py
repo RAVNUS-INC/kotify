@@ -74,6 +74,9 @@ def validate_message(
 # 청크 크기 (NCP 제약: 단일 호출 최대 100건)
 CHUNK_SIZE = 100
 
+# 1회 발송 최대 수신자 수 (SPEC §0)
+MAX_RECIPIENTS_PER_CAMPAIGN = 1000
+
 
 async def dispatch_campaign(
     db: Session,
@@ -115,6 +118,10 @@ async def dispatch_campaign(
         NotImplementedError: signature.py stub 미구현 시 전파.
     """
     from app.ncp.client import NCPAuthError, NCPBadRequest, NCPRateLimited, NCPServerError
+
+    # 0. 수신자 수 제한 (SPEC §0: 1회 최대 1,000명)
+    if len(recipients) > MAX_RECIPIENTS_PER_CAMPAIGN:
+        raise ValueError(f"1회 최대 {MAX_RECIPIENTS_PER_CAMPAIGN}명까지 발송할 수 있습니다.")
 
     # 1. 발신번호 활성 여부 검증 (UI 우회 방지)
     caller = db.execute(

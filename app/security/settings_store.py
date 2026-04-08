@@ -110,7 +110,7 @@ class SettingsStore:
         value = self.get("bootstrap.completed", default="false")
         return (value or "false").lower() == "true"
 
-    def mark_bootstrap_completed(self, updated_by: str) -> None:
+    def mark_bootstrap_completed(self, updated_by: str | None = None) -> None:
         """부트스트랩 완료를 DB에 기록하고 커밋한다.
 
         Args:

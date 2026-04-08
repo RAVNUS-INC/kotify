@@ -158,6 +158,7 @@ class Message(Base):
         Index("idx_messages_campaign_id", "campaign_id"),
         Index("idx_messages_status", "status"),
         Index("idx_messages_message_id", "message_id"),
+        Index("idx_messages_ncp_request_id", "ncp_request_id"),
     )
 
 

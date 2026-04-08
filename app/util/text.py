@@ -15,8 +15,28 @@ _SMS_MAX_BYTES = 90
 _LMS_MAX_BYTES = 2000
 
 
+def encode_or_raise(text: str) -> bytes:
+    """EUC-KR로 인코딩하여 bytes를 반환한다.
+
+    Args:
+        text: 인코딩할 문자열.
+
+    Returns:
+        EUC-KR 인코딩된 bytes.
+
+    Raises:
+        ValueError: EUC-KR 미지원 문자가 포함된 경우.
+    """
+    try:
+        return text.encode("euc-kr")
+    except UnicodeEncodeError as e:
+        raise ValueError(f"EUC-KR로 인코딩할 수 없는 문자: {e}") from e
+
+
 def measure_bytes(text: str) -> int:
     """EUC-KR 인코딩 기준 byte 길이를 반환한다.
+
+    인코딩을 한 번만 수행하여 불필요한 이중 인코딩을 방지한다 (R6).
 
     Args:
         text: 측정할 문자열.

@@ -83,11 +83,8 @@ class Poller:
         """
         from app.config import settings
 
-        lock_path = settings.data_dir if hasattr(settings, "data_dir") else None
-        # data_dir이 없으면 db_path 부모 디렉토리 사용
-        if lock_path is None:
-            lock_path = settings.db_path.parent
-
+        # db_path 부모 디렉토리를 락 파일 위치로 사용 (R2: hasattr 분기 제거)
+        lock_path = settings.db_path.parent
         lock_file = lock_path / "poller.lock"
         try:
             lock_file.parent.mkdir(parents=True, exist_ok=True)
@@ -290,42 +287,56 @@ class Poller:
         await self._update_campaign(db, campaign_id)
 
     async def _update_campaign(self, db: Session, campaign_id: int) -> None:
-        """캠페인의 카운터와 state를 재계산하여 업데이트한다."""
+        """캠페인의 카운터와 state를 재계산하여 업데이트한다.
+
+        R5: 전체 메시지 ORM 로드 대신 COUNT 쿼리로 처리 (1,000명 캠페인 OOM 방지).
+        """
+        from sqlalchemy import func as _func
+
         campaign = db.get(Campaign, campaign_id)
         if campaign is None:
             return
 
-        all_messages = list(
-            db.execute(
-                select(Message).where(Message.campaign_id == campaign_id)
-            ).scalars().all()
-        )
+        # 성공 건수: result_status == "success"
+        ok_count = db.execute(
+            select(_func.count()).select_from(Message).where(
+                Message.campaign_id == campaign_id,
+                Message.result_status == "success",
+            )
+        ).scalar_one()
 
-        ok_count = sum(1 for m in all_messages if m.result_status == "success")
-        fail_count = sum(
-            1 for m in all_messages
-            if m.status in ("COMPLETED", "TIMEOUT", "UNKNOWN")
-            and m.result_status != "success"
-        )
-        pending_count = sum(
-            1 for m in all_messages
-            if m.status not in ("COMPLETED", "TIMEOUT", "UNKNOWN")
-        )
+        # 실패 건수: final state이고 success가 아닌 것
+        fail_count = db.execute(
+            select(_func.count()).select_from(Message).where(
+                Message.campaign_id == campaign_id,
+                Message.status.in_(("COMPLETED", "TIMEOUT", "UNKNOWN")),
+                Message.result_status != "success",
+            )
+        ).scalar_one()
+
+        # 미완료 건수: final state에 도달하지 않은 것
+        pending_count = db.execute(
+            select(_func.count()).select_from(Message).where(
+                Message.campaign_id == campaign_id,
+                Message.status.notin_(("COMPLETED", "TIMEOUT", "UNKNOWN")),
+            )
+        ).scalar_one()
 
         campaign.ok_count = ok_count
         campaign.fail_count = fail_count
         campaign.pending_count = pending_count
 
         # 모든 메시지가 final state에 도달했는지 확인
-        final_statuses = {"COMPLETED", "TIMEOUT", "UNKNOWN"}
-        all_final = all(m.status in final_statuses for m in all_messages)
+        all_final = pending_count == 0
 
+        # PARTIAL_FAILED → 최종 fail/success 카운트로 state 결정 (R7)
         if all_final and campaign.state in ("DISPATCHED", "DISPATCHING", "PARTIAL_FAILED"):
             if fail_count == 0:
                 campaign.state = "COMPLETED"
             elif ok_count == 0:
                 campaign.state = "FAILED"
             else:
+                # 일부 성공, 일부 실패 → PARTIAL_FAILED 유지
                 campaign.state = "PARTIAL_FAILED"
             campaign.completed_at = _now().isoformat()
 

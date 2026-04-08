@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 _FALLBACK_SECRET = os.urandom(32).hex()
 
 
+def get_fallback_secret() -> str:
+    """임시 폴백 시크릿을 반환한다 (외부에서 _FALLBACK_SECRET 직접 접근 대신 사용)."""
+    return _FALLBACK_SECRET
+
+
 def get_session_secret(db: "Session") -> str:
     """DB에서 session.secret을 읽어 반환한다.
 

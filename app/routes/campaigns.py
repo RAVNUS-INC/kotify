@@ -50,8 +50,14 @@ async def campaigns_list(
     if date_from:
         stmt = stmt.where(Campaign.created_at >= date_from)
     if date_to:
-        # #30: 하루 끝까지 포함하도록 T23:59:59Z 추가
-        stmt = stmt.where(Campaign.created_at <= date_to + "T23:59:59Z")
+        # 다음 날 00:00:00 미만으로 비교하여 date_to 당일 전체를 포함 (I6)
+        from datetime import datetime, timezone, timedelta
+        try:
+            date_to_dt = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            next_day_dt = date_to_dt + timedelta(days=1)
+            stmt = stmt.where(Campaign.created_at < next_day_dt.isoformat())
+        except ValueError:
+            stmt = stmt.where(Campaign.created_at <= date_to + "T23:59:59.999999+00:00")
 
     per_page = 20
     offset = (page - 1) * per_page

@@ -12,7 +12,8 @@ from app.auth.deps import require_role, require_setup_complete
 from app.db import get_db
 from app.models import Caller, User
 from app.security.csrf import verify_csrf
-from app.services.compose import validate_message, validate_phone_list
+from app.services import audit
+from app.services.compose import MAX_RECIPIENTS_PER_CAMPAIGN, validate_message, validate_phone_list
 from app.web import templates
 
 router = APIRouter()
@@ -65,14 +66,14 @@ async def compose_preview(
 ) -> HTMLResponse:
     """HTMX — 미리보기 (번호 검증 + byte 길이 + SMS/LMS 판정)."""
     # 번호 검증
-    try:
-        valid_numbers, invalid_numbers = validate_phone_list(recipients_text)
-        phone_error = None
-    except NotImplementedError:
-        valid_numbers, invalid_numbers, phone_error = [], [], "stub"
+    valid_numbers, invalid_numbers = validate_phone_list(recipients_text)
+    phone_error = None
 
     # 메시지 검증
     msg_result = validate_message(content)
+
+    # 1,000명 초과 시 can_send=False (C4)
+    too_many = len(valid_numbers) > MAX_RECIPIENTS_PER_CAMPAIGN
 
     context = {
         "valid_count": len(valid_numbers),
@@ -82,7 +83,15 @@ async def compose_preview(
         "message_type": msg_result["message_type"],
         "msg_ok": msg_result["ok"],
         "msg_error": msg_result["error"],
-        "can_send": phone_error is None and not invalid_numbers and msg_result["ok"] and len(valid_numbers) > 0,
+        "too_many": too_many,
+        "max_recipients": MAX_RECIPIENTS_PER_CAMPAIGN,
+        "can_send": (
+            phone_error is None
+            and not invalid_numbers
+            and msg_result["ok"]
+            and len(valid_numbers) > 0
+            and not too_many
+        ),
     }
     return templates.TemplateResponse(request, "_compose_preview.html", context)
 
@@ -99,22 +108,33 @@ async def compose_send(
     recipients_text: str = Form(...),
 ) -> RedirectResponse:
     """실제 발송 처리."""
-    from app.ncp.client import NCPClient
-    from app.security.settings_store import SettingsStore
     from app.services.compose import dispatch_campaign
 
     # 발신번호 확인
     caller = db.get(Caller, caller_id)
     if caller is None or not caller.active:
+        audit.log(
+            db,
+            actor_sub=user.sub,
+            action=audit.SEND,
+            target=None,
+            detail={"rejected": True, "reason": "invalid_caller"},
+        )
+        db.commit()
         return RedirectResponse("/compose?error=invalid_caller", status_code=303)
 
     # 번호 검증
-    try:
-        valid_numbers, invalid_numbers = validate_phone_list(recipients_text)
-    except NotImplementedError:
-        return RedirectResponse("/compose?error=stub_phone", status_code=303)
+    valid_numbers, invalid_numbers = validate_phone_list(recipients_text)
 
     if invalid_numbers:
+        audit.log(
+            db,
+            actor_sub=user.sub,
+            action=audit.SEND,
+            target=None,
+            detail={"rejected": True, "reason": "invalid_numbers", "count": len(invalid_numbers)},
+        )
+        db.commit()
         return RedirectResponse(
             f"/compose?error=invalid_numbers&count={len(invalid_numbers)}",
             status_code=303,
@@ -122,25 +142,28 @@ async def compose_send(
     if not valid_numbers:
         return RedirectResponse("/compose?error=no_recipients", status_code=303)
 
+    # 1,000명 초과 사전 차단 (C4)
+    if len(valid_numbers) > MAX_RECIPIENTS_PER_CAMPAIGN:
+        audit.log(
+            db,
+            actor_sub=user.sub,
+            action=audit.SEND,
+            target=None,
+            detail={"rejected": True, "reason": "too_many_recipients", "count": len(valid_numbers)},
+        )
+        db.commit()
+        return RedirectResponse("/compose?error=too_many_recipients", status_code=303)
+
     # 메시지 검증
     msg_result = validate_message(content)
     if not msg_result["ok"]:
         return RedirectResponse("/compose?error=invalid_message", status_code=303)
 
-    # NCP 클라이언트 생성
-    store = SettingsStore(db)
-    access_key = store.get("ncp.access_key")
-    secret_key = store.get("ncp.secret_key")
-    service_id = store.get("ncp.service_id")
-
-    if not (access_key and secret_key and service_id):
+    # 싱글턴 NCP 클라이언트 사용 (C3) — circular import 방지를 위해 함수 안에서 import
+    from app.main import get_ncp_client  # noqa: PLC0415
+    ncp_client = get_ncp_client()
+    if ncp_client is None:
         return RedirectResponse("/compose?error=ncp_not_configured", status_code=303)
-
-    ncp_client = NCPClient(
-        access_key=access_key,
-        secret_key=secret_key,
-        service_id=service_id,
-    )
 
     try:
         campaign = await dispatch_campaign(

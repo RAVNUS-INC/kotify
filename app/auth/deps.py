@@ -24,6 +24,23 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def parse_user_roles(user: "User | None") -> list[str]:
+    """user.roles JSON 문자열을 list로 파싱한다. 실패 시 빈 list 반환.
+
+    Args:
+        user: User ORM 객체 또는 None.
+
+    Returns:
+        역할 이름 list.
+    """
+    if not user or not user.roles:
+        return []
+    try:
+        return json.loads(user.roles)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 def get_current_user(
     request: Request,
     db: Session = Depends(get_db),

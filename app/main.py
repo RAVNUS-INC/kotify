@@ -25,6 +25,9 @@ poller: Poller
 # ── NCP 클라이언트 싱글턴 (#27/#28) ──────────────────────────────────────────
 _ncp_client = None
 
+# ── setup_gate 부트스트랩 캐시 (매 요청 DB hit 방지) ──────────────────────────
+_bootstrap_cached: bool = False
+
 
 def _make_ncp_client():
     """현재 DB settings에서 NCP 클라이언트를 생성한다."""
@@ -118,19 +121,24 @@ app = FastAPI(
 # DB 테이블이 아직 없을 수 있으므로 try/except로 보호.
 # 설정이 없으면 임시 키(fallback) 사용.
 # 실제 add_middleware는 데코레이터 미들웨어들 이후에 호출 (outermost 보장).
-from app.auth.session import get_session_secret, add_session_middleware, _FALLBACK_SECRET
+from app.auth.session import get_session_secret, add_session_middleware, get_fallback_secret as _get_fallback_secret
+
+from sqlalchemy.exc import OperationalError as _OperationalError
 
 try:
     # 테이블이 이미 존재하면 DB에서 읽음
-    Base.metadata.create_all(bind=engine)
+    # dev_mode에서만 create_all 실행 (운영은 alembic만 사용)
+    if settings.dev_mode:
+        Base.metadata.create_all(bind=engine)
     _db_init = SessionLocal()
     try:
         _session_secret = get_session_secret(_db_init)
     finally:
         _db_init.close()
-except Exception:  # noqa: BLE001 — OperationalError or similar on first boot
-    from sqlalchemy.exc import OperationalError as _OE  # noqa: F401
-    _session_secret = _FALLBACK_SECRET
+except _OperationalError:
+    _session_secret = _get_fallback_secret()
+except Exception:  # noqa: BLE001
+    _session_secret = _get_fallback_secret()
 
 # ── 라우터 등록 ───────────────────────────────────────────────────────────────
 from app.routes.health import router as health_router
@@ -150,30 +158,43 @@ app.include_router(campaigns_router)
 app.include_router(admin_router)
 
 # ── 미들웨어: setup gate — 부트스트랩 미완료 시 /setup 으로 (#5) ──────────────
+_ALLOWED_DURING_SETUP = (
+    "/setup",
+    "/healthz",
+    "/static",
+    "/auth/login",
+    "/auth/callback",
+    "/auth/logout",
+)
+
+
 @app.middleware("http")
 async def setup_gate(request: Request, call_next):
     """부트스트랩이 완료되지 않으면 /setup 으로 리다이렉트한다.
 
-    통과 허용 경로:
+    통과 허용 경로 (명시적 화이트리스트):
     - /setup* — setup wizard 자체
-    - /auth/* — OIDC 콜백 포함
+    - /auth/login, /auth/callback, /auth/logout — OIDC 흐름
     - /healthz — 헬스체크
     - /static/* — 정적 파일
     """
+    global _bootstrap_cached
+
     path = request.url.path
-    if (
-        path.startswith("/setup")
-        or path.startswith("/auth")
-        or path.startswith("/healthz")
-        or path.startswith("/static")
-    ):
+    if any(path.startswith(p) for p in _ALLOWED_DURING_SETUP):
+        return await call_next(request)
+
+    # 캐시 히트: 이미 부트스트랩 완료 확인됨 — DB 조회 생략 (I2)
+    if _bootstrap_cached:
         return await call_next(request)
 
     try:
         with SessionLocal() as db:
             from app.security.settings_store import SettingsStore
             store = SettingsStore(db)
-            if not store.is_bootstrap_completed():
+            if store.is_bootstrap_completed():
+                _bootstrap_cached = True
+            else:
                 return RedirectResponse("/setup", status_code=303)
     except Exception:
         pass  # DB 없으면 통과 (첫 기동)
@@ -243,49 +264,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         return JSONResponse(
             {"error": exc.detail},
             status_code=exc.status_code,
-        )
-
-
-@app.exception_handler(NotImplementedError)
-async def not_implemented_handler(request: Request, exc: NotImplementedError):
-    """NotImplementedError — stub 미구현 안내 페이지."""
-    import inspect
-    try:
-        frame = inspect.trace()[-1]
-        location = f"{frame[1]}:{frame[2]}"
-    except Exception:
-        location = "알 수 없는 위치"
-
-    try:
-        user_name = request.session.get("user_name", "") if hasattr(request, "session") else ""
-        raw = request.session.get("user_roles", []) if hasattr(request, "session") else []
-        if isinstance(raw, list):
-            user_roles = raw
-        else:
-            import json
-            try:
-                user_roles = json.loads(raw)
-            except Exception:
-                user_roles = []
-
-        return templates.TemplateResponse(
-            request,
-            "error.html",
-            {
-                "status_code": 501,
-                "detail": f"아직 구현되지 않은 기능입니다: {exc}\n위치: {location}",
-                "is_stub_error": True,
-                "stub_message": str(exc),
-                "stub_location": location,
-                "user_name": user_name,
-                "user_roles": user_roles,
-            },
-            status_code=501,
-        )
-    except Exception:
-        return JSONResponse(
-            {"error": "stub_not_implemented", "detail": str(exc)},
-            status_code=501,
         )
 
 

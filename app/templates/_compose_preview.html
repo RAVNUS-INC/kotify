@@ -43,11 +43,13 @@
     </div>
   </div>
 
-  {% if not can_send %}
+  {% if too_many %}
+  <div class="alert alert-error" style="margin-top:0.75rem; margin-bottom:0; background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; padding:0.75rem; border-radius:4px;">
+    ✗ 수신자가 {{ valid_count }}명으로 1회 최대 {{ max_recipients }}명을 초과합니다. 수신자 수를 줄이세요.
+  </div>
+  {% elif not can_send %}
   <div class="alert alert-error" style="margin-top:0.75rem; margin-bottom:0">
-    {% if phone_error == "stub" %}
-    phone.py stub 구현 후 발송 가능합니다.
-    {% elif invalid_numbers %}
+    {% if invalid_numbers %}
     잘못된 번호를 수정하거나 제거한 뒤 발송하세요.
     {% elif valid_count == 0 %}
     유효한 수신번호가 없습니다.

@@ -7,6 +7,11 @@
 <div class="alert alert-success">설정이 저장되었습니다.</div>
 {% endif %}
 
+<div class="alert alert-info" style="background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; padding:0.75rem; border-radius:4px; margin-bottom:1rem;">
+  ℹ️ <strong>참고:</strong> session.secret을 변경하면 서비스를 재시작해야 적용됩니다.
+  재시작 전까지는 모든 기존 세션이 유지됩니다.
+</div>
+
 <div class="card">
   <div class="card-title">NCP 인증 테스트</div>
   <button class="btn btn-secondary btn-sm"

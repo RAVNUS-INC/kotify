@@ -38,6 +38,7 @@ async def setup_page(
         {
             "token": None,  # #10: 토큰을 HTML에 노출하지 않음
             "error": None,
+            "setup_token_path": str(settings.setup_token_path),  # R9
         },
     )
 
