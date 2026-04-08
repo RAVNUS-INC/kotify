@@ -62,22 +62,28 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     if not sub:
         return RedirectResponse("/auth/login?error=no_sub", status_code=303)
 
-    # 첫 admin 승격 — setup.first_admin_email과 일치할 때만 (#9)
+    # admin 부여 정책 (#9 + bugfix):
+    # 1) setup.first_admin_email과 일치하면 영구 admin anchor (매 로그인마다 자동 부여)
+    #    - 이전 버그: pending_first_admin=false 후 두 번째 로그인 시 viewer로 강등됨
+    #    - 수정: first_admin_email은 일회성이 아닌 영구 anchor
+    # 2) first_admin_email 미설정 + pending_first_admin=true → 첫 로그인 사용자 admin
+    #    - 하위 호환 (wizard에서 이메일 안 입력한 케이스)
     from app.security.settings_store import SettingsStore
     store = SettingsStore(db)
+    first_admin_email = store.get("setup.first_admin_email", "")
     pending_first_admin = store.get("setup.pending_first_admin", "false") == "true"
 
-    roles = user_info["roles"]
-    if pending_first_admin:
-        first_admin_email = store.get("setup.first_admin_email", "")
-        if first_admin_email and user_info["email"] == first_admin_email:
-            # 이메일 일치 → admin 승격
-            if "admin" not in roles:
-                roles = ["admin"] + roles
+    roles = list(user_info["roles"])
+    if first_admin_email and user_info["email"] == first_admin_email:
+        # 영구 admin anchor — 매 로그인마다 admin 보장
+        if "admin" not in roles:
+            roles = ["admin"] + roles
+        if pending_first_admin:
             store.set("setup.pending_first_admin", "false", is_secret=False, updated_by=sub)
             db.flush()
-        elif first_admin_email:
-            # 이메일 불일치 → 기본 역할(viewer)로 로그인 + 감사 로그 경고
+    elif first_admin_email:
+        # 이메일 불일치 — admin 부여 거부 + 경고 로그
+        if pending_first_admin:
             audit.log(
                 db,
                 actor_sub=sub,
@@ -87,12 +93,12 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
                     "warning": "first_admin_email 불일치 — admin 승격 거부",
                 },
             )
-        else:
-            # first_admin_email 미설정 → 하위 호환: 첫 로그인 사용자 admin 승격
-            if "admin" not in roles:
-                roles = ["admin"] + roles
-            store.set("setup.pending_first_admin", "false", is_secret=False, updated_by=sub)
-            db.flush()
+    elif pending_first_admin:
+        # first_admin_email 미설정 + 첫 로그인 → 하위 호환 admin 승격
+        if "admin" not in roles:
+            roles = ["admin"] + roles
+        store.set("setup.pending_first_admin", "false", is_secret=False, updated_by=sub)
+        db.flush()
 
     now = _now_iso()
     # #21: 매 로그인마다 Keycloak 역할로 덮어쓰기 (역할 회수 가능)
