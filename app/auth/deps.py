@@ -193,21 +193,28 @@ def require_setup_mode(
     request: Request,
     db: Session = Depends(get_db),
 ) -> None:
-    """부트스트랩이 이미 완료됐거나 외부 IP인 경우 404 반환 (setup 라우트 보호용).
+    """부트스트랩이 이미 완료된 경우 404 반환 (setup 라우트 보호용).
+
+    이전 버전은 IP ACL(사설망/loopback만 허용)도 적용했으나,
+    NPM 같은 reverse proxy 뒤에서 --proxy-headers와 결합 시 진짜 클라이언트 IP가
+    외부 IP로 인식되어 정당한 운영자도 차단되는 catch-22가 발생.
+
+    setup.token(128-bit hex)이 단일 보안 메커니즘이며, 다음 조건들이 함께
+    방어층을 이룬다:
+    - bootstrap 완료 후 영구 비활성 (이 함수의 첫 체크)
+    - setup.token 파일은 600 권한 (CT 콘솔/SSH 접근 필요)
+    - 부트스트랩 완료 시 토큰 파일 자동 삭제
+    - NPM 앞단에서 외부 인바운드 차단 가능 (운영자 책임)
 
     Args:
         request: Starlette Request.
         db: SQLAlchemy 세션.
 
     Raises:
-        HTTPException: 404 — 이미 설정 완료됨 또는 외부 IP.
+        HTTPException: 404 — 이미 설정 완료됨.
     """
     from app.security.settings_store import SettingsStore
 
     store = SettingsStore(db)
     if store.is_bootstrap_completed():
-        raise HTTPException(status_code=404, detail="Not Found")
-
-    client_ip = request.client.host if request.client else None
-    if client_ip and client_ip not in _ALLOWED_SETUP_HOSTS and not _is_private_network(client_ip):
         raise HTTPException(status_code=404, detail="Not Found")

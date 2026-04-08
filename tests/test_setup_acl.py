@@ -87,12 +87,17 @@ class TestRequireSetupMode:
             # (bootstrap 완료로 인한 404는 OK)
             pass  # bootstrap 미완료 상태에서만 IP ACL 실행됨
 
-    def test_public_ip_blocked(self, db_session):
-        """외부 IP(8.8.8.8)는 setup 접근 차단 → 404."""
+    def test_public_ip_passes(self, db_session):
+        """외부 IP도 setup 접근 허용 — IP ACL 제거됨.
+
+        Reverse proxy(NPM) + --proxy-headers 환경에서 진짜 클라이언트 IP가
+        외부 IP로 인식되어 정당한 운영자도 차단되는 catch-22 때문에
+        IP ACL을 제거. setup.token 파일 + bootstrap 완료 플래그 + NPM 외부 차단이
+        다층 방어를 이룬다.
+        """
         request = self._make_request("8.8.8.8")
-        with pytest.raises(HTTPException) as exc_info:
-            require_setup_mode(request, db_session)
-        assert exc_info.value.status_code == 404
+        # 예외 발생하지 않아야 함 (bootstrap 미완료 상태)
+        require_setup_mode(request, db_session)
 
     def test_already_bootstrapped_returns_404(self, db_session):
         """부트스트랩 완료 상태에서는 어떤 IP든 404."""
