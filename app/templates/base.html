@@ -126,9 +126,18 @@
     {% block content %}{% endblock %}
   </div>
   <script>
+    // CSRF 토큰을 모든 HTMX 요청에 자동 추가
     document.body.addEventListener('htmx:configRequest', function(evt) {
       var token = document.querySelector('meta[name="csrf-token"]');
       if (token) { evt.detail.headers['X-CSRF-Token'] = token.content; }
+    });
+    // HTMX는 기본적으로 4xx/5xx 응답을 swap하지 않아 사용자에게 안 보임.
+    // 응답 본문이 있는 에러는 표시하도록 swap 강제 (디버깅 + UX 양쪽 도움).
+    document.body.addEventListener('htmx:beforeSwap', function(evt) {
+      if (evt.detail.xhr.status >= 400) {
+        evt.detail.shouldSwap = true;
+        evt.detail.isError = false;
+      }
     });
   </script>
 </body>
