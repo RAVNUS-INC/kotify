@@ -15,6 +15,7 @@ from app.services import audit
 from app.services.contacts import list_contacts
 from app.services.groups import (
     add_members,
+    bulk_add_by_phones,
     create_group,
     delete_group,
     get_group,
@@ -297,6 +298,66 @@ async def group_members_add(
     )
     db.commit()
     return RedirectResponse(f"/groups/{group_id}?added={added}", status_code=303)
+
+
+# ── 멤버 일괄 추가 (전화번호 paste) ──────────────────────────────────────────
+
+
+@router.post("/{group_id}/members/bulk-add")
+async def group_members_bulk_add(
+    group_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(_sender_dep),
+    _csrf: None = Depends(verify_csrf),
+    phones_text: str = Form(...),
+    auto_create: str = Form(""),
+) -> RedirectResponse:
+    """전화번호 일괄 paste로 멤버 추가.
+
+    phones_text: 줄바꿈/콤마/세미콜론으로 구분된 전화번호 텍스트.
+    auto_create: "1"이면 없는 연락처 자동 생성.
+    """
+    from app.util.phone import parse_phone_list
+
+    group = get_group(db, group_id)
+    if group is None:
+        raise HTTPException(status_code=404)
+
+    valid_phones, invalid_originals = parse_phone_list(phones_text)
+    auto_create_flag = auto_create == "1"
+
+    result = bulk_add_by_phones(
+        db,
+        group_id=group_id,
+        phones=valid_phones,
+        added_by=user.sub,
+        auto_create=auto_create_flag,
+    )
+
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="GROUP_MEMBERS_BULK_ADD",
+        target=f"group:{group_id}",
+        detail={
+            "valid": len(valid_phones),
+            "invalid": len(invalid_originals),
+            **result,
+        },
+    )
+    db.commit()
+
+    # 결과를 query string으로 전달
+    params = {
+        "bulk_added": result["added_existing"],
+        "bulk_created": result["created_new"],
+        "bulk_skipped_member": result["skipped_existing_member"],
+        "bulk_skipped_no_contact": result["skipped_no_contact"],
+        "bulk_invalid": len(invalid_originals),
+    }
+    qs = "&".join(f"{k}={v}" for k, v in params.items())
+    return RedirectResponse(f"/groups/{group_id}?{qs}", status_code=303)
 
 
 # ── 멤버 제거 ─────────────────────────────────────────────────────────────────

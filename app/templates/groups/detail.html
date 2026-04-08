@@ -27,6 +27,21 @@
 <div class="alert alert-success" role="alert">그룹이 생성되었습니다.</div>
 {% elif request.query_params.get("updated") %}
 <div class="alert alert-success" role="alert">그룹이 수정되었습니다.</div>
+{% elif request.query_params.get("bulk_added") is not none %}
+<div class="alert alert-success" role="alert">
+  일괄 추가 완료:
+  기존 연락처 추가 <strong>{{ request.query_params.get("bulk_added") }}명</strong>,
+  신규 생성 <strong>{{ request.query_params.get("bulk_created") }}명</strong>
+  {% if request.query_params.get("bulk_skipped_member") and request.query_params.get("bulk_skipped_member") != "0" %}
+  · 이미 멤버 {{ request.query_params.get("bulk_skipped_member") }}명 스킵
+  {% endif %}
+  {% if request.query_params.get("bulk_skipped_no_contact") and request.query_params.get("bulk_skipped_no_contact") != "0" %}
+  · 주소록에 없어 스킵 {{ request.query_params.get("bulk_skipped_no_contact") }}명
+  {% endif %}
+  {% if request.query_params.get("bulk_invalid") and request.query_params.get("bulk_invalid") != "0" %}
+  · 잘못된 번호 {{ request.query_params.get("bulk_invalid") }}개
+  {% endif %}
+</div>
 {% elif request.query_params.get("added") %}
 <div class="alert alert-success" role="alert">{{ request.query_params.get("added") }}명이 추가되었습니다.</div>
 {% elif request.query_params.get("removed") %}
@@ -121,10 +136,42 @@
   {% endif %}
 </div>
 
+<!-- 멤버 일괄 추가 (전화번호 paste) -->
+{% if "sender" in user_roles or "admin" in user_roles %}
+<div class="card" style="margin-top:20px">
+  <div class="card-title">전화번호로 일괄 추가</div>
+  <p class="form-hint" style="margin-bottom:8px">
+    줄바꿈, 콤마, 세미콜론으로 구분해서 한 번에 여러 명 추가할 수 있습니다.
+    형식 자동 변환: <code>010-1234-5678</code>, <code>01012345678</code>, <code>+82-10-1234-5678</code>
+  </p>
+  <form action="/groups/{{ group.id }}/members/bulk-add" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+    <div class="form-group">
+      <textarea name="phones_text" rows="6"
+        placeholder="010-1234-5678&#10;010-9999-8888&#10;010-1111-2222"
+        style="font-family:'JetBrains Mono','SF Mono',monospace;font-size:12px"></textarea>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+        <input type="checkbox" name="auto_create" value="1" checked>
+        주소록에 없는 번호는 자동으로 새 연락처 생성
+      </label>
+      <div class="form-hint">
+        체크 해제 시: 주소록에 없는 번호는 무시됩니다.<br>
+        체크 시: 새 연락처가 자동 생성되며 이름은 전화번호로 임시 저장됩니다 (나중에 수정 가능).
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i data-lucide="users-round"></i> 일괄 추가
+    </button>
+  </form>
+</div>
+{% endif %}
+
 <!-- 멤버 추가 -->
 {% if "sender" in user_roles or "admin" in user_roles %}
-<div class="card">
-  <div class="card-title">멤버 추가</div>
+<div class="card" style="margin-top:20px">
+  <div class="card-title">기존 연락처에서 선택</div>
   <div style="margin-bottom:8px">
     <input type="text" id="contact-search" placeholder="이름/전화번호/이메일 검색..."
       onkeyup="filterContacts(this.value)"

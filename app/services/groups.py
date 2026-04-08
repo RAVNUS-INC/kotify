@@ -134,6 +134,119 @@ def add_members(
     return added
 
 
+def bulk_add_by_phones(
+    db: Session,
+    group_id: int,
+    phones: list[str],
+    added_by: str,
+    auto_create: bool = True,
+) -> dict:
+    """전화번호 리스트로 멤버 일괄 추가.
+
+    각 전화번호에 대해:
+    1. 기존 연락처(phone 일치) 검색
+    2. 있으면 → 그룹에 추가
+    3. 없으면 → auto_create=True 시 새 연락처 생성 (이름은 전화번호로 임시) → 그룹 추가
+                auto_create=False 시 skip
+
+    Args:
+        db: SQLAlchemy 세션.
+        group_id: 그룹 ID.
+        phones: 정규화된 전화번호 리스트.
+        added_by: 추가한 사용자 sub.
+        auto_create: 없는 연락처를 자동 생성할지 여부.
+
+    Returns:
+        {
+            "added_existing": N,  # 기존 연락처를 그룹에 추가한 수
+            "created_new": M,     # 새로 생성하면서 추가한 수
+            "skipped_existing_member": K,  # 이미 그룹 멤버인 수
+            "skipped_no_contact": L,  # 연락처 없음 + auto_create=False
+        }
+    """
+    from app.models import Contact
+
+    result = {
+        "added_existing": 0,
+        "created_new": 0,
+        "skipped_existing_member": 0,
+        "skipped_no_contact": 0,
+    }
+    if not phones:
+        return result
+
+    # 중복 phone 제거 (입력 자체)
+    unique_phones = list(dict.fromkeys(phones))
+
+    # 기존 멤버 contact_id 조회
+    existing_members = set(
+        db.execute(
+            select(ContactGroupMember.contact_id).where(
+                ContactGroupMember.group_id == group_id
+            )
+        ).scalars().all()
+    )
+
+    # 한 번에 모든 phone에 대한 연락처 조회 (N+1 회피)
+    phone_to_contact = {}
+    if unique_phones:
+        rows = db.execute(
+            select(Contact).where(Contact.phone.in_(unique_phones))
+        ).scalars().all()
+        for c in rows:
+            phone_to_contact[c.phone] = c
+
+    now = _now_iso()
+    contact_ids_to_add: list[int] = []
+
+    for phone in unique_phones:
+        contact = phone_to_contact.get(phone)
+        if contact is None:
+            if auto_create:
+                # 새 연락처 생성 — 이름은 전화번호로 임시 (사용자가 나중에 수정)
+                contact = Contact(
+                    name=phone,  # placeholder
+                    phone=phone,
+                    email=None,
+                    department=None,
+                    notes="(일괄 추가로 자동 생성)",
+                    active=1,
+                    created_by=added_by,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(contact)
+                db.flush()
+                phone_to_contact[phone] = contact
+                contact_ids_to_add.append(contact.id)
+                result["created_new"] += 1
+            else:
+                result["skipped_no_contact"] += 1
+                continue
+        else:
+            if contact.id in existing_members:
+                result["skipped_existing_member"] += 1
+                continue
+            contact_ids_to_add.append(contact.id)
+            result["added_existing"] += 1
+
+    # group_members에 일괄 추가
+    for cid in contact_ids_to_add:
+        if cid in existing_members:
+            continue
+        member = ContactGroupMember(
+            group_id=group_id,
+            contact_id=cid,
+            added_by=added_by,
+            added_at=now,
+        )
+        db.add(member)
+        existing_members.add(cid)
+
+    db.flush()
+    return result
+
+
 def remove_members(
     db: Session,
     group_id: int,
