@@ -38,20 +38,27 @@
   {% if groups %}
   <div class="table-wrapper">
   <table>
+    <colgroup>
+      <col style="width: 200px">    <!-- 그룹명 -->
+      <col>                          <!-- 설명 -->
+      <col style="width: 80px">     <!-- 멤버수 -->
+      <col style="width: 100px">    <!-- 생성일 -->
+      <col style="width: 160px">    <!-- 관리 -->
+    </colgroup>
     <thead>
       <tr>
         <th>그룹명</th>
         <th>설명</th>
-        <th class="text-right" style="width:70px">멤버</th>
-        <th style="width:100px">생성일</th>
-        <th style="width:160px">관리</th>
+        <th class="text-right">멤버</th>
+        <th>생성일</th>
+        <th>관리</th>
       </tr>
     </thead>
     <tbody>
       {% for g in groups %}
       <tr>
-        <td><a href="/groups/{{ g.id }}">{{ g.name }}</a></td>
-        <td class="text-muted">{{ g.description or "—" }}</td>
+        <td title="{{ g.name }}"><a href="/groups/{{ g.id }}">{{ g.name }}</a></td>
+        <td class="text-muted" title="{{ g.description or '' }}">{{ g.description or "—" }}</td>
         <td class="mono text-right">{{ group_sizes.get(g.id, 0) }}명</td>
         <td class="mono text-muted">{{ g.created_at[:10] }}</td>
         <td>

@@ -12,7 +12,7 @@
   <!-- Lucide 아이콘 -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <style>
-    /* ── 디자인 토큰 (Linear/Vercel 스타일 무채색) ──────────────────────── */
+    /* ── 디자인 토큰 (Excel 데이터 그리드 스타일 무채색) ──────────────── */
     :root {
       --primary:          #18181b;          /* zinc-900 (거의 검정) */
       --primary-dark:     #000000;
@@ -27,7 +27,7 @@
       --bg-card-header:   #fafafa;
       --bg-elevated:      #f4f4f5;          /* zinc-100 */
       --bg-alt:           #fafafa;
-      --border-soft:      #f4f4f5;          /* 매우 옅음 */
+      --border-soft:      #e4e4e7;          /* zinc-200 (border-soft → border 동일) */
       --border:           #e4e4e7;          /* zinc-200 */
       --border-strong:    #d4d4d8;          /* zinc-300 */
       --success:          #16a34a;  --success-bg: #dcfce7;
@@ -36,12 +36,12 @@
       --info:             #18181b;  --info-bg:    #f4f4f5;
       --sidebar-w:        200px;
       --sidebar-w-collapsed: 56px;
-      --radius-sm:        8px;
-      --radius:           12px;
-      --radius-lg:        16px;
-      --shadow-card:      0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
-      --shadow-card-hover:0 4px 12px rgba(0, 0, 0, 0.08);
-      --shadow-sm:        0 1px 3px rgba(0, 0, 0, 0.04);
+      --radius-sm:        2px;              /* 직각 */
+      --radius:           2px;              /* 직각 */
+      --radius-lg:        2px;              /* 직각 */
+      --shadow-card:      none;             /* 그림자 제거 */
+      --shadow-card-hover:none;
+      --shadow-sm:        none;
       /* spacing */
       --space-1: 4px; --space-2: 8px; --space-3: 12px;
       --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-8: 32px;
@@ -70,9 +70,10 @@
     /* ── 사이드바 ────────────────────────────────────────────────────────── */
     .sidebar {
       width: var(--sidebar-w);
-      background: #fafafa;
+      background: var(--bg-soft);
       color: var(--text);
-      border-right: 1px solid var(--border);
+      border-right: 1px solid var(--border-strong);
+      box-shadow: none;
       display: flex;
       flex-direction: column;
       position: fixed;
@@ -114,7 +115,7 @@
       border: none;
       color: var(--text-secondary);
       padding: 4px;
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       display: flex;
       align-items: center;
       flex-shrink: 0;
@@ -136,18 +137,19 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 16px;
+      padding: 6px 14px;              /* 컴팩트 */
       color: var(--text-secondary);
       text-decoration: none;
-      font-size: 13px;
-      border-radius: var(--radius-sm);
-      margin: 2px 8px;
+      font-size: 12px;
+      border-radius: 0;               /* 직각 */
+      margin: 0;                      /* 양옆 마진 제거 */
       white-space: nowrap;
       transition: background 0.15s, color 0.15s;
+      border-left: 2px solid transparent;
     }
-    .nav-item:hover { background: var(--bg-elevated); color: var(--text); text-decoration: none; }
-    .nav-item.active { background: var(--bg-elevated); color: var(--text); font-weight: 600; }
-    .nav-item i { width: 18px; height: 18px; flex-shrink: 0; }
+    .nav-item:hover:not(.active) { background: var(--bg-elevated); color: var(--text); text-decoration: none; }
+    .nav-item.active { background: var(--bg-elevated); color: var(--text); font-weight: 600; border-left: 2px solid var(--text); }
+    .nav-item i { width: 14px; height: 14px; flex-shrink: 0; }
     .nav-label { white-space: nowrap; }
     .sidebar.collapsed .nav-label { display: none; }
 
@@ -195,7 +197,7 @@
       border: none;
       color: var(--text-secondary);
       padding: 4px;
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       display: flex;
       align-items: center;
     }
@@ -217,17 +219,20 @@
 
     /* ── 페이지 헤더 ─────────────────────────────────────────────────────── */
     .page-header {
-      background: transparent;
-      border-bottom: none;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border-strong);
       box-shadow: none;
-      padding: 20px 32px 12px;
+      padding: 0 24px;
+      height: 44px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      position: relative;             /* sticky 제거 */
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }
     .page-title {
-      font-size: 22px;               /* 15 → 22 */
+      font-size: 14px;               /* 컴팩트 */
       font-weight: 700;
       color: var(--text);
       letter-spacing: -0.01em;
@@ -241,28 +246,28 @@
     /* ── 페이지 콘텐츠 ───────────────────────────────────────────────────── */
     .page-content {
       flex: 1;
-      padding: 0 32px 32px;          /* 더 넓은 좌우 padding */
-      max-width: 1400px;
+      padding: 16px 24px;            /* 컴팩트 */
+      max-width: none;               /* 전체 너비 활용 */
       width: 100%;
     }
 
     /* ── 카드 ────────────────────────────────────────────────────────────── */
     .card {
-      background: #ffffff;
-      border-radius: var(--radius-lg);   /* 4px → 16px */
-      border: 1px solid var(--border-soft);
-      box-shadow: var(--shadow-card);
-      padding: 24px;                     /* 16px → 24px */
+      background: var(--bg);
+      border-radius: 0;                  /* 직각 */
+      border: 1px solid var(--border);
+      box-shadow: none;                  /* 그림자 제거 */
+      padding: 16px;
       margin-bottom: 16px;
       overflow: hidden;
     }
     .card-title {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
       color: var(--text);
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border-soft);
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
     }
 
     /* ── 통계 그리드 ─────────────────────────────────────────────────────── */
@@ -273,65 +278,77 @@
       margin-bottom: 20px;
     }
     .stat-card {
-      background: #fff;
-      border-radius: var(--radius);
-      border: 1px solid var(--border-soft);
-      padding: 20px;
-      box-shadow: var(--shadow-card);
+      background: var(--bg);
+      border-radius: 0;
+      border: 1px solid var(--border);
+      padding: 12px 16px;
+      box-shadow: none;
     }
     .stat-value {
-      font-size: 28px;
+      font-size: 20px;
       font-weight: 700;
       color: var(--text);
-      margin-top: 8px;
+      margin-top: 4px;
       font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
     }
     .stat-label {
-      font-size: 12px;
+      font-size: 10px;
       color: var(--text-muted);
       font-weight: 500;
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
 
-    /* ── 테이블 (모던 카드 스타일) ───────────────────────────────────────── */
+    /* ── 테이블 (Excel 데이터 그리드 스타일) ────────────────────────────── */
     .table-wrapper {
-      overflow-x: auto;
+      background: var(--bg);
+      border: 1px solid var(--border-strong);
+      border-radius: 0;
+      box-shadow: none;
+      overflow: auto;
+      max-width: 100%;
       -webkit-overflow-scrolling: touch;
-      border-radius: var(--radius-lg);
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 13px;
+      font-size: 12px;
+      table-layout: fixed;           /* 열 너비 고정 */
     }
     th {
-      background: var(--bg-card-header);
+      background: var(--bg-elevated);
+      color: var(--text);
+      font-weight: 600;
+      font-size: 11px;
       text-align: left;
-      padding: 14px 20px;
-      border: none;
-      border-bottom: 1px solid var(--border-soft);
-      font-weight: 500;
-      font-size: 12px;
-      color: var(--text-secondary);
+      padding: 6px 10px;             /* 컴팩트 */
+      border: 1px solid var(--border);
+      border-bottom: 1px solid var(--border-strong);
       position: sticky;
       top: 0;
       z-index: 10;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
       user-select: none;
     }
     td {
-      padding: 14px 20px;            /* 행 높이 ~48px */
-      border: none;
-      border-bottom: 1px solid var(--border-soft);
+      padding: 6px 10px;             /* 행 높이 ~28px */
+      border: 1px solid var(--border);
       vertical-align: middle;
-      color: var(--text-secondary);
+      color: var(--text);
       line-height: 1.4;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    /* 카드 안에 table-wrapper가 있을 때 overflow:hidden 처리를 위해 카드의 padding:0 케이스 대응 */
-    .card:not([style*="padding:0"]) .table-wrapper { margin: 0 -24px; }
-    tr:last-child td { border-bottom: none; }
+    /* 카드 안 table-wrapper 마진 제거 (직각이므로 flush하게) */
+    .card:not([style*="padding:0"]) .table-wrapper { margin: 0 -16px; }
+    tr:last-child td { border-bottom: 1px solid var(--border); }
     tr:hover td { background: var(--bg-soft); }
+    /* 짝수 행 옅은 줄무늬 */
+    tbody tr:nth-child(even) td { background: var(--bg-soft); }
+    tbody tr:nth-child(even):hover td { background: var(--bg-elevated); }
 
     /* ── 폼 ──────────────────────────────────────────────────────────────── */
     .form-group { margin-bottom: 16px; }
@@ -351,14 +368,15 @@
     .form-group select,
     .form-group textarea {
       width: 100%;
-      padding: 10px 14px;            /* 더 여유 있는 padding */
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-size: 13px;
+      padding: 6px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 2px;            /* 거의 직각 */
+      font-size: 12px;
       font-family: inherit;
-      background: #fff;
+      background: var(--bg);
       color: var(--text);
-      transition: border-color 0.15s, box-shadow 0.15s;
+      box-shadow: none;
+      transition: border-color 0.15s;
     }
     .form-group textarea { resize: vertical; }
     .form-group input:focus,
@@ -366,7 +384,7 @@
     .form-group textarea:focus {
       outline: none;
       border-color: var(--text);
-      box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+      box-shadow: 0 0 0 1px var(--text); /* 굵은 outline 대신 1px */
     }
     .form-hint {
       font-size: 11px;
@@ -378,21 +396,22 @@
     input[type=text].ctrl,
     input[type=date].ctrl,
     select.ctrl {
-      padding: 7px 12px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-size: 13px;
+      padding: 6px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 2px;
+      font-size: 12px;
       font-family: inherit;
-      background: #fff;
+      background: var(--bg);
       color: var(--text);
-      transition: border-color 0.15s, box-shadow 0.15s;
+      box-shadow: none;
+      transition: border-color 0.15s;
     }
     input[type=text].ctrl:focus,
     input[type=date].ctrl:focus,
     select.ctrl:focus {
       outline: none;
       border-color: var(--text);
-      box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+      box-shadow: 0 0 0 1px var(--text);
     }
 
     /* ── 버튼 ────────────────────────────────────────────────────────────── */
@@ -400,40 +419,40 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 8px 16px;
-      border-radius: var(--radius-sm);
+      padding: 6px 12px;
+      border-radius: 2px;            /* 거의 직각 */
       border: 1px solid transparent;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
       font-family: inherit;
       text-decoration: none;
-      transition: all 0.15s;
+      transition: background 0.15s, border-color 0.15s;
       white-space: nowrap;
+      box-shadow: none;
     }
     .btn i { width: 14px; height: 14px; }
     .btn-primary {
       background: var(--text);
       color: #fff;
       border-color: var(--text);
-      box-shadow: none;
     }
     .btn-primary:hover {
       background: #000;
       border-color: #000;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-      transform: translateY(-1px);
+      box-shadow: none;
+      transform: none;               /* translateY 효과 제거 */
       text-decoration: none;
       color: #fff;
     }
     .btn-secondary {
       background: var(--bg);
       color: var(--text);
-      border-color: var(--border);
+      border-color: var(--border-strong);
     }
     .btn-secondary:hover {
       background: var(--bg-soft);
-      border-color: var(--border-strong);
+      border-color: var(--text-secondary);
       text-decoration: none;
     }
     .btn-danger {
@@ -442,7 +461,7 @@
       border-color: var(--error);
     }
     .btn-danger:hover { background: #b91c1c; text-decoration: none; color: #fff; }
-    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    .btn-sm { padding: 4px 8px; font-size: 11px; }
     .btn-sm i { width: 12px; height: 12px; }
     button[disabled], .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
     .btn-link {
@@ -457,15 +476,15 @@
     }
     .btn-link:hover { color: var(--text); }
 
-    /* ── 배지/필 (pill 스타일) ───────────────────────────────────────────── */
+    /* ── 배지 (직각 스타일) ─────────────────────────────────────────────── */
     .badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 10px;
-      border-radius: 20px;           /* 완전 pill */
-      font-size: 11px;
-      font-weight: 500;
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 2px;            /* pill → 거의 직각 */
+      font-size: 10px;
+      font-weight: 600;
       white-space: nowrap;
+      border: 1px solid transparent;
     }
     .badge-success  { background: var(--success-bg); color: #166534; }
     .badge-fail     { background: var(--error-bg);   color: #991b1b; }
@@ -479,26 +498,25 @@
 
     /* ── 알림/Alert ──────────────────────────────────────────────────────── */
     .alert {
-      padding: 14px 18px;
-      border-radius: var(--radius);
-      border: none;
-      margin-bottom: 20px;
-      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: 0;              /* 직각 */
+      border: 1px solid;
+      margin-bottom: 16px;
+      font-size: 12px;
     }
-    .alert[role="alert"] {}
-    .alert-error   { background: var(--error-bg);   color: #991b1b; }
-    .alert-success { background: var(--success-bg); color: #166534; }
-    .alert-info    { background: var(--info-bg);    color: var(--text); }
-    .alert-warning { background: var(--warning-bg); color: #92400e; }
+    .alert-success { background: var(--success-bg); color: #166534; border-color: #86efac; }
+    .alert-error   { background: var(--error-bg);   color: #991b1b; border-color: #fca5a5; }
+    .alert-info    { background: var(--bg-elevated); color: var(--text); border-color: var(--border-strong); }
+    .alert-warning { background: var(--warning-bg); color: #92400e; border-color: #fcd34d; }
 
     /* ── 빈 상태 ─────────────────────────────────────────────────────────── */
     .empty-state {
       text-align: center;
-      padding: 48px 20px;
+      padding: 40px 20px;
       color: var(--text-muted);
     }
-    .empty-state i { width: 40px; height: 40px; margin-bottom: 12px; opacity: 0.3; }
-    .empty-state p { font-size: 13px; margin-bottom: 12px; }
+    .empty-state i { width: 32px; height: 32px; margin-bottom: 8px; opacity: 0.5; }
+    .empty-state p { font-size: 12px; margin-bottom: 12px; }
 
     /* ── 페이지네이션 ────────────────────────────────────────────────────── */
     .pagination {
@@ -509,13 +527,13 @@
       flex-wrap: wrap;
     }
     .pagination a {
-      padding: 5px 12px;
+      padding: 4px 10px;
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
+      border-radius: 2px;
       text-decoration: none;
       color: var(--text);
-      font-size: 12px;
-      transition: all 0.15s;
+      font-size: 11px;
+      transition: background 0.15s, border-color 0.15s;
     }
     .pagination a.active { background: var(--text); color: #fff; border-color: var(--text); }
     .pagination a:hover:not(.active) { background: var(--bg-soft); border-color: var(--border-strong); }
@@ -579,9 +597,9 @@
       .sidebar { transform: translateX(-100%); }
       .sidebar.mobile-open { transform: translateX(0); }
       .main { margin-left: 0 !important; }
-      .page-header { padding: 16px 20px 8px; }
-      .page-content { padding: 0 16px 24px; }
-      .page-title { font-size: 18px; }
+      .page-header { padding: 0 16px; }
+      .page-content { padding: 12px 16px; }
+      .page-title { font-size: 13px; }
     }
   </style>
 </head>

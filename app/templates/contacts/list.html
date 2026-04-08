@@ -54,24 +54,33 @@
   {% if contacts %}
   <div class="table-wrapper">
   <table>
+    <colgroup>
+      <col>                          <!-- 이름 -->
+      <col style="width: 130px">    <!-- 전화번호 -->
+      <col>                          <!-- 이메일 -->
+      <col style="width: 100px">    <!-- 부서 -->
+      <col style="width: 60px">     <!-- 상태 -->
+      <col style="width: 130px">    <!-- 마지막 발송 -->
+      <col style="width: 100px">    <!-- 관리 -->
+    </colgroup>
     <thead>
       <tr>
         <th>이름</th>
         <th>전화번호</th>
         <th>이메일</th>
         <th>부서</th>
-        <th style="width:60px">상태</th>
-        <th style="width:130px">마지막 발송</th>
-        <th style="width:100px">관리</th>
+        <th>상태</th>
+        <th>마지막 발송</th>
+        <th>관리</th>
       </tr>
     </thead>
     <tbody>
       {% for c in contacts %}
       <tr>
-        <td><a href="/contacts/{{ c.id }}">{{ c.name }}</a></td>
+        <td title="{{ c.name }}"><a href="/contacts/{{ c.id }}">{{ c.name }}</a></td>
         <td class="mono">{{ c.phone|phone_fmt or "—" }}</td>
-        <td class="text-muted">{{ c.email or "—" }}</td>
-        <td class="text-muted">{{ c.department or "—" }}</td>
+        <td class="text-muted" title="{{ c.email or '' }}">{{ c.email or "—" }}</td>
+        <td class="text-muted" title="{{ c.department or '' }}">{{ c.department or "—" }}</td>
         <td>
           {% if c.active %}
           <span class="badge badge-success">활성</span>

@@ -11,14 +11,22 @@
   {% if logs %}
   <div class="table-wrapper">
   <table>
+    <colgroup>
+      <col style="width: 140px">    <!-- 시각 -->
+      <col style="width: 120px">    <!-- 사용자 -->
+      <col style="width: 90px">     <!-- 액션 -->
+      <col>                          <!-- 대상 -->
+      <col style="width: 200px">    <!-- 상세 -->
+      <col style="width: 110px">    <!-- IP -->
+    </colgroup>
     <thead>
       <tr>
-        <th style="width:130px">시각 (KST)</th>
-        <th style="width:110px">사용자</th>
-        <th style="width:90px">액션</th>
+        <th>시각 (KST)</th>
+        <th>사용자</th>
+        <th>액션</th>
         <th>대상</th>
-        <th style="max-width:200px">상세</th>
-        <th style="width:110px">IP</th>
+        <th>상세</th>
+        <th>IP</th>
       </tr>
     </thead>
     <tbody>

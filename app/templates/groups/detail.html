@@ -53,11 +53,15 @@
   <div class="card-title">그룹 정보</div>
   <div class="table-wrapper">
   <table style="width:auto;min-width:280px">
+    <colgroup>
+      <col style="width: 80px">     <!-- 라벨 -->
+      <col>                          <!-- 값 -->
+    </colgroup>
     <tbody>
-      <tr><th style="width:80px;font-weight:600;background:var(--bg-elevated)">그룹명</th><td>{{ group.name }}</td></tr>
-      <tr><th style="background:var(--bg-elevated)">설명</th><td>{{ group.description or "—" }}</td></tr>
-      <tr><th style="background:var(--bg-elevated)">멤버 수</th><td class="mono">{{ member_total }}명</td></tr>
-      <tr><th style="background:var(--bg-elevated)">생성일</th><td class="mono text-muted" style="font-size:11px">{{ group.created_at[:10] }}</td></tr>
+      <tr><th style="font-weight:600;background:var(--bg-elevated)">그룹명</th><td>{{ group.name }}</td></tr>
+      <tr><th style="font-weight:600;background:var(--bg-elevated)">설명</th><td>{{ group.description or "—" }}</td></tr>
+      <tr><th style="font-weight:600;background:var(--bg-elevated)">멤버 수</th><td class="mono">{{ member_total }}명</td></tr>
+      <tr><th style="font-weight:600;background:var(--bg-elevated)">생성일</th><td class="mono text-muted" style="font-size:11px">{{ group.created_at[:10] }}</td></tr>
     </tbody>
   </table>
   </div>
@@ -74,6 +78,15 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <div class="table-wrapper">
     <table>
+      <colgroup>
+        {% if "sender" in user_roles or "admin" in user_roles %}
+        <col style="width: 32px">   <!-- 체크박스 -->
+        {% endif %}
+        <col>                        <!-- 이름 -->
+        <col style="width: 130px">  <!-- 전화번호 -->
+        <col>                        <!-- 이메일 -->
+        <col style="width: 100px">  <!-- 부서 -->
+      </colgroup>
       <thead>
         <tr>
           {% if "sender" in user_roles or "admin" in user_roles %}
