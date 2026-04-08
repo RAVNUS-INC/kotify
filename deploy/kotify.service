@@ -10,7 +10,12 @@ User=kotify
 Group=kotify
 WorkingDirectory=/opt/kotify
 ExecStartPre=/opt/kotify/.venv/bin/alembic -c /opt/kotify/alembic.ini upgrade head
-ExecStart=/opt/kotify/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1
+# --proxy-headers + --forwarded-allow-ips: NPM 같은 리버스 프록시의
+# X-Forwarded-Proto/For 헤더를 신뢰. 이게 없으면 SessionMiddleware가 https를
+# 인식하지 못해 Secure 쿠키를 못 만들고, 결과적으로 CSRF 검증이 모두 403으로
+# 차단된다. forwarded-allow-ips=* 는 모든 출처를 허용하는데, NPM 앞단에서 외부
+# 인바운드를 차단하는 환경에서는 안전.
+ExecStart=/opt/kotify/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1 --proxy-headers --forwarded-allow-ips=*
 
 # 재시작 정책
 Restart=on-failure
