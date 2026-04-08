@@ -120,7 +120,8 @@
     <!-- 본문 -->
     <div class="form-group">
       <label for="content-textarea">본문</label>
-      <textarea name="content" id="content-textarea" rows="5"
+      <textarea name="content" id="content-textarea" rows="3"
+        style="min-height:80px;resize:none;overflow-y:hidden"
         placeholder="메시지를 입력하세요 (SMS: 90byte 이하, LMS: 2000byte 이하)"
         hx-post="/compose/preview"
         hx-trigger="keyup delay:600ms"
@@ -195,6 +196,9 @@ function updateByteCounter() {
   if (subjectGroup) {
     subjectGroup.style.display = bytes > 90 ? '' : 'none';
   }
+  // textarea auto-grow — 스크롤 없이 본문 길이만큼 자동 확장
+  contentTa.style.height = 'auto';
+  contentTa.style.height = (contentTa.scrollHeight + 2) + 'px';
 }
 if (contentTa) {
   contentTa.addEventListener('input', updateByteCounter);

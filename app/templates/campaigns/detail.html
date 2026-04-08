@@ -61,7 +61,7 @@
   </div>
   <div id="recipients-table"
     hx-get="/campaigns/{{ campaign.id }}/recipients"
-    hx-trigger="load"
+    hx-trigger="load{% if campaign.state in ('DISPATCHING', 'DISPATCHED', 'PARTIAL_FAILED') %}, every 5s{% endif %}"
     hx-swap="innerHTML">
     <div style="padding:20px;text-align:center;color:var(--text-muted)">
       <span class="spinner"></span> 로딩 중...
