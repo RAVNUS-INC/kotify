@@ -51,6 +51,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html { font-size: 13px; }
     body {
+      min-width: 1280px;            /* 고정 레이아웃 — 작은 화면은 가로 스크롤 */
       font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
       background: var(--bg);
       color: var(--text);
@@ -592,15 +593,9 @@
     .byte-counter.warn { color: var(--warning); }
     .byte-counter.err  { color: var(--error); }
 
-    /* ── 모바일 ──────────────────────────────────────────────────────────── */
-    @media (max-width: 768px) {
-      .sidebar { transform: translateX(-100%); }
-      .sidebar.mobile-open { transform: translateX(0); }
-      .main { margin-left: 0 !important; }
-      .page-header { padding: 0 16px; }
-      .page-content { padding: 12px 16px; }
-      .page-title { font-size: 13px; }
-    }
+    /* ── 고정 레이아웃 (반응형 비활성) ──────────────────────────────────────
+       작은 화면에서는 가로 스크롤로 처리. 모바일 미지원 — 데스크탑 전용 도구.
+       반응형 미디어 쿼리 제거. body min-width로 최소 너비 강제. */
   </style>
 </head>
 <body>
