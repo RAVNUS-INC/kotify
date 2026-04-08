@@ -195,14 +195,20 @@ ok "${BACKUP_DIR} (${SERVICE_USER}:${SERVICE_GROUP} 700)"
 
 # ── Step 6: 코드 배포 ────────────────────────────────────────────────────────
 step "6. 코드 배포 (git)"
+# REPO_URL에서 인증 정보 제거한 표시용 URL (토큰 노출 방지)
+DISPLAY_URL=$(echo "${REPO_URL}" | sed -E 's|https://[^@]+@|https://***@|')
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
     info "이미 클론됨. git pull 실행..."
-    git -C "${INSTALL_DIR}" pull --ff-only
+    git -C "${INSTALL_DIR}" pull --ff-only --quiet
     ok "코드 업데이트 완료"
 else
-    info "git clone: ${REPO_URL} → ${INSTALL_DIR}"
-    git clone "${REPO_URL}" "${INSTALL_DIR}"
-    ok "코드 클론 완료"
+    info "git clone: ${DISPLAY_URL} → ${INSTALL_DIR}"
+    git clone --quiet "${REPO_URL}" "${INSTALL_DIR}"
+    # 보안: clone 후 git remote에서 토큰 제거
+    # (토큰이 평문으로 .git/config에 남는 것을 방지)
+    git -C "${INSTALL_DIR}" remote set-url origin \
+        "https://github.com/RAVNUS-INC/sms-sys.git"
+    ok "코드 클론 완료 (remote URL에서 토큰 제거됨)"
 fi
 
 # ── Step 7: Python 가상환경 + 의존성 설치 ───────────────────────────────────
