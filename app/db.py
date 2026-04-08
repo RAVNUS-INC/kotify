@@ -25,10 +25,18 @@ def _apply_wal(dbapi_conn: object, connection_record: object) -> None:  # noqa: 
 def create_db_engine(db_url: str | None = None) -> Engine:
     """엔진을 생성하고 WAL 이벤트 리스너를 붙인다.
 
+    SQLite 파일의 부모 디렉토리가 없으면 자동 생성한다 (dev mode 첫 실행 시
+    ``./var/`` 가 없으면 OperationalError가 발생하는 문제 방지).
+
     Args:
         db_url: 명시하지 않으면 ``settings.db_url`` 사용.
     """
     url = db_url or settings.db_url
+    # SQLite 파일 경로의 부모 디렉토리 보장
+    if url.startswith("sqlite:///"):
+        from pathlib import Path
+        db_file = Path(url.removeprefix("sqlite:///"))
+        db_file.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(url, connect_args={"check_same_thread": False})
     event.listen(engine, "connect", _apply_wal)
     return engine
