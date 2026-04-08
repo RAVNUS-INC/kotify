@@ -227,7 +227,8 @@ ok "Python 패키지 설치 완료"
 step "8. 데이터베이스 초기화"
 info "alembic upgrade head 실행..."
 # DB를 /var/lib/sms/에 생성하려면 sms 사용자 권한으로 실행
-sudo -u "${SERVICE_USER}" \
+# minimal CT는 sudo가 없을 수 있어 runuser(util-linux) 사용
+runuser -u "${SERVICE_USER}" -- \
     env "PATH=${INSTALL_DIR}/.venv/bin:$PATH" \
     bash -c "cd ${INSTALL_DIR} && ${INSTALL_DIR}/.venv/bin/alembic upgrade head"
 ok "DB 마이그레이션 완료 (${DATA_DIR}/sms.db)"
