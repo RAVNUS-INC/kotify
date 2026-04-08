@@ -115,9 +115,10 @@ app = FastAPI(
     redoc_url=None,
 )
 
-# ── 세션 미들웨어 ─────────────────────────────────────────────────────────────
+# ── 세션 시크릿 로드 ──────────────────────────────────────────────────────────
 # DB 테이블이 아직 없을 수 있으므로 try/except로 보호.
 # 설정이 없으면 임시 키(fallback) 사용.
+# 실제 add_middleware는 데코레이터 미들웨어들 이후에 호출 (outermost 보장).
 from app.auth.session import get_session_secret, add_session_middleware, _FALLBACK_SECRET
 
 try:
@@ -131,8 +132,6 @@ try:
 except Exception:  # noqa: BLE001 — OperationalError or similar on first boot
     from sqlalchemy.exc import OperationalError as _OE  # noqa: F401
     _session_secret = _FALLBACK_SECRET
-
-add_session_middleware(app, _session_secret)
 
 # ── 라우터 등록 ───────────────────────────────────────────────────────────────
 from app.routes.health import router as health_router
@@ -193,11 +192,24 @@ async def setup_gate(request: Request, call_next):
 # ── 미들웨어: 사용자 컨텍스트 주입 ───────────────────────────────────────────
 @app.middleware("http")
 async def inject_user_context(request: Request, call_next):
-    """모든 응답에 현재 사용자 정보를 request.state에 주입한다."""
-    sub = request.session.get("user_sub") if hasattr(request, "session") else None
+    """모든 응답에 현재 사용자 정보를 request.state에 주입한다.
+
+    SessionMiddleware보다 안쪽에서 실행되므로 scope 체크로 안전하게 접근.
+    """
+    if "session" in request.scope:
+        sub = request.session.get("user_sub")
+    else:
+        sub = None
     request.state.user_sub = sub
     response = await call_next(request)
     return response
+
+
+# ── 세션 미들웨어 등록 (반드시 마지막 — outermost 보장) ───────────────────────
+# Starlette의 add_middleware는 insert(0)이므로 가장 마지막에 등록한 것이
+# 가장 바깥쪽(첫 실행)에서 동작한다. SessionMiddleware가 outermost여야
+# inject_user_context와 setup_gate가 request.session을 안전하게 읽을 수 있다.
+add_session_middleware(app, _session_secret)
 
 
 # ── 전역 예외 핸들러 ─────────────────────────────────────────────────────────
