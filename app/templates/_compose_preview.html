@@ -1,0 +1,59 @@
+<div class="card" style="border-color: {% if can_send %}#86efac{% elif msg_error or not msg_ok %}#fca5a5{% else %}#ddd{% endif %}">
+  {% if phone_error == "stub" %}
+  <div class="alert alert-warning">
+    ⚠ phone.py가 아직 구현되지 않았습니다 (stub). 번호 검증을 사용할 수 없습니다.
+  </div>
+  {% else %}
+  <div style="margin-bottom:0.75rem">
+    <strong>번호 검증 결과</strong>
+    <div style="margin-top:0.4rem">
+      <span class="ok">✓ 유효: {{ valid_count }}명</span>
+      {% if invalid_numbers %}
+      &nbsp;
+      <span class="err">✗ 잘못된 번호: {{ invalid_numbers|length }}개</span>
+      <details style="margin-top:0.4rem">
+        <summary class="text-muted" style="cursor:pointer">잘못된 번호 목록 보기</summary>
+        <ul style="margin:0.5rem 0 0 1rem; font-family:monospace; font-size:12px; color:#991b1b">
+          {% for num in invalid_numbers %}
+          <li>{{ num }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div>
+    <strong>메시지 정보</strong>
+    <div style="margin-top:0.4rem">
+      {% if msg_ok %}
+      <span class="ok">{{ byte_len }} byte</span>
+      &nbsp;→&nbsp;
+      {% if message_type == "SMS" %}
+      <span class="badge badge-success">SMS</span>
+      <span class="text-muted">(≤ 90 byte)</span>
+      {% else %}
+      <span class="badge badge-dispatched">LMS</span>
+      <span class="text-muted">(≤ 2000 byte)</span>
+      {% endif %}
+      {% else %}
+      <span class="err">✗ {{ msg_error }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not can_send %}
+  <div class="alert alert-error" style="margin-top:0.75rem; margin-bottom:0">
+    {% if phone_error == "stub" %}
+    phone.py stub 구현 후 발송 가능합니다.
+    {% elif invalid_numbers %}
+    잘못된 번호를 수정하거나 제거한 뒤 발송하세요.
+    {% elif valid_count == 0 %}
+    유효한 수신번호가 없습니다.
+    {% elif not msg_ok %}
+    메시지 오류를 수정하세요.
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

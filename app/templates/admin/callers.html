@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}발신번호 관리 — SMS 발송 시스템{% endblock %}
+{% block content %}
+<h1 class="page-title">발신번호 관리</h1>
+
+{% if request.query_params.get("created") %}
+<div class="alert alert-success">발신번호가 추가되었습니다.</div>
+{% elif request.query_params.get("deleted") %}
+<div class="alert alert-success">발신번호가 삭제되었습니다.</div>
+{% elif request.query_params.get("error") == "duplicate" %}
+<div class="alert alert-error">이미 등록된 번호입니다.</div>
+{% elif request.query_params.get("error") == "invalid_number" %}
+<div class="alert alert-error">올바르지 않은 번호 형식입니다.</div>
+{% endif %}
+
+<!-- 추가 폼 -->
+<div class="card">
+  <div class="card-title">발신번호 추가</div>
+  <form action="/admin/callers" method="post" class="flex">
+    <div class="form-group" style="flex:1;margin-bottom:0">
+      <input type="text" name="number" placeholder="02-1234-5678 또는 0212345678" required>
+    </div>
+    <div class="form-group" style="flex:1;margin-bottom:0">
+      <input type="text" name="label" placeholder="표시 이름 (예: 대표번호)" required>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">추가</button>
+  </form>
+  <div class="form-hint" style="margin-top:0.5rem">숫자 외 문자는 자동 제거됩니다. NCP에 사전 등록된 번호만 정상 발송됩니다.</div>
+</div>
+
+<!-- 목록 -->
+<div class="card">
+  {% if callers %}
+  <table>
+    <thead>
+      <tr>
+        <th>번호</th>
+        <th>표시 이름</th>
+        <th>상태</th>
+        <th>기본</th>
+        <th>등록일</th>
+        <th>관리</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in callers %}
+      <tr>
+        <td class="mono">{{ c.number }}</td>
+        <td>{{ c.label }}</td>
+        <td>
+          {% if c.active %}
+          <span class="badge badge-success">활성</span>
+          {% else %}
+          <span class="badge badge-fail">비활성</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if c.is_default %}
+          <span class="badge badge-dispatched">기본</span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="text-muted">{{ c.created_at[:10] }}</td>
+        <td>
+          <div class="flex" style="gap:0.4rem">
+            <form action="/admin/callers/{{ c.id }}/toggle" method="post" style="display:inline">
+              <button type="submit" class="btn btn-secondary btn-sm">
+                {{ "비활성" if c.active else "활성" }}
+              </button>
+            </form>
+            {% if not c.is_default %}
+            <form action="/admin/callers/{{ c.id }}/default" method="post" style="display:inline">
+              <button type="submit" class="btn btn-secondary btn-sm">기본 지정</button>
+            </form>
+            <form action="/admin/callers/{{ c.id }}/delete" method="post" style="display:inline"
+              onsubmit="return confirm('삭제하시겠습니까?')">
+              <button type="submit" class="btn btn-danger btn-sm">삭제</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">등록된 발신번호가 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}발송 이력 — SMS 발송 시스템{% endblock %}
+{% block content %}
+<h1 class="page-title">발송 이력</h1>
+
+<!-- 필터 -->
+<div class="card">
+  <form method="get" action="/campaigns" class="flex" style="flex-wrap:wrap;gap:0.5rem">
+    <div>
+      <label style="font-size:12px;color:#666">상태</label>
+      <select name="status" style="padding:0.3rem 0.5rem;border:1px solid #ccc;border-radius:4px;font-size:13px">
+        <option value="">전체</option>
+        <option value="DISPATCHED" {% if status_filter == "DISPATCHED" %}selected{% endif %}>발송됨</option>
+        <option value="COMPLETED" {% if status_filter == "COMPLETED" %}selected{% endif %}>완료</option>
+        <option value="FAILED" {% if status_filter == "FAILED" %}selected{% endif %}>실패</option>
+        <option value="PARTIAL_FAILED" {% if status_filter == "PARTIAL_FAILED" %}selected{% endif %}>부분 실패</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:12px;color:#666">시작일</label>
+      <input type="date" name="date_from" value="{{ date_from or '' }}" style="padding:0.3rem;border:1px solid #ccc;border-radius:4px;font-size:13px">
+    </div>
+    <div>
+      <label style="font-size:12px;color:#666">종료일</label>
+      <input type="date" name="date_to" value="{{ date_to or '' }}" style="padding:0.3rem;border:1px solid #ccc;border-radius:4px;font-size:13px">
+    </div>
+    <button type="submit" class="btn btn-secondary btn-sm">검색</button>
+    <a href="/campaigns" class="btn btn-secondary btn-sm">초기화</a>
+  </form>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+    <span class="text-muted">총 {{ total_count }}건</span>
+    {% if "sender" in user_roles or "admin" in user_roles %}
+    <a href="/compose" class="btn btn-primary btn-sm">새 발송</a>
+    {% endif %}
+  </div>
+
+  {% if campaigns %}
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        {% if is_admin %}<th>작성자</th>{% endif %}
+        <th>발신번호</th>
+        <th>유형</th>
+        <th>수신자</th>
+        <th>성공 / 실패 / 대기</th>
+        <th>상태</th>
+        <th>발송 시각</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in campaigns %}
+      <tr>
+        <td><a href="/campaigns/{{ c.id }}">#{{ c.id }}</a></td>
+        {% if is_admin %}<td class="text-muted">{{ c.created_by[:8] }}…</td>{% endif %}
+        <td class="mono">{{ c.caller_number }}</td>
+        <td>
+          {% if c.message_type == "SMS" %}
+          <span class="badge badge-success">SMS</span>
+          {% else %}
+          <span class="badge badge-dispatched">LMS</span>
+          {% endif %}
+        </td>
+        <td>{{ c.total_count }}</td>
+        <td>
+          <span class="ok">{{ c.ok_count }}</span> /
+          <span class="err">{{ c.fail_count }}</span> /
+          <span style="color:#713f12">{{ c.pending_count }}</span>
+        </td>
+        <td>
+          {% if c.state == "COMPLETED" %}<span class="badge badge-completed">완료</span>
+          {% elif c.state == "FAILED" %}<span class="badge badge-failed">실패</span>
+          {% elif c.state == "PARTIAL_FAILED" %}<span class="badge badge-partial">부분실패</span>
+          {% elif c.state == "DISPATCHED" %}<span class="badge badge-dispatched">발송됨</span>
+          {% elif c.state == "DISPATCHING" %}<span class="badge badge-pending">발송중</span>
+          {% else %}<span class="badge">{{ c.state }}</span>{% endif %}
+        </td>
+        <td class="text-muted">{{ c.created_at[:16].replace("T", " ") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- 페이지네이션 -->
+  {% if total_count > per_page %}
+  <div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">이전</a>
+    {% endif %}
+    <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
+    {% if page * per_page < total_count %}
+    <a href="?page={{ page + 1 }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">다음</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <p class="text-muted">조건에 맞는 발송 이력이 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

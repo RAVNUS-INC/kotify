@@ -1,0 +1,177 @@
+"""SQLAlchemy ORM 모델 — SPEC §4 데이터 모델 구현.
+
+모든 날짜/시간은 ISO-8601 텍스트(UTC)로 저장한다.
+"""
+from __future__ import annotations
+
+from sqlalchemy import (
+    ForeignKey,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db import Base
+
+
+class User(Base):
+    """Keycloak 로그인 시 upsert 되는 사용자 레코드."""
+
+    __tablename__ = "users"
+
+    sub: Mapped[str] = mapped_column(Text, primary_key=True)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    roles: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    last_login_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    campaigns: Mapped[list[Campaign]] = relationship(
+        "Campaign", back_populates="creator", lazy="select"
+    )
+
+
+class Caller(Base):
+    """등록된 발신번호 (admin이 관리)."""
+
+    __tablename__ = "callers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    number: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Setting(Base):
+    """시스템 설정 — env 대체. 시크릿은 Fernet 암호화 후 저장."""
+
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    is_secret: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_by: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.sub"), nullable=True
+    )
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Campaign(Base):
+    """발송 캠페인 — 사용자가 "보내기"를 한 번 누른 단위."""
+
+    __tablename__ = "campaigns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_by: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.sub"), nullable=False
+    )
+    caller_number: Mapped[str] = mapped_column(Text, nullable=False)
+    message_type: Mapped[str] = mapped_column(Text, nullable=False)  # SMS | LMS
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)  # LMS 전용
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    ok_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fail_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # DRAFT | DISPATCHING | DISPATCHED | COMPLETED | PARTIAL_FAILED | FAILED
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    creator: Mapped[User] = relationship("User", back_populates="campaigns")
+    ncp_requests: Mapped[list[NcpRequest]] = relationship(
+        "NcpRequest", back_populates="campaign", lazy="select"
+    )
+    messages: Mapped[list[Message]] = relationship(
+        "Message", back_populates="campaign", lazy="select"
+    )
+
+    __table_args__ = (
+        Index("idx_campaigns_created_by", "created_by"),
+        Index("idx_campaigns_created_at", "created_at"),
+    )
+
+
+class NcpRequest(Base):
+    """NCP API 호출 단위 — campaign 1개 = ncp_request N개 (청크)."""
+
+    __tablename__ = "ncp_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("campaigns.id"), nullable=False
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_time: Mapped[str | None] = mapped_column(Text, nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    campaign: Mapped[Campaign] = relationship("Campaign", back_populates="ncp_requests")
+    messages: Mapped[list[Message]] = relationship(
+        "Message", back_populates="ncp_request", lazy="select"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "chunk_index", name="uq_ncp_requests_chunk"),
+        Index("idx_ncp_requests_request_id", "request_id"),
+    )
+
+
+class Message(Base):
+    """개별 수신자 메시지 (수신자 단위 결과 추적)."""
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("campaigns.id"), nullable=False
+    )
+    ncp_request_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("ncp_requests.id"), nullable=False
+    )
+    to_number: Mapped[str] = mapped_column(Text, nullable=False)  # 정규화 후 숫자만
+    to_number_raw: Mapped[str] = mapped_column(Text, nullable=False)  # 사용자 원본
+    message_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # NCP messageId
+    # PENDING | READY | PROCESSING | COMPLETED | TIMEOUT | UNKNOWN
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="PENDING")
+    result_status: Mapped[str | None] = mapped_column(Text, nullable=True)   # success | fail
+    result_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telco_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    complete_time: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_polled_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    poll_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    campaign: Mapped[Campaign] = relationship("Campaign", back_populates="messages")
+    ncp_request: Mapped[NcpRequest] = relationship(
+        "NcpRequest", back_populates="messages"
+    )
+
+    __table_args__ = (
+        Index("idx_messages_campaign_id", "campaign_id"),
+        Index("idx_messages_status", "status"),
+        Index("idx_messages_message_id", "message_id"),
+    )
+
+
+class AuditLog(Base):
+    """감사 로그 — 모든 중요 액션을 기록한다."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_sub: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # LOGIN | SEND | CALLER_CREATE | CALLER_DELETE | SETTING_CHANGE | ...
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    target: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    ip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)

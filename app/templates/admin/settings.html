@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}시스템 설정 — SMS 발송 시스템{% endblock %}
+{% block content %}
+<h1 class="page-title">시스템 설정</h1>
+
+{% if request.query_params.get("saved") %}
+<div class="alert alert-success">설정이 저장되었습니다.</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-title">NCP 인증 테스트</div>
+  <button class="btn btn-secondary btn-sm"
+    hx-post="/admin/settings/test-ncp"
+    hx-target="#ncp-test-result"
+    hx-swap="innerHTML">
+    현재 키로 NCP 테스트 <span class="htmx-indicator spinner"></span>
+  </button>
+  <span id="ncp-test-result" style="margin-left:0.75rem"></span>
+</div>
+
+<form action="/admin/settings" method="post">
+  <!-- Keycloak -->
+  <div class="card">
+    <div class="card-title">Keycloak 설정</div>
+    <div class="form-group">
+      <label>Issuer URL</label>
+      <input type="text" name="keycloak_issuer" value="{{ public_settings.get('keycloak.issuer', '') }}" placeholder="https://keycloak.example.com/realms/sms-sys">
+    </div>
+    <div class="form-group">
+      <label>Client ID</label>
+      <input type="text" name="keycloak_client_id" value="{{ public_settings.get('keycloak.client_id', '') }}" placeholder="sms-sys">
+    </div>
+    <div class="form-group">
+      <label>Client Secret</label>
+      <input type="password" name="keycloak_client_secret" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('keycloak.client_secret', '') }})">
+      <div class="form-hint">빈 값이면 변경되지 않습니다.</div>
+    </div>
+  </div>
+
+  <!-- NCP -->
+  <div class="card">
+    <div class="card-title">NCP SENS 설정</div>
+    <div class="form-group">
+      <label>Access Key</label>
+      <input type="text" name="ncp_access_key" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.access_key', '') }})">
+      <div class="form-hint">빈 값이면 변경되지 않습니다.</div>
+    </div>
+    <div class="form-group">
+      <label>Secret Key</label>
+      <input type="password" name="ncp_secret_key" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.secret_key', '') }})">
+    </div>
+    <div class="form-group">
+      <label>Service ID</label>
+      <input type="text" name="ncp_service_id" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.service_id', '') }})">
+    </div>
+  </div>
+
+  <!-- 앱 설정 -->
+  <div class="card">
+    <div class="card-title">앱 설정</div>
+    <div class="form-group">
+      <label>공개 URL</label>
+      <input type="text" name="app_public_url" value="{{ public_settings.get('app.public_url', '') }}" placeholder="https://sms.example.com">
+    </div>
+    <div class="form-group">
+      <label>세션 시크릿</label>
+      <input type="password" name="session_secret" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('session.secret', '') }})">
+      <div class="form-hint">변경 시 모든 사용자 세션이 만료됩니다.</div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">설정 저장</button>
+</form>
+{% endblock %}

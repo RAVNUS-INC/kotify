@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}캠페인 #{{ campaign.id }} — SMS 발송 시스템{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1 class="page-title" style="margin-bottom:0">캠페인 #{{ campaign.id }}</h1>
+  <a href="/campaigns" class="btn btn-secondary btn-sm">← 목록</a>
+</div>
+
+<!-- 기본 정보 -->
+<div class="card">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem">
+    <div>
+      <div class="text-muted">발신번호</div>
+      <div class="mono" style="font-size:15px">{{ campaign.caller_number }}</div>
+    </div>
+    <div>
+      <div class="text-muted">유형</div>
+      <div>
+        {% if campaign.message_type == "SMS" %}<span class="badge badge-success">SMS</span>
+        {% else %}<span class="badge badge-dispatched">LMS</span>{% endif %}
+      </div>
+    </div>
+    <div>
+      <div class="text-muted">발송 시각</div>
+      <div>{{ campaign.created_at[:16].replace("T", " ") }} UTC</div>
+    </div>
+    <div>
+      <div class="text-muted">완료 시각</div>
+      <div>{{ campaign.completed_at[:16].replace("T", " ") ~ " UTC" if campaign.completed_at else "—" }}</div>
+    </div>
+    <div>
+      <div class="text-muted">상태</div>
+      <div>
+        {% if campaign.state == "COMPLETED" %}<span class="badge badge-completed">완료</span>
+        {% elif campaign.state == "FAILED" %}<span class="badge badge-failed">실패</span>
+        {% elif campaign.state == "PARTIAL_FAILED" %}<span class="badge badge-partial">부분 실패</span>
+        {% elif campaign.state == "DISPATCHED" %}<span class="badge badge-dispatched">발송됨 (폴링 중)</span>
+        {% elif campaign.state == "DISPATCHING" %}<span class="badge badge-pending">발송 중</span>
+        {% else %}<span class="badge">{{ campaign.state }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 본문 -->
+<div class="card">
+  <div class="card-title">메시지 본문</div>
+  <pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;background:#f8f8f8;padding:0.75rem;border-radius:4px">{{ campaign.content }}</pre>
+</div>
+
+<!-- 진행률 -->
+<div class="card"
+  {% if campaign.state in ("DISPATCHED", "DISPATCHING") %}
+  hx-get="/campaigns/{{ campaign.id }}"
+  hx-trigger="every 5s"
+  hx-swap="outerHTML"
+  {% endif %}
+>
+  <div class="card-title">
+    진행 현황
+    {% if campaign.state in ("DISPATCHED", "DISPATCHING") %}
+    <span class="text-muted" style="font-size:11px;font-weight:normal">5초마다 자동 갱신</span>
+    {% endif %}
+  </div>
+
+  {% set total = campaign.total_count %}
+  {% set done = campaign.ok_count + campaign.fail_count %}
+  {% set pct = (done / total * 100) | int if total > 0 else 0 %}
+
+  <div style="margin-bottom:0.5rem">
+    <span style="font-size:1.1rem;font-weight:600">{{ done }} / {{ total }}</span>
+    &nbsp;
+    <span class="ok">✓ {{ campaign.ok_count }}</span>
+    &nbsp;
+    <span class="err">✗ {{ campaign.fail_count }}</span>
+    &nbsp;
+    <span style="color:#713f12">⏳ {{ campaign.pending_count }}</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-fill" style="width: {{ pct }}%"></div>
+  </div>
+  <div class="text-muted" style="margin-top:0.25rem">{{ pct }}%</div>
+
+  <div style="margin-top:0.75rem">
+    <button class="btn btn-secondary btn-sm"
+      hx-post="/campaigns/{{ campaign.id }}/refresh"
+      hx-target="#refresh-result"
+      hx-swap="innerHTML">
+      지금 새로고침 <span class="htmx-indicator spinner"></span>
+    </button>
+    <span id="refresh-result" style="margin-left:0.5rem"></span>
+  </div>
+</div>
+
+<!-- 수신자 결과 -->
+<div class="card">
+  <div class="card-title">수신자 결과</div>
+  <div id="recipients-table"
+    hx-get="/campaigns/{{ campaign.id }}/recipients"
+    hx-trigger="load"
+    hx-swap="innerHTML">
+    <p class="text-muted">로딩 중...</p>
+  </div>
+</div>
+{% endblock %}

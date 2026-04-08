@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}새 발송 — SMS 발송 시스템{% endblock %}
+{% block content %}
+<h1 class="page-title">신규 공지 발송</h1>
+
+{% if request.query_params.get("error") %}
+<div class="alert alert-error">
+  오류: {{ request.query_params.get("error") }}
+</div>
+{% endif %}
+
+<div class="card">
+  <form id="compose-form" action="/compose/send" method="post">
+    <div class="form-group">
+      <label for="caller_id">발신번호</label>
+      <select name="caller_id" id="caller_id" required>
+        {% for c in callers %}
+        <option value="{{ c.id }}" {% if default_caller and c.id == default_caller.id %}selected{% endif %}>
+          {{ c.label }} ({{ c.number }})
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="recipients_text">수신자 번호 <span class="text-muted">(한 줄에 한 번호 또는 콤마 구분)</span></label>
+      <textarea name="recipients_text" id="recipients_text" rows="6"
+        placeholder="010-1234-5678&#10;01087654321&#10;+82-10-9999-8888"
+        hx-post="/compose/preview"
+        hx-trigger="change delay:800ms"
+        hx-target="#preview-result"
+        hx-include="#compose-form"
+        hx-swap="innerHTML"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="content">본문</label>
+      <textarea name="content" id="content" rows="5"
+        placeholder="메시지를 입력하세요 (SMS: 90byte 이하, LMS: 2000byte 이하)"
+        hx-post="/compose/preview"
+        hx-trigger="keyup delay:600ms"
+        hx-target="#preview-result"
+        hx-include="#compose-form"
+        hx-swap="innerHTML"></textarea>
+    </div>
+
+    <!-- 미리보기 결과 영역 -->
+    <div id="preview-result" style="margin-bottom:1rem">
+      {% if preview %}
+        {% include "_compose_preview.html" %}
+      {% endif %}
+    </div>
+
+    <div class="flex">
+      <button type="button" class="btn btn-secondary"
+        hx-post="/compose/preview"
+        hx-target="#preview-result"
+        hx-include="#compose-form"
+        hx-swap="innerHTML">
+        미리보기 <span class="htmx-indicator spinner"></span>
+      </button>
+      <button type="submit" class="btn btn-primary" id="send-btn">
+        발송하기
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

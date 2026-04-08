@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}감사 로그 — SMS 발송 시스템{% endblock %}
+{% block content %}
+<h1 class="page-title">감사 로그</h1>
+
+<div class="card">
+  <div class="text-muted" style="margin-bottom:0.75rem">총 {{ total_count }}건</div>
+  {% if logs %}
+  <table>
+    <thead>
+      <tr>
+        <th>시각</th>
+        <th>사용자</th>
+        <th>액션</th>
+        <th>대상</th>
+        <th>상세</th>
+        <th>IP</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td class="text-muted mono">{{ log.created_at[:16].replace("T", " ") }}</td>
+        <td class="mono text-muted">{{ log.actor_sub[:12] ~ "…" if log.actor_sub else "system" }}</td>
+        <td>
+          <span class="badge
+            {% if log.action == "LOGIN" %}badge-success
+            {% elif log.action == "LOGOUT" %}badge-pending
+            {% elif log.action == "SEND" %}badge-dispatched
+            {% elif "DELETE" in log.action %}badge-fail
+            {% else %}{% endif %}
+          ">{{ log.action }}</span>
+        </td>
+        <td class="text-muted">{{ log.target or "—" }}</td>
+        <td class="text-muted mono" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">
+          {{ log.detail or "" }}
+        </td>
+        <td class="text-muted mono">{{ log.ip or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if total_count > per_page %}
+  <div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}">이전</a>
+    {% endif %}
+    <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
+    {% if page * per_page < total_count %}
+    <a href="?page={{ page + 1 }}">다음</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <p class="text-muted">감사 로그가 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

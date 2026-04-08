@@ -1,0 +1,156 @@
+"""인증 라우트 — Keycloak OIDC Authorization Code Flow."""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
+
+from app.auth.oidc import get_oauth_client, parse_user_from_claims
+from app.db import get_db
+from app.models import User
+from app.services import audit
+
+router = APIRouter(prefix="/auth")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@router.get("/login")
+async def login(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    """Keycloak 인증 페이지로 리다이렉트."""
+    oauth = get_oauth_client(db)
+    if oauth is None:
+        # 설정 미완료 → setup으로
+        return RedirectResponse("/setup", status_code=303)
+
+    keycloak = oauth.create_client("keycloak")
+    redirect_uri = str(request.url_for("auth_callback"))
+    return await keycloak.authorize_redirect(request, redirect_uri)
+
+
+@router.get("/callback", name="auth_callback")
+async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    """OIDC 콜백 — code 교환, ID 토큰 검증, 세션 저장."""
+    oauth = get_oauth_client(db)
+    if oauth is None:
+        return RedirectResponse("/setup", status_code=303)
+
+    keycloak = oauth.create_client("keycloak")
+    try:
+        token = await keycloak.authorize_access_token(request)
+    except Exception:
+        return RedirectResponse("/auth/login?error=callback_failed", status_code=303)
+
+    # ID 토큰에서 사용자 정보 추출
+    claims = token.get("userinfo") or token.get("id_token") or {}
+    if not claims:
+        try:
+            claims = await keycloak.userinfo(token=token)
+        except Exception:
+            claims = {}
+
+    user_info = parse_user_from_claims(claims)
+    sub = user_info["sub"]
+
+    if not sub:
+        return RedirectResponse("/auth/login?error=no_sub", status_code=303)
+
+    # 첫 사용자 → admin 역할 자동 부여
+    from app.security.settings_store import SettingsStore
+    store = SettingsStore(db)
+    pending_first_admin = store.get("setup.pending_first_admin", "false") == "true"
+
+    roles = user_info["roles"]
+    if pending_first_admin:
+        if "admin" not in roles:
+            roles = ["admin"] + roles
+        store.set("setup.pending_first_admin", "false", is_secret=False, updated_by=sub)
+        db.flush()
+
+    now = _now_iso()
+    roles_json = json.dumps(roles, ensure_ascii=False)
+
+    # users 테이블 upsert
+    user = db.get(User, sub)
+    if user is None:
+        user = User(
+            sub=sub,
+            email=user_info["email"],
+            name=user_info["name"],
+            roles=roles_json,
+            created_at=now,
+            last_login_at=now,
+        )
+        db.add(user)
+    else:
+        user.email = user_info["email"]
+        user.name = user_info["name"]
+        # 기존 역할 보존 (DB 역할 우선, Keycloak 역할 병합)
+        try:
+            existing_roles = set(json.loads(user.roles))
+        except (json.JSONDecodeError, TypeError):
+            existing_roles = set()
+        merged = existing_roles | set(roles)
+        user.roles = json.dumps(list(merged), ensure_ascii=False)
+        user.last_login_at = now
+
+    db.flush()
+
+    # 감사 로그
+    ip = request.client.host if request.client else None
+    audit.log(
+        db,
+        actor_sub=sub,
+        action=audit.LOGIN,
+        detail={"email": user_info["email"]},
+        ip=ip,
+    )
+    db.commit()
+
+    # 세션 저장
+    request.session["user_sub"] = sub
+    request.session["user_email"] = user_info["email"]
+    request.session["user_name"] = user_info["name"]
+    request.session["user_roles"] = user.roles
+
+    return RedirectResponse("/", status_code=303)
+
+
+@router.post("/logout")
+async def logout(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    """세션 클리어 + Keycloak end_session으로 리다이렉트."""
+    sub = request.session.get("user_sub")
+
+    if sub:
+        ip = request.client.host if request.client else None
+        audit.log(db, actor_sub=sub, action=audit.LOGOUT, ip=ip)
+        db.commit()
+
+    request.session.clear()
+
+    # Keycloak end_session
+    oauth = get_oauth_client(db)
+    if oauth:
+        try:
+            keycloak = oauth.create_client("keycloak")
+            meta = await keycloak.load_server_metadata()
+            end_session_url = meta.get("end_session_endpoint", "")
+            if end_session_url:
+                from app.config import settings as app_settings
+                from app.security.settings_store import SettingsStore
+                store = SettingsStore(db)
+                public_url = store.get("app.public_url", "")
+                post_logout_uri = f"{public_url}/" if public_url else "/"
+                return RedirectResponse(
+                    f"{end_session_url}?post_logout_redirect_uri={post_logout_uri}",
+                    status_code=303,
+                )
+        except Exception:
+            pass
+
+    return RedirectResponse("/auth/login", status_code=303)
