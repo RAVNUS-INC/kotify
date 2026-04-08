@@ -4,7 +4,6 @@ from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_mode
@@ -15,9 +14,9 @@ from app.services.setup_service import (
     generate_setup_token,
     verify_setup_token,
 )
+from app.web import templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/setup", response_class=HTMLResponse)

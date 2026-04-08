@@ -5,7 +5,6 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -13,9 +12,9 @@ from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
 from app.models import Campaign, Message, User
 from app.security.csrf import verify_csrf
+from app.web import templates
 
 router = APIRouter(prefix="/campaigns")
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _is_admin(user: User) -> bool:

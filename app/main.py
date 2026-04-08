@@ -7,16 +7,15 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.db import SessionLocal, engine
 from app.models import Base
 from app.ncp.client import NCPAuthError
-from app.security.csrf import get_csrf_token
 from app.security.crypto import load_or_create_master_key
 from app.services.poller import Poller
+from app.web import templates
 
 logger = logging.getLogger(__name__)
 
@@ -149,13 +148,6 @@ app.include_router(dashboard_router)
 app.include_router(compose_router)
 app.include_router(campaigns_router)
 app.include_router(admin_router)
-
-# ── Jinja2 Templates (전역) ───────────────────────────────────────────────────
-templates = Jinja2Templates(directory="app/templates")
-
-# csrf_token을 모든 템플릿에서 {{ csrf_token(request) }} 로 사용 가능하게 등록
-templates.env.globals["csrf_token"] = get_csrf_token
-
 
 # ── 미들웨어: setup gate — 부트스트랩 미완료 시 /setup 으로 (#5) ──────────────
 @app.middleware("http")

@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -16,9 +15,9 @@ from app.models import AuditLog, Caller, User
 from app.security.csrf import verify_csrf
 from app.security.settings_store import SettingsStore
 from app.services import audit
+from app.web import templates
 
 router = APIRouter(prefix="/admin")
-templates = Jinja2Templates(directory="app/templates")
 
 _admin_dep = require_role("admin")
 

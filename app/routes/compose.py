@@ -5,7 +5,6 @@ import json
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,9 +13,9 @@ from app.db import get_db
 from app.models import Caller, User
 from app.security.csrf import verify_csrf
 from app.services.compose import validate_message, validate_phone_list
+from app.web import templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 _sender_dep = require_role("sender", "admin")
 
