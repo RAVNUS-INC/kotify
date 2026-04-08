@@ -10,7 +10,7 @@ User=sms
 Group=sms
 WorkingDirectory=/opt/sms
 ExecStartPre=/opt/sms/.venv/bin/alembic -c /opt/sms/alembic.ini upgrade head
-ExecStart=/opt/sms/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --workers 1
+ExecStart=/opt/sms/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1
 
 # 재시작 정책
 Restart=on-failure

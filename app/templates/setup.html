@@ -22,7 +22,7 @@
     .form-hint { font-size: 12px; color: #888; margin-top: 0.2rem; }
     .token-box { background: #f8f8f8; border: 1px solid #ddd; border-radius: 4px; padding: 0.75rem; font-family: monospace; font-size: 13px; word-break: break-all; margin-bottom: 1rem; }
     .token-note { font-size: 12px; color: #666; margin-bottom: 1rem; }
-    .btn-row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+    .btn-row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem; }
     .btn { display: inline-block; padding: 0.5rem 1.25rem; border-radius: 4px; border: 1px solid transparent; cursor: pointer; font-size: 14px; font-family: inherit; }
     .btn-primary { background: #2563eb; color: #fff; }
     .btn-primary:hover { background: #1d4ed8; }
@@ -38,109 +38,130 @@
 </head>
 <body>
 <div class="setup-box">
-  <h1>⚙️ 초기 설정</h1>
+  <h1>초기 설정</h1>
   <p class="subtitle">SMS 발송 시스템 최초 설정 마법사입니다. 아래 정보를 입력하고 설정을 완료하세요.</p>
 
   {% if error %}
   <div class="alert-error">오류: {{ error }}</div>
   {% endif %}
 
-  <!-- Step 1: 토큰 확인 -->
-  <div class="section">
-    <div class="section-title">1단계: 관리자 토큰 확인</div>
-    <p class="token-note">서버의 토큰 파일에서 값을 확인하세요:</p>
-    <div class="token-box">{{ token }}</div>
-    <p class="form-hint">파일 위치: {{ settings_path if settings_path is defined else "설정된 경로" }}</p>
-    <form hx-post="/setup/verify-token" hx-target="#token-result" hx-swap="innerHTML" class="btn-row" style="margin-top:0.75rem">
-      <input type="text" name="token" placeholder="토큰 입력" style="flex:1; padding:0.5rem 0.75rem; border:1px solid #ccc; border-radius:4px;" required>
-      <button type="submit" class="btn btn-secondary">확인
-        <span class="htmx-indicator">⏳</span>
-      </button>
-    </form>
-    <div id="token-result" style="margin-top:0.5rem"></div>
-  </div>
-
-  <!-- Step 2: Keycloak 설정 -->
-  <div class="section">
-    <div class="section-title">2단계: Keycloak 설정</div>
-    <div id="kc-test-result"></div>
-    <form hx-post="/setup/test-keycloak" hx-target="#kc-test-result" hx-swap="innerHTML" hx-include="#kc-issuer" style="margin-bottom:0.75rem">
-      <div class="form-group">
-        <label for="kc-issuer">Issuer URL</label>
-        <input type="text" id="kc-issuer" name="issuer" placeholder="https://keycloak.example.com/realms/sms-sys" value="">
-        <div class="form-hint">예: https://keycloak.example.com/realms/sms-sys</div>
-      </div>
-      <button type="submit" class="btn btn-secondary btn-sm">연결 테스트
-        <span class="htmx-indicator">⏳</span>
-      </button>
-    </form>
-  </div>
-
-  <!-- Step 3: NCP 설정 -->
-  <div class="section">
-    <div class="section-title">3단계: NCP SENS 설정</div>
-    <div id="ncp-test-result"></div>
-    <form hx-post="/setup/test-ncp" hx-target="#ncp-test-result" hx-swap="innerHTML" hx-include="#ncp-access-key, #ncp-secret-key, #ncp-service-id" style="margin-bottom:0.75rem">
-      <div class="form-group">
-        <label for="ncp-access-key">Access Key</label>
-        <input type="text" id="ncp-access-key" name="access_key" placeholder="NCP IAM Access Key">
-      </div>
-      <div class="form-group">
-        <label for="ncp-secret-key">Secret Key</label>
-        <input type="password" id="ncp-secret-key" name="secret_key" placeholder="NCP IAM Secret Key">
-      </div>
-      <div class="form-group">
-        <label for="ncp-service-id">Service ID</label>
-        <input type="text" id="ncp-service-id" name="service_id" placeholder="SENS 서비스 ID">
-      </div>
-      <button type="submit" class="btn btn-secondary btn-sm">NCP 연결 테스트
-        <span class="htmx-indicator">⏳</span>
-      </button>
-    </form>
-  </div>
-
-  <!-- 최종 저장 -->
   <form action="/setup/complete" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <input type="hidden" name="token" id="final-token" value="{{ token }}">
 
-    <div class="form-group">
-      <label for="final-issuer">Keycloak Issuer</label>
-      <input type="text" id="final-issuer" name="keycloak_issuer" placeholder="https://keycloak.example.com/realms/sms-sys" required>
-    </div>
-    <div class="form-group">
-      <label for="final-client-id">Client ID</label>
-      <input type="text" id="final-client-id" name="keycloak_client_id" value="sms-sys" required>
-    </div>
-    <div class="form-group">
-      <label for="final-client-secret">Client Secret</label>
-      <input type="password" id="final-client-secret" name="keycloak_client_secret" required>
-    </div>
-    <div class="form-group">
-      <label for="final-ncp-ak">NCP Access Key</label>
-      <input type="text" id="final-ncp-ak" name="ncp_access_key" required>
-    </div>
-    <div class="form-group">
-      <label for="final-ncp-sk">NCP Secret Key</label>
-      <input type="password" id="final-ncp-sk" name="ncp_secret_key" required>
-    </div>
-    <div class="form-group">
-      <label for="final-ncp-sid">NCP Service ID</label>
-      <input type="text" id="final-ncp-sid" name="ncp_service_id" required>
-    </div>
-    <div class="form-group">
-      <label for="final-url">공개 URL (선택)</label>
-      <input type="text" id="final-url" name="app_public_url" placeholder="https://sms.example.com">
+    <!-- Step 1: 토큰 확인 -->
+    <div class="section">
+      <div class="section-title">1단계: 관리자 토큰 확인</div>
+      <p class="token-note">
+        <strong>보안상 토큰은 화면에 표시되지 않습니다.</strong><br>
+        CT 콘솔(또는 SSH)에서 다음 명령으로 토큰을 확인한 뒤 아래에 입력하세요:
+      </p>
+      <div class="token-box"><code>cat /var/lib/sms/setup.token</code></div>
+      <p class="form-hint">CT 콘솔에서 실행 → 출력된 32자 hex 문자열을 복사 → 아래 입력란에 붙여넣기</p>
+      <div class="form-group" style="margin-top:0.75rem">
+        <label for="field-token">Setup Token</label>
+        <input type="text" id="field-token" name="token" placeholder="setup token 붙여넣기" autocomplete="off" required>
+      </div>
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary"
+                hx-post="/setup/verify-token"
+                hx-target="#token-result"
+                hx-swap="innerHTML"
+                hx-include="#field-token"
+                hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>토큰 확인
+          <span class="htmx-indicator">...</span>
+        </button>
+      </div>
+      <div id="token-result" style="margin-top:0.5rem"></div>
     </div>
 
-    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:1rem">설정 완료 및 로그인</button>
+    <!-- Step 2: Keycloak 설정 -->
+    <div class="section">
+      <div class="section-title">2단계: Keycloak 설정</div>
+      <div class="form-group">
+        <label for="field-keycloak-issuer">Issuer URL</label>
+        <input type="text" id="field-keycloak-issuer" name="keycloak_issuer"
+               placeholder="https://keycloak.example.com/realms/sms-sys" required>
+        <div class="form-hint">예: https://keycloak.example.com/realms/sms-sys</div>
+      </div>
+      <div class="form-group">
+        <label for="field-keycloak-client-id">Client ID</label>
+        <input type="text" id="field-keycloak-client-id" name="keycloak_client_id" value="sms-sys" required>
+      </div>
+      <div class="form-group">
+        <label for="field-keycloak-client-secret">Client Secret</label>
+        <input type="password" id="field-keycloak-client-secret" name="keycloak_client_secret" required>
+      </div>
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary"
+                hx-post="/setup/test-keycloak"
+                hx-target="#kc-test-result"
+                hx-swap="innerHTML"
+                hx-include="#field-keycloak-issuer"
+                hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>연결 테스트
+          <span class="htmx-indicator">...</span>
+        </button>
+      </div>
+      <div id="kc-test-result" style="margin-top:0.5rem"></div>
+    </div>
+
+    <!-- Step 3: NCP SENS 설정 -->
+    <div class="section">
+      <div class="section-title">3단계: NCP SENS 설정</div>
+      <div class="form-group">
+        <label for="field-ncp-access-key">Access Key</label>
+        <input type="text" id="field-ncp-access-key" name="ncp_access_key"
+               placeholder="NCP IAM Access Key" required>
+      </div>
+      <div class="form-group">
+        <label for="field-ncp-secret-key">Secret Key</label>
+        <input type="password" id="field-ncp-secret-key" name="ncp_secret_key"
+               placeholder="NCP IAM Secret Key" required>
+      </div>
+      <div class="form-group">
+        <label for="field-ncp-service-id">Service ID</label>
+        <input type="text" id="field-ncp-service-id" name="ncp_service_id"
+               placeholder="ncp:sms:kr:..." required>
+      </div>
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary"
+                hx-post="/setup/test-ncp"
+                hx-target="#ncp-test-result"
+                hx-swap="innerHTML"
+                hx-include="#field-ncp-access-key, #field-ncp-secret-key, #field-ncp-service-id"
+                hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>NCP 인증 테스트
+          <span class="htmx-indicator">...</span>
+        </button>
+      </div>
+      <div id="ncp-test-result" style="margin-top:0.5rem"></div>
+    </div>
+
+    <!-- Step 4: 첫 관리자 + 공개 URL -->
+    <div class="section">
+      <div class="section-title">4단계: 첫 관리자 + 공개 URL</div>
+      <div class="form-group">
+        <label for="field-first-admin-email">첫 관리자 이메일</label>
+        <input type="email" id="field-first-admin-email" name="first_admin_email" required>
+        <div class="form-hint">Keycloak 계정 이메일과 정확히 일치해야 합니다. 이 이메일로 로그인한 사용자에게 자동으로 admin 권한이 부여됩니다.</div>
+      </div>
+      <div class="form-group">
+        <label for="field-app-public-url">공개 URL</label>
+        <input type="url" id="field-app-public-url" name="app_public_url"
+               value="https://sms.example.com" required>
+      </div>
+    </div>
+
+    <!-- Step 5: 최종 저장 -->
+    <div class="section">
+      <button type="submit" class="btn btn-primary" style="width:100%">설정 완료 및 로그인</button>
+    </div>
+
   </form>
 </div>
-  <script>
-    document.body.addEventListener('htmx:configRequest', function(evt) {
-      var token = document.querySelector('meta[name="csrf-token"]');
-      if (token) { evt.detail.headers['X-CSRF-Token'] = token.content; }
-    });
-  </script>
+<script>
+  document.body.addEventListener('htmx:configRequest', function(evt) {
+    var token = document.querySelector('meta[name="csrf-token"]');
+    if (token) { evt.detail.headers['X-CSRF-Token'] = token.content; }
+  });
+</script>
 </body>
 </html>
