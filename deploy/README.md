@@ -1,6 +1,6 @@
 # 배포 가이드
 
-사내 SMS 발송 시스템 Proxmox LXC CT 배포 절차 요약입니다.
+kotify Proxmox LXC CT 배포 절차 요약입니다.
 
 ---
 
@@ -14,7 +14,7 @@
 | CPU | 1 vCPU |
 | RAM | 1 GB |
 | Disk | 8 GB |
-| 네트워크 | 사내망 IP 할당 (외부 인바운드 차단) |
+| 네트워크 | IP 할당 (아웃바운드 허용 필요) |
 
 CT 생성 후 **아웃바운드 허용 필요**:
 - `sens.apigw.ntruss.com:443` (NCP SENS API)
@@ -29,13 +29,13 @@ CT 콘솔에서 root로 실행합니다.
 
 **방법 A — curl pipe (git clone 불필요):**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/RAVNUS-INC/sms-sys/main/deploy/ct-bootstrap.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/RAVNUS-INC/kotify/main/deploy/ct-bootstrap.sh)
 ```
 
 **방법 B — git clone 후 직접 실행:**
 ```bash
-git clone https://github.com/RAVNUS-INC/sms-sys.git /opt/sms
-bash /opt/sms/deploy/ct-bootstrap.sh
+git clone https://github.com/RAVNUS-INC/kotify.git /opt/kotify
+bash /opt/kotify/deploy/ct-bootstrap.sh
 ```
 
 스크립트가 자동으로 수행하는 작업:
@@ -53,7 +53,7 @@ bash /opt/sms/deploy/ct-bootstrap.sh
 ### 3. setup.token 확인
 
 ```bash
-cat /var/lib/sms/setup.token
+cat /var/lib/kotify/setup.token
 ```
 
 이 토큰은 Setup Wizard 첫 단계에서 입력합니다. 메모해 두세요.
@@ -91,7 +91,7 @@ Wizard 단계:
 Wizard 완료 직후 반드시 수행:
 
 ```bash
-cat /var/lib/sms/master.key
+cat /var/lib/kotify/master.key
 ```
 
 → 1Password, 사내 비밀 저장소 등 **DB와 분리된 안전한 위치**에 보관.
@@ -125,7 +125,7 @@ claudedocs/E2E-CHECKLIST.md
 | 파일 | 설명 |
 |---|---|
 | `ct-bootstrap.sh` | CT 초기 설정 자동화 스크립트 |
-| `sms.service` | systemd 서비스 유닛 파일 |
+| `kotify.service` | systemd 서비스 유닛 파일 |
 | `sms-backup.sh` | SQLite DB 일일 백업 스크립트 |
 | `sms-backup.cron` | 백업 cron 설정 (`/etc/cron.d/`에 복사) |
 | `npm-config.md` | NPM Proxy Host 설정 가이드 |
@@ -136,19 +136,19 @@ claudedocs/E2E-CHECKLIST.md
 
 ```bash
 # 서비스 상태
-systemctl status sms
+systemctl status kotify
 
 # 로그 확인
-journalctl -u sms -f
-tail -f /var/log/sms/stdout.log
-tail -f /var/log/sms/stderr.log
+journalctl -u kotify -f
+tail -f /var/log/kotify/stdout.log
+tail -f /var/log/kotify/stderr.log
 
 # 서비스 재시작
-systemctl restart sms
+systemctl restart kotify
 
 # 백업 수동 실행
-sudo -u sms /opt/sms/deploy/sms-backup.sh
+sudo -u kotify /opt/kotify/deploy/sms-backup.sh
 
 # DB 직접 조회
-sqlite3 /var/lib/sms/sms.db ".tables"
+sqlite3 /var/lib/kotify/sms.db ".tables"
 ```

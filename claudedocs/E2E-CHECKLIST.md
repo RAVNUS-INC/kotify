@@ -12,7 +12,7 @@
 - [ ] NCP 콘솔에서 SENS Project 생성
 - [ ] serviceId 확보 (형식 예: `ncp:sms:kr:XXXXXXXXXX:sens`)
 - [ ] Sub Account에서 Access Key + Secret Key 발급
-- [ ] 발신번호 등록 신청: `02-1234-5678`, `02-1234-5678`, `02-1234-5678`
+- [ ] 발신번호 등록 신청 (NCP 콘솔 → SENS → 발신번호 관리)
 - [ ] 영업일 3-4일 후 발신번호 승인 확인 (NCP 콘솔 → SENS → 발신번호 관리)
 
 ---
@@ -49,7 +49,7 @@
   ```
 - [ ] setup.token 메모:
   ```bash
-  cat /var/lib/sms/setup.token
+  cat /var/lib/kotify/setup.token
   ```
 
 ---
@@ -73,13 +73,13 @@
 - [ ] Step 1: setup.token 입력 → 검증 성공 확인
 - [ ] Step 2: Keycloak 정보 입력 (Issuer URL, Client ID, Client Secret) → "연결 테스트" 성공
 - [ ] Step 3: NCP 정보 입력 (Access Key, Secret Key, Service ID) → "인증 테스트" 성공
-- [ ] Step 4: 발신번호 목록 확인 (02-1234-5678, 02-1234-5678, 02-1234-5678)
+- [ ] Step 4: 발신번호 목록 확인 (등록된 발신번호 목록)
 - [ ] Step 5: Keycloak 로그인 (본인 계정)
 - [ ] 로그인 후 Dashboard 진입 확인
 - [ ] 본인 계정에 `admin` 역할 자동 부여 확인 (Keycloak 콘솔 또는 `/admin` 접근 가능 여부)
-- [ ] `/var/lib/sms/setup.token` 파일이 자동 삭제되었는지 확인:
+- [ ] `/var/lib/kotify/setup.token` 파일이 자동 삭제되었는지 확인:
   ```bash
-  ls /var/lib/sms/setup.token  # "No such file" 이어야 함
+  ls /var/lib/kotify/setup.token  # "No such file" 이어야 함
   ```
 - [ ] `/setup` 재접근 시 404 응답 확인
 
@@ -87,9 +87,9 @@
 
 ## 6. master.key 백업
 
-- [ ] `/var/lib/sms/master.key` 내용을 안전한 위치에 백업:
+- [ ] `/var/lib/kotify/master.key` 내용을 안전한 위치에 백업:
   ```bash
-  cat /var/lib/sms/master.key
+  cat /var/lib/kotify/master.key
   ```
   → 1Password, 사내 비밀 저장소 등 **DB와 분리된** 위치에 저장
 - [ ] 백업 위치를 팀 내에 문서화 (담당자 2명 이상 접근 가능하도록)
@@ -162,7 +162,7 @@
 - [ ] (분기 1회 권장) 별도 CT에서 백업 복원 후 데이터 동일성 확인:
   ```bash
   # 별도 CT에서
-  cp sms-YYYYMMDD.db /var/lib/sms/sms.db
+  cp sms-YYYYMMDD.db /var/lib/kotify/sms.db
   systemctl start sms
   # 이력 조회, 로그인 등 정상 동작 확인
   ```

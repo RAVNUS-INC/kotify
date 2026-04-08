@@ -1,4 +1,4 @@
-"""초기 스키마 생성 + 발신번호 시드 데이터.
+"""초기 스키마 생성.
 
 Revision ID: 0001
 Revises:
@@ -6,7 +6,6 @@ Create Date: 2026-04-08
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -16,8 +15,6 @@ revision: str = "0001"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
-
-_NOW = datetime.now(timezone.utc).isoformat()
 
 
 def upgrade() -> None:
@@ -41,41 +38,6 @@ def upgrade() -> None:
         sa.Column("active", sa.Integer, nullable=False, server_default="1"),
         sa.Column("is_default", sa.Integer, nullable=False, server_default="0"),
         sa.Column("created_at", sa.Text, nullable=False),
-    )
-
-    # 발신번호 시드 (SPEC §4 / §16 #4)
-    op.bulk_insert(
-        sa.table(
-            "callers",
-            sa.column("number", sa.Text),
-            sa.column("label", sa.Text),
-            sa.column("active", sa.Integer),
-            sa.column("is_default", sa.Integer),
-            sa.column("created_at", sa.Text),
-        ),
-        [
-            {
-                "number": "0212345678",
-                "label": "대표번호 (기본)",
-                "active": 1,
-                "is_default": 1,
-                "created_at": _NOW,
-            },
-            {
-                "number": "0212345678",
-                "label": "예비 1",
-                "active": 1,
-                "is_default": 0,
-                "created_at": _NOW,
-            },
-            {
-                "number": "0212345678",
-                "label": "예비 2",
-                "active": 1,
-                "is_default": 0,
-                "created_at": _NOW,
-            },
-        ],
     )
 
     # ── settings ─────────────────────────────────────────────────────────────

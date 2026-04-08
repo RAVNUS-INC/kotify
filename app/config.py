@@ -32,13 +32,13 @@ class Settings(BaseSettings):
     port: int = 8080
 
     # DB 경로 (운영)
-    db_path: Path = Path("/var/lib/sms/sms.db")
+    db_path: Path = Path("/var/lib/kotify/sms.db")
 
     # 마스터 키 경로 (운영)
-    master_key_path: Path = Path("/var/lib/sms/master.key")
+    master_key_path: Path = Path("/var/lib/kotify/master.key")
 
     # Setup 토큰 경로 (운영)
-    setup_token_path: Path = Path("/var/lib/sms/setup.token")
+    setup_token_path: Path = Path("/var/lib/kotify/setup.token")
 
     def model_post_init(self, __context: object) -> None:
         """개발 모드 시 경로를 ./var/* 로 교체."""

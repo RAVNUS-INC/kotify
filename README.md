@@ -1,74 +1,137 @@
-# 사내 SMS 공지 시스템
+# kotify
 
-NCP SENS SMS v2 API 기반 사내 문자 공지 발송 시스템.
+> Korean broadcast notification system powered by Naver Cloud Platform (NCP).
 
-운영자가 웹 UI에서 다수 인원에게 SMS/LMS 공지를 발송하고, 발송 이력과 NCP 수신결과를 영구 보관·조회합니다.
+[![Tests](https://github.com/RAVNUS-INC/kotify/actions/workflows/test.yml/badge.svg)](https://github.com/RAVNUS-INC/kotify/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-## 빠른 시작 (개발 환경)
+A self-hostable web application for sending mass SMS announcements via NCP SENS,
+built specifically for Korean phone numbers and Korean operators.
 
-### 방법 A — uv 사용 (권장)
+**Languages**: [English](#english) | [한국어](#한국어)
+
+---
+
+## English
+
+### Features
+
+- Mass SMS dispatch via NCP SENS API (up to 1,000 recipients per campaign)
+- Keycloak OIDC authentication with role-based access (viewer / sender / admin)
+- Real-time delivery status polling and history
+- Korean phone number normalization (010-1234-5678, +82-10-1234-5678, etc.)
+- Encrypted secrets storage (Fernet) — no `.env` file required
+- Web-based setup wizard for first-time configuration
+- Single-file deployment via Proxmox LXC bootstrap script
+- Audit logging for all sensitive actions
+- 1,000 recipient limit (NCP API constraint enforced)
+
+### Architecture
+
+- **Backend**: FastAPI + SQLAlchemy 2.0 + SQLite
+- **Frontend**: Jinja2 + HTMX (no SPA, no build step)
+- **Auth**: Authlib + Keycloak OIDC
+- **Background**: asyncio polling worker (NCP delivery sync)
+- **Encryption**: Fernet (AES-128-CBC + HMAC-SHA256) for secrets
+
+### Quick Start (Development)
 
 ```bash
-uv sync
-SMS_DEV_MODE=true uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
-```
-
-### 방법 B — 표준 venv 사용
-
-```bash
+git clone https://github.com/RAVNUS-INC/kotify.git
+cd kotify
 python3.12 -m venv .venv
 .venv/bin/pip install -e .
-SMS_DEV_MODE=true .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8080
+SMS_DEV_MODE=true .venv/bin/uvicorn app.main:app --reload
 ```
 
-`SMS_DEV_MODE=true` 로 실행하면 DB와 마스터 키를 `./var/` 아래에 생성합니다.
+Open http://localhost:8000/setup and follow the wizard.
 
-### 마이그레이션
+### Production Deployment (Proxmox LXC)
+
+1. Create a Debian 12 or 13 LXC container (1 vCPU, 1 GB RAM, 8 GB disk)
+2. Run the bootstrap script:
+   ```bash
+   bash <(curl -fsSL https://raw.githubusercontent.com/RAVNUS-INC/kotify/main/deploy/ct-bootstrap.sh)
+   ```
+3. Configure NPM (Nginx Proxy Manager) — see [deploy/npm-config.md](deploy/npm-config.md)
+4. Open `https://your-domain.example.com/setup` and complete the wizard
+5. Backup `/var/lib/kotify/master.key` to a secure location
+
+See [deploy/README.md](deploy/README.md) for detailed instructions.
+
+### Configuration
+
+All configuration is done via the web-based setup wizard:
+- NCP SENS credentials (Access Key, Secret Key, Service ID)
+- Keycloak OIDC (issuer, client ID/secret)
+- First admin email (must match Keycloak login email)
+- Public URL
+
+After setup, additional configuration via the `/admin/settings` page.
+
+### Upgrading from v0.0.x
+
+If you previously deployed with `/var/lib/sms/` paths (pre-OSS release), migrate manually:
 
 ```bash
-uv run alembic upgrade head
+systemctl stop sms
+mv /var/lib/sms /var/lib/kotify
+mv /var/log/sms /var/log/kotify
+mv /var/backups/sms /var/backups/kotify
+mv /opt/sms /opt/kotify
+# Update systemd service and re-run bootstrap or install kotify.service manually
 ```
 
-### 테스트
+### Documentation
+
+- [Architecture & Specification](claudedocs/SPEC.md)
+- [E2E Deployment Checklist](claudedocs/E2E-CHECKLIST.md)
+- [NCP SENS Research Notes](claudedocs/ncp-research.md)
+- [Deployment Guide](deploy/README.md)
+
+### Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and PRs welcome.
+
+### License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+## 한국어
+
+### 주요 기능
+
+- NCP SENS를 활용한 단체 SMS 발송 (캠페인당 최대 1,000명)
+- Keycloak OIDC 인증 + 역할 기반 권한 (viewer / sender / admin)
+- 실시간 발송 결과 폴링 및 이력 관리
+- 한국 휴대폰 번호 자동 정규화 (다양한 형식 지원)
+- 시크릿 암호화 저장 (Fernet) — `.env` 파일 불필요
+- 웹 기반 첫 설정 마법사
+- Proxmox LXC 부트스트랩 스크립트로 단일 파일 배포
+- 모든 민감 작업 감사 로깅
+- 1,000명 제한 (NCP API 제약 강제)
+
+### 빠른 시작 (개발)
 
 ```bash
-uv run pytest tests/test_text.py tests/test_codes.py -v
+git clone https://github.com/RAVNUS-INC/kotify.git
+cd kotify
+python3.12 -m venv .venv
+.venv/bin/pip install -e .
+SMS_DEV_MODE=true .venv/bin/uvicorn app.main:app --reload
 ```
 
-## 배포 (운영 환경)
+http://localhost:8000/setup 에 접속하여 마법사를 진행하세요.
 
-Proxmox LXC CT(Debian 12)에 systemd 서비스로 배포합니다.
+### Proxmox 배포
 
-```bash
-# CT root 콘솔에서
-bash <(curl -fsSL https://raw.githubusercontent.com/RAVNUS-INC/sms-sys/main/deploy/ct-bootstrap.sh)
-```
+[deploy/README.md](deploy/README.md) 참고. CT(Debian 12/13)에서 한 줄 부트스트랩.
 
-상세 절차: [deploy/README.md](deploy/README.md)
+### 라이선스
 
-## E2E 검증
+MIT — 자유롭게 사용/수정/배포 가능. 단, copyright 표기 보존 필수.
 
-운영 시작 전 단계별 검증 절차: [claudedocs/E2E-CHECKLIST.md](claudedocs/E2E-CHECKLIST.md)
-
-## 사용자 작성 영역
-
-이 시스템은 다음 두 파일을 **직접 구현**해야 합니다 (스텁 제공, 테스트 포함):
-
-| 파일 | 내용 | 테스트 |
-|---|---|---|
-| `app/ncp/signature.py` | NCP SENS API HMAC-SHA256 서명 생성 | `tests/test_signature.py` |
-| `app/util/phone.py` | 전화번호 정규화 (`010-1234-5678` → `01012345678`) | `tests/test_phone.py` |
-
-구현 후 테스트로 검증:
-
-```bash
-uv run pytest tests/test_signature.py tests/test_phone.py -v
-```
-
-## 구성
-
-- **스택**: Python 3.12 + FastAPI + Jinja2 + HTMX + SQLite + Authlib(Keycloak OIDC)
-- **시크릿**: `.env` 없음. 마스터 키(`/var/lib/sms/master.key`) + DB Fernet 암호화
-- **첫 실행**: `/setup` wizard에서 Keycloak/NCP 설정 후 자동 폐쇄
-
-자세한 내용은 [명세서](claudedocs/SPEC.md)를 참조하세요.
+`Copyright (c) 2026 RAVNUS Inc.`

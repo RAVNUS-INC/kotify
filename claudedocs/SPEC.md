@@ -1,13 +1,13 @@
-# 사내 SMS 공지 시스템 — 개발 명세서
+# kotify — 개발 명세서
 
-> NCP SENS SMS v2 API 기반 사내 문자 공지 발송 시스템
+> NCP SENS SMS v2 API 기반 단체 문자 공지 발송 시스템
 > 작성일: 2026-04-08 / 버전: 0.1 (초안)
 
 ---
 
 ## 0. 한 페이지 요약 (TL;DR)
 
-- **목적**: 사내 운영자가 웹 UI에서 다수 인원에게 SMS/LMS 공지를 발송하고, 발송 이력과 NCP 측 결과를 영구 보관·조회한다.
+- **목적**: 운영자가 웹 UI에서 다수 인원에게 SMS/LMS 공지를 발송하고, 발송 이력과 NCP 측 결과를 영구 보관·조회한다.
 - **운영 도메인**: `sms.example.com`
 - **스택**: Python 3.12 + FastAPI + Jinja2 + HTMX + SQLite + Authlib(Keycloak OIDC).
 - **배포**: Proxmox LXC CT (Debian 12, 1GB RAM, 8GB disk). 앞단 NPM(Nginx Proxy Manager)이 TLS 종단.
@@ -139,7 +139,7 @@ CREATE TABLE callers (
   is_default   INTEGER NOT NULL DEFAULT 0,  -- compose 화면 기본 선택 (1개만 1)
   created_at   TEXT NOT NULL
 );
--- 초기 시드: 02-1234-5678(default), 02-1234-5678, 02-1234-5678
+-- 초기 시드 없음 — 발신번호는 admin UI에서 직접 추가
 
 -- 시스템 설정 (env 대체) — 시크릿은 Fernet 암호화 후 저장
 CREATE TABLE settings (
@@ -633,7 +633,7 @@ def has_unsupported_chars(text: str) -> bool:
    - Step 1: setup 토큰 입력
    - Step 2: Keycloak 정보 입력 (issuer, client_id=sms-sys, client_secret) + 연결 테스트
    - Step 3: NCP 정보 입력 (access_key, secret_key, service_id) + 발신번호 조회 테스트
-   - Step 4: 발신번호 시드 데이터 확인/수정 (02-1234-5678 default)
+   - Step 4: 발신번호 추가 (NCP에 등록된 번호를 admin UI에서 직접 입력)
    - Step 5: Keycloak으로 본인 로그인 → 첫 사용자가 자동 admin으로 등록
 5. 완료 시 `bootstrap.completed=true` 저장 + `setup.token` 파일 삭제 + `/setup` 라우트 영구 비활성
 
@@ -850,7 +850,7 @@ ncp-sms-system/
 
 ### 출시 전
 - [ ] NCP 콘솔에서 Project 생성, `serviceId` 확보
-- [ ] 발신번호 등록 (02-1234-5678 / 5678 / 5678 — 영업일 3-4일 소요, 가장 먼저!)
+- [ ] 발신번호 등록 (NCP 콘솔에서 신청 — 영업일 3-4일 소요, 가장 먼저!)
 - [ ] Access Key / Secret Key 발급 (Sub Account 권장)
 - [ ] Keycloak에 realm/client `sms-sys` 생성 + 권한 그룹(viewer/sender/admin) 생성
 - [ ] Keycloak Redirect URI: `https://sms.example.com/auth/callback`
@@ -878,7 +878,7 @@ ncp-sms-system/
 | 1 | 잘못된 번호 정책 | **(a) 차단** — 하나라도 invalid면 발송 불가 |
 | 2 | Keycloak realm/client | `sms-sys` |
 | 3 | 운영 도메인 | `sms.example.com` |
-| 4 | 발신번호 (3개) | `02-1234-5678` (default), `02-1234-5678`, `02-1234-5678` |
+| 4 | 발신번호 | NCP에 등록된 번호를 admin UI에서 직접 추가 |
 | 5 | 광고성(`AD`) 발송 | 1차 제외 |
 | 6 | 폴링 타임아웃 | **1시간** (5/10/30/60/300/900초 backoff). 근거: NCP SMS는 통상 수 초~수십 초 내 COMPLETED. 1시간이면 통신망 일시 장애도 흡수. 더 길게 가면 폴링 큐에 좀비 row가 쌓임. |
 | 7 | 직접 작성 함수 3개 | OK (signature, normalize_phone, parse_phone_list) |

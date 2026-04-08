@@ -7,9 +7,23 @@ include = ["app*"]
 exclude = ["tests*", "deploy*", "alembic*", "claudedocs*"]
 
 [project]
-name = "ncp-sms-system"
+name = "kotify"
 version = "0.1.0"
-description = "Internal SMS announcement system using NCP SENS"
+description = "Korean broadcast notification system powered by Naver Cloud Platform"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "RAVNUS Inc." }]
+keywords = ["sms", "broadcast", "notification", "ncp", "naver-cloud", "korea", "fastapi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Korean",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications",
+]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -24,6 +38,19 @@ dependencies = [
     "cryptography>=44.0",
     "pydantic>=2.10",
     "pydantic-settings>=2.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/RAVNUS-INC/kotify"
+Repository = "https://github.com/RAVNUS-INC/kotify"
+Issues = "https://github.com/RAVNUS-INC/kotify/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "respx>=0.22",
+    "ruff>=0.8",
 ]
 
 [dependency-groups]

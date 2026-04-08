@@ -1,13 +1,13 @@
 # Nginx Proxy Manager — sms.example.com 설정 가이드
 
-NPM(Nginx Proxy Manager)에서 사내 SMS 발송 시스템을 외부에 노출하는 방법입니다.
+NPM(Nginx Proxy Manager)에서 kotify를 외부에 노출하는 방법입니다.
 
 ---
 
 ## 사전 확인
 
 - NPM 관리자 화면에 접속할 수 있는 계정 준비
-- Proxmox CT에 할당된 사내망 IP 주소 확인 (예: `192.168.1.100`)
+- Proxmox CT에 할당된 IP 주소 확인 (예: `192.168.1.100`)
 - `sms.example.com` DNS가 NPM 서버 IP를 가리키고 있는지 확인
 
 ---

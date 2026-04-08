@@ -1,31 +1,31 @@
 #!/usr/bin/env bash
 # deploy/ct-bootstrap.sh
-# Proxmox LXC CT (Debian 12) 초기 셋업 스크립트
+# Proxmox LXC CT (Debian 12/13) 초기 셋업 스크립트
 # 사용법: root 계정으로 실행
 #   bash deploy/ct-bootstrap.sh
 # 또는:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/RAVNUS-INC/sms-sys/main/deploy/ct-bootstrap.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/RAVNUS-INC/kotify/main/deploy/ct-bootstrap.sh)
 
 set -euo pipefail
 
 # ── 설정 변수 ────────────────────────────────────────────────────────────────
 # Private repo인 경우 GITHUB_TOKEN 환경변수 또는 REPO_URL 직접 지정
 #   GITHUB_TOKEN=ghp_xxx bash ct-bootstrap.sh
-#   REPO_URL=https://<token>@github.com/RAVNUS-INC/sms-sys.git bash ct-bootstrap.sh
+#   REPO_URL=https://<token>@github.com/RAVNUS-INC/kotify.git bash ct-bootstrap.sh
 if [[ -n "${REPO_URL:-}" ]]; then
     : # 사용자가 명시적으로 지정함
 elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    REPO_URL="https://${GITHUB_TOKEN}@github.com/RAVNUS-INC/sms-sys.git"
+    REPO_URL="https://${GITHUB_TOKEN}@github.com/RAVNUS-INC/kotify.git"
 else
-    REPO_URL="https://github.com/RAVNUS-INC/sms-sys.git"
+    REPO_URL="https://github.com/RAVNUS-INC/kotify.git"
 fi
-INSTALL_DIR="/opt/sms"
-DATA_DIR="/var/lib/sms"
-LOG_DIR="/var/log/sms"
-BACKUP_DIR="/var/backups/sms"
-SERVICE_USER="sms"
-SERVICE_GROUP="sms"
-SERVICE_FILE="/etc/systemd/system/sms.service"
+INSTALL_DIR="/opt/kotify"
+DATA_DIR="/var/lib/kotify"
+LOG_DIR="/var/log/kotify"
+BACKUP_DIR="/var/backups/kotify"
+SERVICE_USER="kotify"
+SERVICE_GROUP="kotify"
+SERVICE_FILE="/etc/systemd/system/kotify.service"
 # Python 바이너리는 OS 버전에 따라 동적으로 결정 (Step 2에서 PYTHON_BIN 설정)
 
 # ── ANSI 색상 ────────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ fi
 
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║       사내 SMS 발송 시스템 — CT 부트스트랩            ║"
+echo "║           kotify — CT 부트스트랩                      ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -155,7 +155,7 @@ else
     timedatectl status
 fi
 
-# ── Step 4: sms 시스템 사용자/그룹 생성 ─────────────────────────────────────
+# ── Step 4: kotify 시스템 사용자/그룹 생성 ──────────────────────────────────
 step "4. 시스템 사용자/그룹 생성"
 if ! getent group "${SERVICE_GROUP}" > /dev/null 2>&1; then
     groupadd --system "${SERVICE_GROUP}"
@@ -169,7 +169,7 @@ if ! id "${SERVICE_USER}" > /dev/null 2>&1; then
         --gid "${SERVICE_GROUP}" \
         --no-create-home \
         --shell /usr/sbin/nologin \
-        --comment "SMS Service Account" \
+        --comment "kotify Service Account" \
         "${SERVICE_USER}"
     ok "사용자 '${SERVICE_USER}' 생성"
 else
@@ -179,11 +179,11 @@ fi
 # ── Step 5: 디렉토리 생성 + 권한 설정 ───────────────────────────────────────
 step "5. 디렉토리 생성 및 권한 설정"
 
-# /opt/sms (root:root 755) — git clone 대상이므로 root가 소유
+# /opt/kotify (root:root 755) — git clone 대상이므로 root가 소유
 install -d -m 755 -o root -g root "${INSTALL_DIR}"
 ok "${INSTALL_DIR} (root:root 755)"
 
-# 데이터/로그/백업 디렉토리 (sms:sms 700)
+# 데이터/로그/백업 디렉토리 (kotify:kotify 700)
 install -d -m 700 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${DATA_DIR}"
 ok "${DATA_DIR} (${SERVICE_USER}:${SERVICE_GROUP} 700)"
 
@@ -207,7 +207,7 @@ else
     # 보안: clone 후 git remote에서 토큰 제거
     # (토큰이 평문으로 .git/config에 남는 것을 방지)
     git -C "${INSTALL_DIR}" remote set-url origin \
-        "https://github.com/RAVNUS-INC/sms-sys.git"
+        "https://github.com/RAVNUS-INC/kotify.git"
     ok "코드 클론 완료 (remote URL에서 토큰 제거됨)"
 fi
 
@@ -226,7 +226,7 @@ ok "Python 패키지 설치 완료"
 # ── Step 8: DB 초기화 (alembic) ──────────────────────────────────────────────
 step "8. 데이터베이스 초기화"
 info "alembic upgrade head 실행..."
-# DB를 /var/lib/sms/에 생성하려면 sms 사용자 권한으로 실행
+# DB를 /var/lib/kotify/에 생성하려면 kotify 사용자 권한으로 실행
 # minimal CT는 sudo가 없을 수 있어 runuser(util-linux) 사용
 runuser -u "${SERVICE_USER}" -- \
     env "PATH=${INSTALL_DIR}/.venv/bin:$PATH" \
@@ -235,26 +235,26 @@ ok "DB 마이그레이션 완료 (${DATA_DIR}/sms.db)"
 
 # ── Step 9: systemd 서비스 등록 ─────────────────────────────────────────────
 step "9. systemd 서비스 등록"
-if [[ -f "${INSTALL_DIR}/deploy/sms.service" ]]; then
-    cp "${INSTALL_DIR}/deploy/sms.service" "${SERVICE_FILE}"
-    ok "sms.service 복사 완료: ${SERVICE_FILE}"
+if [[ -f "${INSTALL_DIR}/deploy/kotify.service" ]]; then
+    cp "${INSTALL_DIR}/deploy/kotify.service" "${SERVICE_FILE}"
+    ok "kotify.service 복사 완료: ${SERVICE_FILE}"
 else
-    fail "${INSTALL_DIR}/deploy/sms.service 파일이 없습니다."
+    fail "${INSTALL_DIR}/deploy/kotify.service 파일이 없습니다."
 fi
 
 systemctl daemon-reload
-systemctl enable sms
-systemctl restart sms
-ok "sms 서비스 활성화 및 시작"
+systemctl enable kotify
+systemctl restart kotify
+ok "kotify 서비스 활성화 및 시작"
 
 # ── Step 10: 서비스 기동 확인 ────────────────────────────────────────────────
 step "10. 서비스 상태 확인"
 sleep 3
-if systemctl is-active --quiet sms; then
-    ok "sms 서비스 실행 중"
+if systemctl is-active --quiet kotify; then
+    ok "kotify 서비스 실행 중"
 else
-    warn "sms 서비스가 시작되지 않았습니다. 로그를 확인하세요:"
-    journalctl -u sms -n 30 --no-pager
+    warn "kotify 서비스가 시작되지 않았습니다. 로그를 확인하세요:"
+    journalctl -u kotify -n 30 --no-pager
     fail "서비스 시작 실패"
 fi
 
@@ -270,7 +270,7 @@ fi
 step "11. 백업 cron 설정"
 if [[ -f "${INSTALL_DIR}/deploy/sms-backup.sh" ]]; then
     chmod +x "${INSTALL_DIR}/deploy/sms-backup.sh"
-    CRON_FILE="/etc/cron.d/sms-backup"
+    CRON_FILE="/etc/cron.d/kotify-backup"
     cp "${INSTALL_DIR}/deploy/sms-backup.cron" "${CRON_FILE}"
     chmod 644 "${CRON_FILE}"
     ok "백업 cron 설치: ${CRON_FILE}"
@@ -292,22 +292,22 @@ echo ""
 echo "  1. setup.token 확인:"
 echo -e "     ${YELLOW}cat ${SETUP_TOKEN_PATH}${NC}"
 echo ""
-echo "  2. NPM(Nginx Proxy Manager)에서 sms.example.com 호스트 설정:"
+echo "  2. NPM(Nginx Proxy Manager)에서 도메인 호스트 설정:"
 echo "     - 이 CT의 IP → 포트 8080 으로 프록시"
 echo "     - Let's Encrypt SSL 발급 + Force SSL ON"
 echo "     - 가이드: ${INSTALL_DIR}/deploy/npm-config.md"
 echo ""
 echo "  3. 브라우저에서 Setup Wizard 실행:"
-echo -e "     ${YELLOW}https://sms.example.com/setup${NC}"
+echo -e "     ${YELLOW}https://your-domain.example.com/setup${NC}"
 echo ""
 echo "  4. Wizard 완료 후 master.key 백업 (중요!):"
 echo -e "     ${YELLOW}cat ${DATA_DIR}/master.key${NC}"
-echo "     → 1Password 또는 사내 비밀 저장소에 안전하게 보관"
+echo "     → 안전한 위치에 보관 (DB와 분리)"
 echo ""
 echo "  5. E2E 검증:"
 echo "     - 가이드: ${INSTALL_DIR}/claudedocs/E2E-CHECKLIST.md"
 echo ""
-echo -e "${BLUE}서비스 상태 확인: systemctl status sms${NC}"
-echo -e "${BLUE}로그 확인:        journalctl -u sms -f${NC}"
+echo -e "${BLUE}서비스 상태 확인: systemctl status kotify${NC}"
+echo -e "${BLUE}로그 확인:        journalctl -u kotify -f${NC}"
 echo -e "${BLUE}stdout 로그:      tail -f ${LOG_DIR}/stdout.log${NC}"
 echo ""

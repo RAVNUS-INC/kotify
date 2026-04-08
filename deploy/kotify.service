@@ -1,0 +1,43 @@
+[Unit]
+Description=kotify — Korean broadcast notification system powered by NCP
+Documentation=https://github.com/RAVNUS-INC/kotify
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kotify
+Group=kotify
+WorkingDirectory=/opt/kotify
+ExecStartPre=/opt/kotify/.venv/bin/alembic -c /opt/kotify/alembic.ini upgrade head
+ExecStart=/opt/kotify/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1
+
+# 재시작 정책
+Restart=on-failure
+RestartSec=5
+
+# 로그 출력
+StandardOutput=append:/var/log/kotify/stdout.log
+StandardError=append:/var/log/kotify/stderr.log
+
+# 환경변수
+# DB 경로, master.key 경로는 app/config.py 기본값(/var/lib/kotify/) 사용
+# .env 파일 없음 — 모든 설정은 DB + master.key로 관리
+Environment=PYTHONUNBUFFERED=1
+
+# ── 보안 강화 (Systemd Hardening) ────────────────────────────────────────────
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kotify /var/log/kotify
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target
