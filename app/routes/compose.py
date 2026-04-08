@@ -38,6 +38,7 @@ def _get_compose_context(
     group_id: int = 0,
     error_slug: str | None = None,
     content: str = "",
+    subject: str = "",
     recipients_text: str = "",
     preserved_caller_id: int | None = None,
 ) -> dict:
@@ -73,6 +74,7 @@ def _get_compose_context(
         "preselect_group_id": group_id,
         "error_slug": error_slug,
         "content": content,
+        "subject": subject,
         "recipients_text": recipients_text,
         "preserved_caller_id": preserved_caller_id,
     }
@@ -154,6 +156,7 @@ async def compose_send(
     _csrf: None = Depends(verify_csrf),
     caller_id: int = Form(...),
     content: str = Form(...),
+    subject: str = Form(""),
     recipients_text: str = Form(""),
     source: str = Form("manual"),
 ) -> HTMLResponse | RedirectResponse:
@@ -174,6 +177,7 @@ async def compose_send(
             user,
             error_slug=slug,
             content=content,
+            subject=subject,
             recipients_text=recipients_text,
             preserved_caller_id=caller_id,
         )
@@ -239,6 +243,9 @@ async def compose_send(
     if ncp_client is None:
         return _render_error("ncp_not_configured")
 
+    # subject는 LMS일 때만 의미 있음 (SMS는 제목 미지원)
+    final_subject = subject.strip() if msg_result["message_type"] == "LMS" else None
+
     try:
         campaign = await dispatch_campaign(
             db=db,
@@ -248,6 +255,7 @@ async def compose_send(
             content=content,
             recipients=valid_numbers,
             message_type=msg_result["message_type"],
+            subject=final_subject,
         )
 
         # 연락처 last_sent_at 업데이트

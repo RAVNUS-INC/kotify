@@ -101,6 +101,15 @@
       </div>
     </div>
 
+    <!-- LMS 제목 (90 byte 초과 시 자동 표시) -->
+    <div class="form-group" id="subject-group" style="display:none">
+      <label for="subject-input">제목 <span class="text-muted" style="font-weight:normal">(LMS 전용, 0~40 byte)</span></label>
+      <input type="text" name="subject" id="subject-input" maxlength="40"
+        placeholder="LMS 메시지 제목 (선택)"
+        value="{{ subject or '' }}">
+      <div class="form-hint">SMS(90 byte 이하)일 때는 제목이 무시됩니다. LMS일 때만 사용됩니다.</div>
+    </div>
+
     <!-- 본문 -->
     <div class="form-group">
       <label for="content-textarea">본문</label>
@@ -173,6 +182,11 @@ function updateByteCounter() {
   var type = bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과');
   byteCounter.textContent = bytes + ' byte (' + type + ')';
   byteCounter.className = 'byte-counter ' + (bytes > 2000 ? 'err' : (bytes > 90 ? 'warn' : 'ok'));
+  // LMS(>90 byte)일 때 제목 입력란 자동 표시
+  var subjectGroup = document.getElementById('subject-group');
+  if (subjectGroup) {
+    subjectGroup.style.display = bytes > 90 ? '' : 'none';
+  }
 }
 if (contentTa) {
   contentTa.addEventListener('input', updateByteCounter);
