@@ -64,37 +64,44 @@
       </div>
     </div>
 
-    <!-- 그룹 선택 -->
+    <!-- 그룹 선택 (체크박스) -->
     <div id="source-groups" class="source-section" {% if preselect_group_id == 0 %}style="display:none"{% endif %}>
       <div class="form-group">
-        <label>그룹 선택 <span class="text-muted">(Ctrl+클릭으로 다중 선택)</span></label>
+        <label>그룹 선택</label>
         {% if groups %}
-        <select name="group_ids" multiple size="6">
+        <div class="checkbox-list" style="max-height:240px;overflow-y:auto">
           {% for g in groups %}
-          <option value="{{ g.id }}" {% if g.id == preselect_group_id %}selected{% endif %}>
-            {{ g.name }} ({{ g.member_count }}명)
-          </option>
+          <label class="checkbox-item">
+            <input type="checkbox" name="group_ids" value="{{ g.id }}" {% if g.id == preselect_group_id %}checked{% endif %}>
+            <span class="checkbox-label">{{ g.name }} <span class="text-muted">({{ g.member_count }}명)</span></span>
+          </label>
           {% endfor %}
-        </select>
+        </div>
+        <div class="form-hint">여러 그룹 동시 선택 가능. 중복 멤버는 자동 제거됩니다.</div>
         {% else %}
         <div class="alert alert-info">등록된 그룹이 없습니다. <a href="/groups/new">새 그룹 만들기</a></div>
         {% endif %}
       </div>
     </div>
 
-    <!-- 개별 연락처 -->
+    <!-- 개별 연락처 (체크박스 + 검색) -->
     <div id="source-contacts" class="source-section" style="display:none">
       <div class="form-group">
-        <label>개별 연락처 <span class="text-muted">(Ctrl+클릭으로 다중 선택)</span></label>
+        <label>개별 연락처</label>
         <input type="text" id="contact-filter" placeholder="이름/전화번호 검색..."
           onkeyup="filterContacts(this.value)"
-          style="margin-bottom:6px;padding:4px 8px;border:1px solid var(--border-strong);border-radius:var(--radius);font-size:12px;width:100%">
+          style="margin-bottom:6px">
         {% if contacts %}
-        <select name="contact_ids" multiple size="10" id="contact-select">
+        <div class="checkbox-list" id="contact-list" style="max-height:320px;overflow-y:auto">
           {% for c in contacts %}
-          <option value="{{ c.id }}">{{ c.name }} ({{ c.phone|phone_fmt or "번호없음" }}{% if c.department %} · {{ c.department }}{% endif %})</option>
+          <label class="checkbox-item"
+            data-search="{{ (c.name or '')|lower }} {{ (c.phone or '')|lower }} {{ (c.department or '')|lower }}">
+            <input type="checkbox" name="contact_ids" value="{{ c.id }}">
+            <span class="checkbox-label">{{ c.name }} <span class="text-muted">{{ c.phone|phone_fmt or "" }}{% if c.department %} · {{ c.department }}{% endif %}</span></span>
+          </label>
           {% endfor %}
-        </select>
+        </div>
+        <div class="form-hint">검색으로 필터링 후 체크. 여러 명 선택 가능.</div>
         {% else %}
         <div class="alert alert-info">등록된 연락처가 없습니다. <a href="/contacts/new">연락처 추가</a></div>
         {% endif %}
@@ -157,12 +164,13 @@ function toggleSource() {
 }
 
 function filterContacts(query) {
-  query = query.toLowerCase();
-  var select = document.getElementById('contact-select');
-  if (!select) return;
-  for (var i = 0; i < select.options.length; i++) {
-    var opt = select.options[i];
-    opt.style.display = opt.text.toLowerCase().includes(query) ? '' : 'none';
+  query = (query || '').toLowerCase().trim();
+  var list = document.getElementById('contact-list');
+  if (!list) return;
+  var items = list.querySelectorAll('.checkbox-item');
+  for (var i = 0; i < items.length; i++) {
+    var search = items[i].getAttribute('data-search') || '';
+    items[i].style.display = !query || search.includes(query) ? '' : 'none';
   }
 }
 

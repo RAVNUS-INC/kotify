@@ -604,6 +604,43 @@
     .byte-counter.warn { color: var(--warning); }
     .byte-counter.err  { color: var(--error); }
 
+    /* ── 체크박스 리스트 (그룹/연락처 다중 선택) ─────────────────────────── */
+    .checkbox-list {
+      border: 1px solid var(--border-strong);
+      background: var(--bg);
+      border-radius: 2px;
+    }
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      user-select: none;
+    }
+    .checkbox-item:last-child { border-bottom: none; }
+    .checkbox-item:hover { background: var(--bg-soft); }
+    .checkbox-item input[type="checkbox"] {
+      margin: 0;
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      cursor: pointer;
+      accent-color: var(--text);
+    }
+    .checkbox-item:has(input:checked) {
+      background: var(--bg-elevated);
+      font-weight: 600;
+    }
+    .checkbox-label {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     /* ── 고정 레이아웃 (반응형 비활성) ──────────────────────────────────────
        작은 화면에서는 가로 스크롤로 처리. 모바일 미지원 — 데스크탑 전용 도구.
        반응형 미디어 쿼리 제거. body min-width로 최소 너비 강제. */
