@@ -66,12 +66,15 @@ async def verify_token(
 @router.post("/setup/test-keycloak", response_class=HTMLResponse)
 async def test_keycloak(
     request: Request,
-    issuer: str = Form(...),
+    keycloak_issuer: str = Form(...),
     _: None = Depends(require_setup_mode),
     _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
-    """HTMX — Keycloak issuer discovery 테스트."""
-    url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+    """HTMX — Keycloak issuer discovery 테스트.
+
+    HTML form 필드명 keycloak_issuer를 그대로 받음 (/setup/complete와 일관).
+    """
+    url = f"{keycloak_issuer.rstrip('/')}/.well-known/openid-configuration"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)
@@ -87,19 +90,22 @@ async def test_keycloak(
 @router.post("/setup/test-ncp", response_class=HTMLResponse)
 async def test_ncp(
     request: Request,
-    access_key: str = Form(...),
-    secret_key: str = Form(...),
-    service_id: str = Form(...),
+    ncp_access_key: str = Form(...),
+    ncp_secret_key: str = Form(...),
+    ncp_service_id: str = Form(...),
     _: None = Depends(require_setup_mode),
     _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
-    """HTMX — NCP 인증 테스트 (#7: 예외 분기 명확화)."""
+    """HTMX — NCP 인증 테스트 (#7: 예외 분기 명확화).
+
+    HTML form 필드명 ncp_*를 그대로 받음 (/setup/complete와 일관).
+    """
     from app.ncp.client import NCPAuthError, NCPClient, NCPError, NCPForbidden
 
     client = NCPClient(
-        access_key=access_key,
-        secret_key=secret_key,
-        service_id=service_id,
+        access_key=ncp_access_key,
+        secret_key=ncp_secret_key,
+        service_id=ncp_service_id,
     )
     try:
         # list_by_request_id 대신 가벼운 검증: dummy requestId로 404 받으면 인증 성공
