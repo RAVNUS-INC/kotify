@@ -28,10 +28,12 @@
   </div>
 </div>
 
+{# M12: 섹션별 독립 form — 각 섹션에 저장 버튼. 단일 /admin/settings 라우트 유지 #}
+
+<!-- Keycloak -->
 <form action="/admin/settings" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-
-  <!-- Keycloak -->
+  {# 다른 섹션 값 유지 — 빈 값이면 라우트가 변경하지 않음 #}
   <div class="card">
     <div class="card-title">Keycloak 설정</div>
     <div class="form-group">
@@ -48,34 +50,58 @@
     </div>
     <div class="form-group">
       <label for="kc-client-secret">Client Secret</label>
+      {% if secret_display.get('keycloak.client_secret') %}
+      <div class="current-value">현재: {{ secret_display.get('keycloak.client_secret') }}</div>
+      {% endif %}
       <input type="password" id="kc-client-secret" name="keycloak_client_secret"
-        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('keycloak.client_secret', '') }})">
+        placeholder="변경하지 않으려면 비워두세요">
       <div class="form-hint">빈 값이면 변경되지 않습니다.</div>
     </div>
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i data-lucide="save"></i> Keycloak 저장
+    </button>
   </div>
+</form>
 
-  <!-- NCP -->
+<!-- NCP -->
+<form action="/admin/settings" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
   <div class="card">
     <div class="card-title">NCP SENS 설정</div>
     <div class="form-group">
       <label for="ncp-access-key">Access Key</label>
+      {% if secret_display.get('ncp.access_key') %}
+      <div class="current-value">현재: {{ secret_display.get('ncp.access_key') }}</div>
+      {% endif %}
       <input type="text" id="ncp-access-key" name="ncp_access_key"
-        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.access_key', '') }})">
+        placeholder="변경하지 않으려면 비워두세요">
       <div class="form-hint">빈 값이면 변경되지 않습니다.</div>
     </div>
     <div class="form-group">
       <label for="ncp-secret-key">Secret Key</label>
+      {% if secret_display.get('ncp.secret_key') %}
+      <div class="current-value">현재: {{ secret_display.get('ncp.secret_key') }}</div>
+      {% endif %}
       <input type="password" id="ncp-secret-key" name="ncp_secret_key"
-        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.secret_key', '') }})">
+        placeholder="변경하지 않으려면 비워두세요">
     </div>
     <div class="form-group">
       <label for="ncp-service-id">Service ID</label>
+      {% if secret_display.get('ncp.service_id') %}
+      <div class="current-value">현재: {{ secret_display.get('ncp.service_id') }}</div>
+      {% endif %}
       <input type="text" id="ncp-service-id" name="ncp_service_id"
-        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.service_id', '') }})">
+        placeholder="변경하지 않으려면 비워두세요">
     </div>
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i data-lucide="save"></i> NCP 저장
+    </button>
   </div>
+</form>
 
-  <!-- 앱 설정 -->
+<!-- 앱 설정 -->
+<form action="/admin/settings" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
   <div class="card">
     <div class="card-title">앱 설정</div>
     <div class="form-group">
@@ -86,14 +112,16 @@
     </div>
     <div class="form-group">
       <label for="session-secret">세션 시크릿</label>
+      {% if secret_display.get('session.secret') %}
+      <div class="current-value">현재: {{ secret_display.get('session.secret') }}</div>
+      {% endif %}
       <input type="password" id="session-secret" name="session_secret"
-        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('session.secret', '') }})">
+        placeholder="변경하지 않으려면 비워두세요">
       <div class="form-hint">변경 시 모든 사용자 세션이 만료됩니다.</div>
     </div>
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i data-lucide="save"></i> 앱 설정 저장
+    </button>
   </div>
-
-  <button type="submit" class="btn btn-primary">
-    <i data-lucide="save"></i> 설정 저장
-  </button>
 </form>
 {% endblock %}

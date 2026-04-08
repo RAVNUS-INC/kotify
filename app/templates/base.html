@@ -118,7 +118,8 @@
       white-space: nowrap;
       overflow: hidden;
     }
-    .brand-icon { font-size: 18px; flex-shrink: 0; }
+    .brand-icon { font-size: 18px; flex-shrink: 0; display: flex; align-items: center; }
+    .brand-icon i { width: 18px; height: 18px; }
     .brand-text { white-space: nowrap; }
     .sidebar.collapsed .brand-text { display: none; }
 
@@ -644,7 +645,69 @@
     /* ── 고정 레이아웃 (반응형 비활성) ──────────────────────────────────────
        작은 화면에서는 가로 스크롤로 처리. 모바일 미지원 — 데스크탑 전용 도구.
        반응형 미디어 쿼리 제거. body min-width로 최소 너비 강제. */
+
+    /* ── M2: 필수 표시 ──────────────────────────────────────────────────────── */
+    .required { color: var(--error); margin-left: 2px; }
+    .form-legend { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+
+    /* ── M11: 설정 현재값 표시 ──────────────────────────────────────────────── */
+    .current-value {
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    /* ── M9: 3색 stacked progress bar ───────────────────────────────────────── */
+    .progress-bar-stacked {
+      display: flex;
+      height: 8px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .progress-fill-success { background: var(--success); }
+    .progress-fill-fail    { background: var(--error); }
+    .progress-fill-pending { background: var(--text-muted); opacity: 0.3; }
+
+    /* ── L5: 선택 행 강조 ───────────────────────────────────────────────────── */
+    .table tbody tr:has(input[type="checkbox"]:checked) td {
+      background: var(--bg-elevated);
+    }
+
+    /* ── per_page 드롭다운 ───────────────────────────────────────────────────── */
+    .per-page-form {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .per-page-form select {
+      padding: 3px 6px;
+      border: 1px solid var(--border-strong);
+      border-radius: 2px;
+      font-size: 11px;
+      font-family: inherit;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    /* ── 감사 로그 행 클릭 ───────────────────────────────────────────────────── */
+    .audit-row { cursor: pointer; }
+    .audit-row:hover td { background: var(--bg-elevated); }
+
+    /* ── L9: 프린트 스타일 ───────────────────────────────────────────────────── */
+    @media print {
+      .sidebar, .page-header .page-actions { display: none; }
+      body { width: 100%; min-width: 0; }
+      .main { margin-left: 0; }
+      .page-content { padding: 0; }
+      .card { page-break-inside: avoid; }
+    }
   </style>
+  <!-- L10: favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔔</text></svg>">
 </head>
 <body>
 {% set user_name = request.session.get("user_name", "") if request.session is defined else "" %}
@@ -655,7 +718,7 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <a href="/">
-        <span class="brand-icon">🔔</span>
+        <span class="brand-icon"><i data-lucide="bell"></i></span>
         <span class="brand-text">kotify</span>
       </a>
       <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="사이드바 토글">
@@ -724,11 +787,37 @@
     }
   });
 
-  // ── Lucide 아이콘 초기화 ─────────────────────────────────────────────────
-  if (typeof lucide !== 'undefined') lucide.createIcons();
+  // ── L6: Lucide 아이콘 초기화 (DOMContentLoaded로 플래시 방지) ─────────────
+  document.addEventListener('DOMContentLoaded', function() {
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  });
   // HTMX swap 후에도 아이콘 재초기화
   document.body.addEventListener('htmx:afterSwap', function() {
     if (typeof lucide !== 'undefined') lucide.createIcons();
+  });
+
+  // ── L1: 단축키 ─────────────────────────────────────────────────────────────
+  document.addEventListener('keydown', function(e) {
+    // Ctrl+Enter / Cmd+Enter: 현재 폼 제출
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      var activeForm = document.activeElement && document.activeElement.closest('form');
+      if (activeForm) {
+        e.preventDefault();
+        activeForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        activeForm.submit();
+      }
+    }
+    // Esc: 사이드바 토글 (모달이 열려있지 않을 때만)
+    if (e.key === 'Escape') {
+      var modal = document.querySelector('[id$="-modal"][style*="flex"]');
+      if (!modal) {
+        var sb = document.getElementById('sidebar');
+        if (sb) {
+          var collapsed = sb.classList.toggle('collapsed');
+          localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
+        }
+      }
+    }
   });
 
   // ── H4: flash 쿼리스트링 → JS로 URL 정리 ────────────────────────────────

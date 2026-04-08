@@ -35,8 +35,14 @@
     </span>
   </div>
 
-  <div class="progress-bar" style="margin-bottom:6px">
-    <div class="progress-fill" style="width:{{ pct }}%"></div>
+  {# M9: 3색 stacked progress bar (성공/실패/대기) #}
+  {% set ok_pct  = (campaign.ok_count   / total * 100) if total > 0 else 0 %}
+  {% set fail_pct = (campaign.fail_count / total * 100) if total > 0 else 0 %}
+  {% set pend_pct = (campaign.pending_count / total * 100) if total > 0 else 0 %}
+  <div class="progress-bar-stacked" style="margin-bottom:6px">
+    <div class="progress-fill-success" style="width:{{ ok_pct | round(1) }}%"></div>
+    <div class="progress-fill-fail"    style="width:{{ fail_pct | round(1) }}%"></div>
+    <div class="progress-fill-pending" style="width:{{ pend_pct | round(1) }}%"></div>
   </div>
   <div class="text-muted">{{ pct }}%</div>
 

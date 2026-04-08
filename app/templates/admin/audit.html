@@ -3,6 +3,55 @@
 {% block page_title %}감사 로그{% endblock %}
 
 {% block content %}
+<!-- M7: 감사 로그 필터 바 -->
+<div class="card" style="padding:10px 16px">
+  <form method="get" action="/admin/audit" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+    <input type="hidden" name="per_page" value="{{ per_page }}">
+    <div>
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">액션</label>
+      <select name="action_filter" class="ctrl">
+        <option value="">전체 액션</option>
+        {% for a in audit_actions %}
+        <option value="{{ a }}" {% if action_filter == a %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">사용자</label>
+      <input type="text" name="actor_filter" value="{{ actor_filter or '' }}"
+        placeholder="이메일/sub 검색" class="ctrl">
+    </div>
+    <div>
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">시작일</label>
+      <input type="date" name="date_from" value="{{ date_from or '' }}" class="ctrl">
+    </div>
+    <div>
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">종료일</label>
+      <input type="date" name="date_to" value="{{ date_to or '' }}" class="ctrl">
+    </div>
+    <div style="display:flex;gap:4px">
+      <button type="submit" class="btn btn-secondary btn-sm">
+        <i data-lucide="search"></i> 검색
+      </button>
+      <a href="/admin/audit" class="btn btn-secondary btn-sm">초기화</a>
+    </div>
+    <!-- H7: per_page -->
+    <form class="per-page-form" method="get" action="/admin/audit">
+      <input type="hidden" name="action_filter" value="{{ action_filter or '' }}">
+      <input type="hidden" name="actor_filter" value="{{ actor_filter or '' }}">
+      <input type="hidden" name="date_from" value="{{ date_from or '' }}">
+      <input type="hidden" name="date_to" value="{{ date_to or '' }}">
+      <label for="audit-per-page">페이지당</label>
+      <select id="audit-per-page" name="per_page" onchange="this.form.submit()">
+        <option value="20" {% if per_page == 20 %}selected{% endif %}>20개</option>
+        <option value="50" {% if per_page == 50 %}selected{% endif %}>50개</option>
+        <option value="100" {% if per_page == 100 %}selected{% endif %}>100개</option>
+        <option value="200" {% if per_page == 200 %}selected{% endif %}>200개</option>
+      </select>
+    </form>
+  </form>
+</div>
+
 <div class="card" style="padding:0">
   <div style="padding:8px 16px;border-bottom:1px solid var(--border)">
     <span class="text-muted">총 {{ total_count }}건</span>
@@ -39,10 +88,20 @@
     </thead>
     <tbody>
       {% for log in logs %}
-      <tr>
+      {# L8: 행 클릭 시 detail 모달. M8: actor email or sub 표시 #}
+      <tr class="audit-row" onclick="showAuditDetail(this)"
+          data-detail="{{ log.detail or '' }}">
         <td class="mono text-muted">{{ log.created_at|kst_dt }}</td>
-        <td class="mono text-muted truncate" style="max-width:110px">
-          {{ log.actor_sub[:14] ~ "…" if log.actor_sub else "system" }}
+        <td class="mono text-muted truncate" style="max-width:110px"
+            title="{{ log.actor_sub or 'system' }}">
+          {# M8: actor_email이 있으면 email, 없으면 sub 앞 14자 #}
+          {% if log.actor_email %}
+            {{ log.actor_email }}
+          {% elif log.actor_sub %}
+            {{ log.actor_sub[:14] }}…
+          {% else %}
+            system
+          {% endif %}
         </td>
         <td>
           <span class="badge
@@ -68,11 +127,11 @@
   <div style="padding:10px 16px;border-top:1px solid var(--border)">
     <div class="pagination">
       {% if page > 1 %}
-      <a href="?page={{ page - 1 }}">이전</a>
+      <a href="?page={{ page - 1 }}&per_page={{ per_page }}&action_filter={{ action_filter or '' }}&actor_filter={{ actor_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">이전</a>
       {% endif %}
       <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
       {% if page * per_page < total_count %}
-      <a href="?page={{ page + 1 }}">다음</a>
+      <a href="?page={{ page + 1 }}&per_page={{ per_page }}&action_filter={{ action_filter or '' }}&actor_filter={{ actor_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">다음</a>
       {% endif %}
     </div>
   </div>
@@ -85,4 +144,42 @@
   </div>
   {% endif %}
 </div>
+
+<!-- L8: 감사 로그 상세 모달 -->
+<div id="audit-detail-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.4);align-items:center;justify-content:center">
+  <div style="background:#fff;border:1px solid var(--border-strong);width:520px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column">
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <span>감사 로그 상세</span>
+      <button onclick="closeAuditModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1">×</button>
+    </div>
+    <div style="padding:16px;overflow-y:auto;flex:1">
+      <pre id="audit-detail-content" style="white-space:pre-wrap;font-family:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace;font-size:11px;background:var(--bg-elevated);padding:10px;border:1px solid var(--border);margin:0"></pre>
+    </div>
+  </div>
+</div>
+<script>
+function showAuditDetail(tr) {
+  var detail = tr.dataset.detail;
+  if (!detail) return;
+  // JSON 이쁘게 출력
+  var content;
+  try {
+    content = JSON.stringify(JSON.parse(detail), null, 2);
+  } catch(e) {
+    content = detail;
+  }
+  document.getElementById('audit-detail-content').textContent = content;
+  var modal = document.getElementById('audit-detail-modal');
+  modal.style.display = 'flex';
+}
+function closeAuditModal() {
+  document.getElementById('audit-detail-modal').style.display = 'none';
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeAuditModal();
+});
+document.getElementById('audit-detail-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeAuditModal();
+});
+</script>
 {% endblock %}

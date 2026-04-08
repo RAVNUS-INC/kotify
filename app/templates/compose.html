@@ -165,16 +165,9 @@
       {% endif %}
     </div>
 
+    {# M13: HTMX 자동 미리보기가 이미 있으므로 수동 "미리보기" 버튼 제거.
+       발송하기 버튼만 유지. #}
     <div class="flex">
-      <button type="button" class="btn btn-secondary"
-        hx-post="/compose/preview"
-        hx-target="#preview-result"
-        hx-include="#compose-form"
-        hx-swap="innerHTML">
-        <i data-lucide="eye"></i>
-        미리보기
-        <span class="htmx-indicator spinner"></span>
-      </button>
       {% if callers %}
       <button type="button" class="btn btn-primary" id="send-btn" onclick="openSendModal()">
         <i data-lucide="send"></i>

@@ -48,18 +48,35 @@
   <form action="/setup/complete" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
+    <!-- M15: stepper -->
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:1.5rem;font-size:12px;flex-wrap:wrap">
+      <span style="font-weight:700;color:#18181b">1 토큰</span>
+      <span style="color:#ccc">→</span>
+      <span style="color:#999">2 Keycloak</span>
+      <span style="color:#ccc">→</span>
+      <span style="color:#999">3 NCP</span>
+      <span style="color:#ccc">→</span>
+      <span style="color:#999">4 관리자</span>
+      <span style="color:#ccc">→</span>
+      <span style="color:#999">5 완료</span>
+    </div>
+
     <!-- Step 1: 토큰 확인 -->
     <div class="section">
       <div class="section-title">1단계: 관리자 토큰 확인</div>
       <p class="token-note">
         <strong>보안상 토큰은 화면에 표시되지 않습니다.</strong><br>
-        CT 콘솔(또는 SSH)에서 다음 명령으로 토큰을 확인한 뒤 아래에 입력하세요:
+        서버 콘솔(SSH 또는 서버에 직접 접속)에서 다음 명령으로 토큰을 확인한 뒤 아래에 입력하세요:
       </p>
-      <div class="token-box"><code>cat {{ setup_token_path }}</code></div>
-      <p class="form-hint">CT 콘솔에서 실행 → 출력된 32자 hex 문자열을 복사 → 아래 입력란에 붙여넣기</p>
+      <div style="position:relative;display:flex;align-items:center;gap:8px;margin-bottom:1rem">
+        <div class="token-box" style="flex:1;margin:0"><code id="token-cmd">cat {{ setup_token_path }}</code></div>
+        <button type="button" onclick="copyTokenCmd()" style="padding:0.4rem 0.75rem;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;white-space:nowrap" title="명령어 복사">복사</button>
+      </div>
+      <p class="form-hint">서버 콘솔에서 실행 → 출력된 32자 hex 문자열을 복사 → 아래 입력란에 붙여넣기</p>
       <div class="form-group" style="margin-top:0.75rem">
         <label for="field-token">Setup Token</label>
-        <input type="text" id="field-token" name="token" placeholder="setup token 붙여넣기" autocomplete="off" required
+        <input type="text" id="field-token" name="token" placeholder="setup token 붙여넣기"
+               autocomplete="off" required enterkeyhint="next"
                onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('verify-token-btn').click();}">
       </div>
       <div class="btn-row">
@@ -81,16 +98,16 @@
       <div class="form-group">
         <label for="field-keycloak-issuer">Issuer URL</label>
         <input type="text" id="field-keycloak-issuer" name="keycloak_issuer"
-               placeholder="https://keycloak.example.com/realms/sms-sys" required>
+               placeholder="https://keycloak.example.com/realms/sms-sys" required enterkeyhint="next">
         <div class="form-hint">예: https://keycloak.example.com/realms/kotify</div>
       </div>
       <div class="form-group">
         <label for="field-keycloak-client-id">Client ID</label>
-        <input type="text" id="field-keycloak-client-id" name="keycloak_client_id" value="sms-sys" required>
+        <input type="text" id="field-keycloak-client-id" name="keycloak_client_id" value="sms-sys" required enterkeyhint="next">
       </div>
       <div class="form-group">
         <label for="field-keycloak-client-secret">Client Secret</label>
-        <input type="password" id="field-keycloak-client-secret" name="keycloak_client_secret" required>
+        <input type="password" id="field-keycloak-client-secret" name="keycloak_client_secret" required enterkeyhint="next">
       </div>
       <div class="btn-row">
         <button type="button" class="btn btn-secondary"
@@ -169,6 +186,24 @@
       evt.detail.isError = false;
     }
   });
+  // M14: 토큰 명령어 복사
+  function copyTokenCmd() {
+    var cmd = document.getElementById('token-cmd');
+    if (!cmd) return;
+    navigator.clipboard.writeText(cmd.textContent.trim()).then(function() {
+      var btn = event.target;
+      btn.textContent = '복사됨!';
+      setTimeout(function() { btn.textContent = '복사'; }, 1500);
+    }).catch(function() {
+      // clipboard API 실패 시 fallback
+      var ta = document.createElement('textarea');
+      ta.value = cmd.textContent.trim();
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    });
+  }
 </script>
 </body>
 </html>

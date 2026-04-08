@@ -50,11 +50,13 @@ async def contacts_list(
     department: str = Query(""),
     active_only: bool = Query(False),
     page: int = Query(1, ge=1),
+    per_page: int = Query(50),
     sort: str = Query("name"),
     order: str = Query("asc"),
 ) -> HTMLResponse:
-    """연락처 목록."""
-    per_page = 50
+    """연락처 목록. H7 per_page 지원."""
+    # H7: clamp
+    per_page = max(1, min(per_page, 200))
     contacts, total = list_contacts(
         db,
         search=search or None,
@@ -131,6 +133,10 @@ async def contact_create(
         normalized_phone = normalize_phone(phone.strip())
         if normalized_phone is None:
             return RedirectResponse("/contacts/new?error=invalid_phone", status_code=303)
+
+    # M3: 전화번호 또는 이메일 중 하나 이상 필수 (라우트 레벨 검증)
+    if not normalized_phone and not email.strip():
+        return RedirectResponse("/contacts/new?error=phone_or_email_required", status_code=303)
 
     contact = create_contact(
         db,

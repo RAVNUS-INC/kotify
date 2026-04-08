@@ -18,17 +18,43 @@
 
 <!-- 검색 -->
 <div class="card" style="padding:10px 16px">
-  <form method="get" action="/groups" style="display:flex;gap:8px;align-items:flex-end">
-    <div style="flex:1">
+  <form id="groups-filter-form" method="get" action="/groups" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+    <input type="hidden" name="per_page" value="{{ per_page }}">
+    <div style="flex:1;min-width:160px">
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px" for="grp-search">그룹명 검색</label>
       <input type="text" id="grp-search" name="search" value="{{ search }}"
-        placeholder="그룹명 검색..." class="ctrl" style="width:100%">
+        placeholder="그룹명 검색..." class="ctrl" style="width:100%" autocomplete="off">
     </div>
     <button type="submit" class="btn btn-secondary btn-sm">
       <i data-lucide="search"></i> 검색
     </button>
+    <!-- H7: per_page 선택 -->
+    <form class="per-page-form" method="get" action="/groups">
+      <input type="hidden" name="search" value="{{ search }}">
+      <label for="groups-per-page">페이지당</label>
+      <select id="groups-per-page" name="per_page" onchange="this.form.submit()">
+        <option value="20" {% if per_page == 20 %}selected{% endif %}>20개</option>
+        <option value="50" {% if per_page == 50 %}selected{% endif %}>50개</option>
+        <option value="100" {% if per_page == 100 %}selected{% endif %}>100개</option>
+        <option value="200" {% if per_page == 200 %}selected{% endif %}>200개</option>
+      </select>
+    </form>
   </form>
 </div>
+<script>
+// M5: 그룹 검색 debounce
+(function() {
+  var inp = document.getElementById('grp-search');
+  if (!inp) return;
+  var t;
+  inp.addEventListener('input', function() {
+    clearTimeout(t);
+    t = setTimeout(function() {
+      document.getElementById('groups-filter-form').submit();
+    }, 500);
+  });
+})();
+</script>
 
 <div class="card" style="padding:0">
   <div style="padding:8px 16px;border-bottom:1px solid var(--border)">
@@ -86,14 +112,14 @@
   <div style="padding:10px 16px;border-top:1px solid var(--border)">
     <div class="pagination">
       {% if page > 1 %}
-      <a href="?search={{ search }}&page={{ page - 1 }}">이전</a>
+      <a href="?search={{ search }}&per_page={{ per_page }}&page={{ page - 1 }}">이전</a>
       {% endif %}
       {% for p in range(1, total_pages + 1) %}
-      <a href="?search={{ search }}&page={{ p }}"
+      <a href="?search={{ search }}&per_page={{ per_page }}&page={{ p }}"
          {% if p == page %}class="active"{% endif %}>{{ p }}</a>
       {% endfor %}
       {% if page < total_pages %}
-      <a href="?search={{ search }}&page={{ page + 1 }}">다음</a>
+      <a href="?search={{ search }}&per_page={{ per_page }}&page={{ page + 1 }}">다음</a>
       {% endif %}
     </div>
   </div>

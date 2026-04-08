@@ -13,6 +13,7 @@
 <!-- 필터 바 -->
 <div class="card" style="padding:10px 16px">
   <form method="get" action="/campaigns" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+    <input type="hidden" name="per_page" value="{{ per_page }}">
     <div>
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">상태</label>
       <select name="status" class="ctrl">
@@ -38,6 +39,21 @@
       </button>
       <a href="/campaigns" class="btn btn-secondary btn-sm">초기화</a>
     </div>
+    <!-- H7: per_page -->
+    <form class="per-page-form" method="get" action="/campaigns">
+      <input type="hidden" name="status" value="{{ status_filter or '' }}">
+      <input type="hidden" name="date_from" value="{{ date_from or '' }}">
+      <input type="hidden" name="date_to" value="{{ date_to or '' }}">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="order" value="{{ order }}">
+      <label for="campaigns-per-page">페이지당</label>
+      <select id="campaigns-per-page" name="per_page" onchange="this.form.submit()">
+        <option value="20" {% if per_page == 20 %}selected{% endif %}>20개</option>
+        <option value="50" {% if per_page == 50 %}selected{% endif %}>50개</option>
+        <option value="100" {% if per_page == 100 %}selected{% endif %}>100개</option>
+        <option value="200" {% if per_page == 200 %}selected{% endif %}>200개</option>
+      </select>
+    </form>
   </form>
 </div>
 
@@ -83,7 +99,11 @@
       {% for c in campaigns %}
       <tr>
         <td><a href="/campaigns/{{ c.id }}">#{{ c.id }}</a></td>
-        {% if is_admin %}<td class="text-muted mono truncate" style="max-width:100px">{{ c.created_by[:12] }}…</td>{% endif %}
+        {% if is_admin %}
+        <td class="text-muted truncate" style="max-width:110px" title="{{ c.created_by }}">
+          {{ creator_emails.get(c.created_by, c.created_by[:12] ~ '…') }}
+        </td>
+        {% endif %}
         <td class="mono">{{ c.caller_number|phone_fmt }}</td>
         <td>
           {% if c.message_type == "SMS" %}
@@ -119,11 +139,11 @@
   <div style="padding:10px 16px;border-top:1px solid var(--border)">
     <div class="pagination">
       {% if page > 1 %}
-      <a href="?page={{ page - 1 }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">이전</a>
+      <a href="?page={{ page - 1 }}&per_page={{ per_page }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&sort={{ sort }}&order={{ order }}">이전</a>
       {% endif %}
       <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
       {% if page * per_page < total_count %}
-      <a href="?page={{ page + 1 }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">다음</a>
+      <a href="?page={{ page + 1 }}&per_page={{ per_page }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&sort={{ sort }}&order={{ order }}">다음</a>
       {% endif %}
     </div>
   </div>

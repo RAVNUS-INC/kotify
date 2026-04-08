@@ -24,11 +24,13 @@
 
 <!-- 검색 + 필터 -->
 <div class="card" style="padding:10px 16px">
-  <form method="get" action="/contacts" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+  <form id="contacts-filter-form" method="get" action="/contacts" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+    <input type="hidden" name="per_page" value="{{ per_page }}">
     <div style="flex:2;min-width:160px">
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px" for="search-input">검색</label>
       <input type="text" id="search-input" name="search" value="{{ search }}"
-        placeholder="이름/전화번호/이메일/부서" class="ctrl" style="width:100%">
+        placeholder="이름/전화번호/이메일/부서" class="ctrl" style="width:100%"
+        autocomplete="off">
     </div>
     <div style="flex:1;min-width:100px">
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px" for="dept-input">부서</label>
@@ -43,8 +45,37 @@
     <button type="submit" class="btn btn-secondary btn-sm">
       <i data-lucide="search"></i> 검색
     </button>
+    <!-- H7: per_page 선택 -->
+    <form class="per-page-form" method="get" action="/contacts">
+      <input type="hidden" name="search" value="{{ search }}">
+      <input type="hidden" name="department" value="{{ department }}">
+      {% if active_only %}<input type="hidden" name="active_only" value="true">{% endif %}
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="order" value="{{ order }}">
+      <label for="contacts-per-page">페이지당</label>
+      <select id="contacts-per-page" name="per_page" onchange="this.form.submit()">
+        <option value="20" {% if per_page == 20 %}selected{% endif %}>20개</option>
+        <option value="50" {% if per_page == 50 %}selected{% endif %}>50개</option>
+        <option value="100" {% if per_page == 100 %}selected{% endif %}>100개</option>
+        <option value="200" {% if per_page == 200 %}selected{% endif %}>200개</option>
+      </select>
+    </form>
   </form>
 </div>
+<script>
+// M5: 검색 입력 debounce
+(function() {
+  var inp = document.getElementById('search-input');
+  if (!inp) return;
+  var t;
+  inp.addEventListener('input', function() {
+    clearTimeout(t);
+    t = setTimeout(function() {
+      document.getElementById('contacts-filter-form').submit();
+    }, 500);
+  });
+})();
+</script>
 
 <div class="card" style="padding:0">
   <div style="padding:8px 16px;border-bottom:1px solid var(--border)">
@@ -58,7 +89,7 @@
       <col>                          <!-- 이름 -->
       <col style="width: 130px">    <!-- 전화번호 -->
       <col>                          <!-- 이메일 -->
-      <col style="width: 100px">    <!-- 부서 -->
+      <col style="width: 120px">    <!-- 부서 -->
       <col style="width: 60px">     <!-- 상태 -->
       <col style="width: 130px">    <!-- 마지막 발송 -->
       <col style="width: 100px">    <!-- 관리 -->
@@ -93,7 +124,7 @@
           {% if c.active %}
           <span class="badge badge-success">활성</span>
           {% else %}
-          <span class="badge badge-fail">비활성</span>
+          <span class="badge badge-muted">비활성</span>
           {% endif %}
         </td>
         <td class="text-muted mono" style="font-size:11px">
@@ -123,14 +154,14 @@
   <div style="padding:10px 16px;border-top:1px solid var(--border)">
     <div class="pagination">
       {% if page > 1 %}
-      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ page - 1 }}">이전</a>
+      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&per_page={{ per_page }}&sort={{ sort }}&order={{ order }}&page={{ page - 1 }}">이전</a>
       {% endif %}
       {% for p in range(1, total_pages + 1) %}
-      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ p }}"
+      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&per_page={{ per_page }}&sort={{ sort }}&order={{ order }}&page={{ p }}"
          {% if p == page %}class="active"{% endif %}>{{ p }}</a>
       {% endfor %}
       {% if page < total_pages %}
-      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ page + 1 }}">다음</a>
+      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&per_page={{ per_page }}&sort={{ sort }}&order={{ order }}&page={{ page + 1 }}">다음</a>
       {% endif %}
     </div>
   </div>

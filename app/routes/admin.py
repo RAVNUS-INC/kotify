@@ -166,8 +166,11 @@ async def callers_list(
     db: Session = Depends(get_db),
     user: User = Depends(require_role("viewer", "sender", "admin")),
     _: None = Depends(require_setup_complete),
+    per_page: int = Query(50),
 ) -> HTMLResponse:
-    """발신번호 목록."""
+    """발신번호 목록. H7 per_page 지원."""
+    # H7: clamp
+    per_page = max(1, min(per_page, 200))
     callers = list(
         db.execute(select(Caller).order_by(Caller.is_default.desc(), Caller.id)).scalars().all()
     )
@@ -183,6 +186,7 @@ async def callers_list(
             "user": user,
             "user_roles": user_roles,
             "callers": callers,
+            "per_page": per_page,
         },
     )
 
@@ -323,29 +327,76 @@ async def audit_log_page(
     user: User = Depends(_admin_dep),
     _: None = Depends(require_setup_complete),
     page: int = Query(1, ge=1),
+    per_page: int = Query(50),
     sort: str = Query("created_at"),
     order: str = Query("desc"),
+    action_filter: str = Query(""),
+    actor_filter: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
 ) -> HTMLResponse:
-    """감사 로그 조회 (페이지네이션 50건, H5 정렬)."""
-    per_page = 50
+    """감사 로그 조회 (페이지네이션, M7 필터, M8 email join, H7 per_page)."""
+    # H7: per_page clamp
+    per_page = max(1, min(per_page, 200))
     offset = (page - 1) * per_page
 
     # H5: 정렬
     sort_expr = AuditLog.created_at.desc() if order != "asc" else AuditLog.created_at.asc()
 
-    logs = list(
-        db.execute(
-            select(AuditLog)
-            .order_by(sort_expr)
-            .offset(offset)
-            .limit(per_page)
-        ).scalars().all()
+    # M8: User join으로 email 가져오기
+    from sqlalchemy import and_
+
+    stmt = (
+        select(AuditLog, User.email.label("actor_email"))
+        .outerjoin(User, User.sub == AuditLog.actor_sub)
     )
 
-    # #14: COUNT 쿼리로 OOM 방지 (전체 조회 대신)
-    total_count = db.execute(
-        select(func.count()).select_from(select(AuditLog).subquery())
-    ).scalar_one()
+    # M7: 필터 적용
+    filters = []
+    if action_filter:
+        filters.append(AuditLog.action == action_filter)
+    if actor_filter:
+        pattern = f"%{actor_filter}%"
+        filters.append(
+            (AuditLog.actor_sub.like(pattern)) | (User.email.like(pattern))
+        )
+    if date_from:
+        filters.append(AuditLog.created_at >= date_from)
+    if date_to:
+        filters.append(AuditLog.created_at <= date_to + "T23:59:59.999999+00:00")
+    if filters:
+        stmt = stmt.where(and_(*filters))
+
+    stmt = stmt.order_by(sort_expr)
+
+    # COUNT
+    count_stmt = select(func.count()).select_from(
+        select(AuditLog)
+        .outerjoin(User, User.sub == AuditLog.actor_sub)
+        .where(and_(*filters) if filters else True)
+        .subquery()
+    )
+    total_count = db.execute(count_stmt).scalar_one()
+
+    rows = db.execute(stmt.offset(offset).limit(per_page)).all()
+
+    # AuditLog 객체에 actor_email 속성 주입
+    class _LogWithEmail:
+        def __init__(self, log: AuditLog, email: str | None) -> None:
+            self._log = log
+            self.actor_email = email
+
+        def __getattr__(self, name: str):  # type: ignore[override]
+            return getattr(self._log, name)
+
+    logs = [_LogWithEmail(row[0], row[1]) for row in rows]
+
+    # M7: 감사 로그에 존재하는 action 목록
+    audit_actions = list(
+        db.execute(
+            select(AuditLog.action).distinct().order_by(AuditLog.action)
+        ).scalars().all()
+    )
 
     try:
         user_roles = json.loads(user.roles)
@@ -364,5 +415,10 @@ async def audit_log_page(
             "total_count": total_count,
             "sort": sort,
             "order": order,
+            "action_filter": action_filter,
+            "actor_filter": actor_filter,
+            "date_from": date_from,
+            "date_to": date_to,
+            "audit_actions": audit_actions,
         },
     )

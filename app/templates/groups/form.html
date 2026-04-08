@@ -10,11 +10,12 @@
 
 {% block content %}
 <div class="card" style="max-width:480px">
+  <p class="form-legend">* 필수 항목</p>
   <form action="{{ action }}" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
     <div class="form-group">
-      <label for="name">그룹명 <span style="color:var(--error)">*</span></label>
+      <label for="name">그룹명 <span class="required">*</span></label>
       <input type="text" name="name" id="name"
         value="{{ group.name if group else '' }}"
         placeholder="예: VIP 고객, 마케팅팀" required>

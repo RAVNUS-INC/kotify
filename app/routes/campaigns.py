@@ -41,10 +41,14 @@ async def campaigns_list(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     page: int = Query(1, ge=1),
+    per_page: int = Query(20),
     sort: str = Query("created_at"),
     order: str = Query("desc"),
 ) -> HTMLResponse:
-    """캠페인 목록. viewer는 본인 것만, admin은 전체."""
+    """캠페인 목록. viewer는 본인 것만, admin은 전체. H7 per_page, M16 작성자 email."""
+    # H7: per_page clamp
+    per_page = max(1, min(per_page, 200))
+
     # H5: 정렬 컬럼 허용 목록
     _sort_cols = {
         "created_at": Campaign.created_at,
@@ -72,7 +76,6 @@ async def campaigns_list(
         except ValueError:
             stmt = stmt.where(Campaign.created_at <= date_to + "T23:59:59.999999+00:00")
 
-    per_page = 20
     offset = (page - 1) * per_page
 
     # #14: COUNT 쿼리로 OOM 방지
@@ -83,6 +86,16 @@ async def campaigns_list(
     paginated = list(
         db.execute(stmt.offset(offset).limit(per_page)).scalars().all()
     )
+
+    # M16: 작성자 sub → email 매핑 (admin 전용)
+    creator_emails: dict[str, str] = {}
+    if _is_admin(user) and paginated:
+        subs = list({c.created_by for c in paginated if c.created_by})
+        if subs:
+            rows = db.execute(
+                select(User.sub, User.email).where(User.sub.in_(subs))
+            ).all()
+            creator_emails = {row[0]: row[1] for row in rows if row[1]}
 
     try:
         user_roles = json.loads(user.roles)
@@ -105,6 +118,7 @@ async def campaigns_list(
             "is_admin": _is_admin(user),
             "sort": sort,
             "order": order,
+            "creator_emails": creator_emails,
         },
     )
 

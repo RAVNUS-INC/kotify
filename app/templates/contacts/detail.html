@@ -74,7 +74,7 @@
   {% if groups %}
   <div class="flex" style="flex-wrap:wrap;gap:6px">
     {% for g in groups %}
-    <a href="/groups/{{ g.id }}" class="badge badge-dispatched" style="text-decoration:none">{{ g.name }}</a>
+    <a href="/groups/{{ g.id }}" class="badge badge-muted" style="text-decoration:none;padding:3px 8px">{{ g.name }}</a>
     {% endfor %}
   </div>
   {% else %}

@@ -11,14 +11,17 @@
 {% block content %}
 {% if request.query_params.get("error") == "invalid_phone" %}
 <div class="alert alert-error" role="alert">올바르지 않은 전화번호 형식입니다.</div>
+{% elif request.query_params.get("error") == "phone_or_email_required" %}
+<div class="alert alert-error" role="alert">전화번호 또는 이메일 중 최소 하나는 입력해야 합니다.</div>
 {% endif %}
 
 <div class="card" style="max-width:560px">
+  <p class="form-legend">* 필수 항목</p>
   <form action="{{ action }}" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
     <div class="form-group">
-      <label for="name">이름 <span style="color:var(--error)">*</span></label>
+      <label for="name">이름 <span class="required">*</span></label>
       <input type="text" name="name" id="name"
         value="{{ contact.name if contact else '' }}" required>
     </div>
@@ -36,6 +39,7 @@
       <input type="text" name="email" id="email"
         value="{{ contact.email if contact else '' }}"
         placeholder="user@example.com">
+      <div class="form-hint">M3: 전화번호 또는 이메일 중 최소 하나는 입력해야 합니다.</div>
     </div>
 
     <div class="form-group">

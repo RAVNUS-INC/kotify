@@ -52,9 +52,11 @@ async def groups_list(
     _: None = Depends(require_setup_complete),
     search: str = Query(""),
     page: int = Query(1, ge=1),
+    per_page: int = Query(50),
 ) -> HTMLResponse:
-    """그룹 목록."""
-    per_page = 50
+    """그룹 목록. H7 per_page 지원."""
+    # H7: clamp
+    per_page = max(1, min(per_page, 200))
     groups, total = list_groups(db, search=search or None, page=page, per_page=per_page)
     total_pages = max(1, (total + per_page - 1) // per_page)
 
@@ -72,6 +74,7 @@ async def groups_list(
             "total": total,
             "page": page,
             "total_pages": total_pages,
+            "per_page": per_page,
             "search": search,
         },
     )
