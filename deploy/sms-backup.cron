@@ -1,0 +1,7 @@
+# /etc/cron.d/sms-backup
+# 사내 SMS 시스템 일일 DB 백업
+# 설치: cp /opt/sms/deploy/sms-backup.cron /etc/cron.d/sms-backup
+#        chmod 644 /etc/cron.d/sms-backup
+
+# 매일 00:00에 sms 사용자로 백업 스크립트 실행
+0 0 * * * sms /opt/sms/deploy/sms-backup.sh

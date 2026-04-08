@@ -1,0 +1,43 @@
+[Unit]
+Description=Internal SMS Service
+Documentation=https://github.com/RAVNUS-INC/sms-sys
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sms
+Group=sms
+WorkingDirectory=/opt/sms
+ExecStartPre=/opt/sms/.venv/bin/alembic -c /opt/sms/alembic.ini upgrade head
+ExecStart=/opt/sms/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --workers 1
+
+# 재시작 정책
+Restart=on-failure
+RestartSec=5
+
+# 로그 출력
+StandardOutput=append:/var/log/sms/stdout.log
+StandardError=append:/var/log/sms/stderr.log
+
+# 환경변수
+# DB 경로, master.key 경로는 app/config.py 기본값(/var/lib/sms/) 사용
+# .env 파일 없음 — 모든 설정은 DB + master.key로 관리
+Environment=PYTHONUNBUFFERED=1
+
+# ── 보안 강화 (Systemd Hardening) ────────────────────────────────────────────
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/sms /var/log/sms
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target
