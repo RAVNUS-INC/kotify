@@ -1,44 +1,55 @@
 {% extends "base.html" %}
-{% block title %}시스템 설정 — SMS 발송 시스템{% endblock %}
-{% block content %}
-<h1 class="page-title">시스템 설정</h1>
+{% block title %}시스템 설정 — kotify{% endblock %}
+{% block page_title %}시스템 설정{% endblock %}
 
+{% block content %}
 {% if request.query_params.get("saved") %}
-<div class="alert alert-success">설정이 저장되었습니다.</div>
+<div class="alert alert-success" role="alert">설정이 저장되었습니다.</div>
 {% endif %}
 
-<div class="alert alert-info" style="background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; padding:0.75rem; border-radius:4px; margin-bottom:1rem;">
-  ℹ️ <strong>참고:</strong> session.secret을 변경하면 서비스를 재시작해야 적용됩니다.
-  재시작 전까지는 모든 기존 세션이 유지됩니다.
+<div class="alert alert-info" role="alert">
+  <i data-lucide="info" style="width:13px;height:13px;vertical-align:middle;margin-right:4px"></i>
+  <strong>참고:</strong> session.secret을 변경하면 서비스를 재시작해야 적용됩니다.
 </div>
 
-<div class="card">
-  <div class="card-title">NCP 인증 테스트</div>
-  <button class="btn btn-secondary btn-sm"
-    hx-post="/admin/settings/test-ncp"
-    hx-target="#ncp-test-result"
-    hx-swap="innerHTML">
-    현재 키로 NCP 테스트 <span class="htmx-indicator spinner"></span>
-  </button>
-  <span id="ncp-test-result" style="margin-left:0.75rem"></span>
+<!-- NCP 인증 테스트 -->
+<div class="card" style="padding:12px 16px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-size:13px;font-weight:600">NCP 인증 테스트</span>
+    <button class="btn btn-secondary btn-sm"
+      hx-post="/admin/settings/test-ncp"
+      hx-target="#ncp-test-result"
+      hx-swap="innerHTML">
+      <i data-lucide="zap"></i>
+      현재 키로 NCP 테스트
+      <span class="htmx-indicator spinner"></span>
+    </button>
+    <span id="ncp-test-result"></span>
+  </div>
 </div>
 
 <form action="/admin/settings" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
   <!-- Keycloak -->
   <div class="card">
     <div class="card-title">Keycloak 설정</div>
     <div class="form-group">
-      <label>Issuer URL</label>
-      <input type="text" name="keycloak_issuer" value="{{ public_settings.get('keycloak.issuer', '') }}" placeholder="https://keycloak.example.com/realms/sms-sys">
+      <label for="kc-issuer">Issuer URL</label>
+      <input type="text" id="kc-issuer" name="keycloak_issuer"
+        value="{{ public_settings.get('keycloak.issuer', '') }}"
+        placeholder="https://keycloak.example.com/realms/sms-sys">
     </div>
     <div class="form-group">
-      <label>Client ID</label>
-      <input type="text" name="keycloak_client_id" value="{{ public_settings.get('keycloak.client_id', '') }}" placeholder="sms-sys">
+      <label for="kc-client-id">Client ID</label>
+      <input type="text" id="kc-client-id" name="keycloak_client_id"
+        value="{{ public_settings.get('keycloak.client_id', '') }}"
+        placeholder="sms-sys">
     </div>
     <div class="form-group">
-      <label>Client Secret</label>
-      <input type="password" name="keycloak_client_secret" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('keycloak.client_secret', '') }})">
+      <label for="kc-client-secret">Client Secret</label>
+      <input type="password" id="kc-client-secret" name="keycloak_client_secret"
+        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('keycloak.client_secret', '') }})">
       <div class="form-hint">빈 값이면 변경되지 않습니다.</div>
     </div>
   </div>
@@ -47,17 +58,20 @@
   <div class="card">
     <div class="card-title">NCP SENS 설정</div>
     <div class="form-group">
-      <label>Access Key</label>
-      <input type="text" name="ncp_access_key" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.access_key', '') }})">
+      <label for="ncp-access-key">Access Key</label>
+      <input type="text" id="ncp-access-key" name="ncp_access_key"
+        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.access_key', '') }})">
       <div class="form-hint">빈 값이면 변경되지 않습니다.</div>
     </div>
     <div class="form-group">
-      <label>Secret Key</label>
-      <input type="password" name="ncp_secret_key" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.secret_key', '') }})">
+      <label for="ncp-secret-key">Secret Key</label>
+      <input type="password" id="ncp-secret-key" name="ncp_secret_key"
+        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.secret_key', '') }})">
     </div>
     <div class="form-group">
-      <label>Service ID</label>
-      <input type="text" name="ncp_service_id" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.service_id', '') }})">
+      <label for="ncp-service-id">Service ID</label>
+      <input type="text" id="ncp-service-id" name="ncp_service_id"
+        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('ncp.service_id', '') }})">
     </div>
   </div>
 
@@ -65,16 +79,21 @@
   <div class="card">
     <div class="card-title">앱 설정</div>
     <div class="form-group">
-      <label>공개 URL</label>
-      <input type="text" name="app_public_url" value="{{ public_settings.get('app.public_url', '') }}" placeholder="https://sms.example.com">
+      <label for="app-public-url">공개 URL</label>
+      <input type="text" id="app-public-url" name="app_public_url"
+        value="{{ public_settings.get('app.public_url', '') }}"
+        placeholder="https://sms.example.com">
     </div>
     <div class="form-group">
-      <label>세션 시크릿</label>
-      <input type="password" name="session_secret" placeholder="변경 시에만 입력 (현재: {{ secret_display.get('session.secret', '') }})">
+      <label for="session-secret">세션 시크릿</label>
+      <input type="password" id="session-secret" name="session_secret"
+        placeholder="변경 시에만 입력 (현재: {{ secret_display.get('session.secret', '') }})">
       <div class="form-hint">변경 시 모든 사용자 세션이 만료됩니다.</div>
     </div>
   </div>
 
-  <button type="submit" class="btn btn-primary">설정 저장</button>
+  <button type="submit" class="btn btn-primary">
+    <i data-lucide="save"></i> 설정 저장
+  </button>
 </form>
 {% endblock %}

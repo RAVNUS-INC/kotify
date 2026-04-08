@@ -1,12 +1,13 @@
+<div class="table-wrapper">
 <table>
   <thead>
     <tr>
       <th>번호</th>
       <th>원본 입력</th>
-      <th>상태</th>
-      <th>결과</th>
-      <th>코드</th>
-      <th>완료 시각</th>
+      <th style="width:80px">상태</th>
+      <th>결과 메시지</th>
+      <th class="text-right" style="width:70px">결과 코드</th>
+      <th style="width:130px">완료 시각</th>
     </tr>
   </thead>
   <tbody>
@@ -16,42 +17,42 @@
       <td class="mono text-muted">{{ msg.to_number_raw }}</td>
       <td>
         {% if msg.result_status == "success" %}
-        <span class="badge badge-success">✓ 성공</span>
+        <span class="badge badge-success">성공</span>
         {% elif msg.status == "TIMEOUT" %}
-        <span class="badge badge-fail">⏱ 타임아웃</span>
+        <span class="badge badge-fail">타임아웃</span>
         {% elif msg.status == "UNKNOWN" %}
-        <span class="badge" style="background:#f3f4f6;color:#666">알수없음</span>
+        <span class="badge" style="background:var(--bg-elevated);color:var(--text-muted)">알수없음</span>
         {% elif msg.status in ("PENDING", "READY", "PROCESSING") %}
-        <span class="badge badge-pending">⏳ 대기</span>
+        <span class="badge badge-pending">대기</span>
         {% elif msg.result_status == "fail" %}
-        <span class="badge badge-fail">✗ 실패</span>
+        <span class="badge badge-fail">실패</span>
         {% else %}
         <span class="badge">{{ msg.status }}</span>
         {% endif %}
       </td>
-      <td class="text-muted">
-        {% if msg.result_code %}
-        {{ msg.result_code }}
-        {% if msg.result_message %} — {{ msg.result_message }}{% endif %}
-        {% endif %}
+      <td class="text-muted" style="font-size:11px">
+        {{ msg.result_message or describe_ncp(msg.result_code) }}
       </td>
-      <td class="mono text-muted">{{ msg.result_code or "" }}</td>
-      <td class="text-muted">{{ msg.complete_time[:16].replace("T", " ") if msg.complete_time else "—" }}</td>
+      <td class="mono text-right text-muted">{{ msg.result_code or "—" }}</td>
+      <td class="mono text-muted">{{ msg.complete_time|kst_dt if msg.complete_time else "—" }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 
 {% if total_count > per_page %}
-<div class="pagination">
-  {% if page > 1 %}
-  <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page - 1 }}"
-     hx-target="#recipients-table" hx-swap="innerHTML">이전</a>
-  {% endif %}
-  <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
-  {% if page * per_page < total_count %}
-  <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page + 1 }}"
-     hx-target="#recipients-table" hx-swap="innerHTML">다음</a>
-  {% endif %}
+<div style="padding:10px 16px;border-top:1px solid var(--border)">
+  <div class="pagination">
+    {% if page > 1 %}
+    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page - 1 }}"
+       hx-target="#recipients-table" hx-swap="innerHTML">이전</a>
+    {% endif %}
+    <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
+    {% if page * per_page < total_count %}
+    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page + 1 }}"
+       hx-target="#recipients-table" hx-swap="innerHTML">다음</a>
+    {% endif %}
+  </div>
 </div>
 {% endif %}

@@ -1,44 +1,58 @@
 {% extends "base.html" %}
-{% block title %}주소록 — SMS 발송 시스템{% endblock %}
-{% block content %}
-<h1 class="page-title">주소록</h1>
+{% block title %}주소록 — kotify{% endblock %}
+{% block page_title %}주소록{% endblock %}
+{% block page_actions %}
+  {% if "sender" in user_roles or "admin" in user_roles %}
+  <a href="/contacts/new" class="btn btn-primary btn-sm">
+    <i data-lucide="user-plus"></i> 새 연락처
+  </a>
+  <a href="/contacts/import" class="btn btn-secondary btn-sm">
+    <i data-lucide="upload"></i> CSV 가져오기
+  </a>
+  {% endif %}
+  <a href="/contacts/export" class="btn btn-secondary btn-sm">
+    <i data-lucide="download"></i> CSV 내보내기
+  </a>
+{% endblock %}
 
+{% block content %}
 {% if request.query_params.get("created") %}
-<div class="alert alert-success">연락처가 추가되었습니다.</div>
+<div class="alert alert-success" role="alert">연락처가 추가되었습니다.</div>
 {% elif request.query_params.get("deleted") %}
-<div class="alert alert-success">연락처가 삭제되었습니다.</div>
+<div class="alert alert-success" role="alert">연락처가 삭제되었습니다.</div>
 {% endif %}
 
 <!-- 검색 + 필터 -->
-<div class="card">
-  <form method="get" action="/contacts" class="flex" style="flex-wrap:wrap;gap:0.5rem">
-    <div class="form-group" style="flex:2;min-width:180px;margin-bottom:0">
-      <input type="text" name="search" value="{{ search }}" placeholder="이름/전화번호/이메일/부서 검색">
+<div class="card" style="padding:10px 16px">
+  <form method="get" action="/contacts" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+    <div style="flex:2;min-width:160px">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px" for="search-input">검색</label>
+      <input type="text" id="search-input" name="search" value="{{ search }}"
+        placeholder="이름/전화번호/이메일/부서" class="ctrl" style="width:100%">
     </div>
-    <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0">
-      <input type="text" name="department" value="{{ department }}" placeholder="부서 필터">
+    <div style="flex:1;min-width:100px">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px" for="dept-input">부서</label>
+      <input type="text" id="dept-input" name="department" value="{{ department }}"
+        placeholder="부서 필터" class="ctrl" style="width:100%">
     </div>
-    <div class="form-group" style="margin-bottom:0;display:flex;align-items:center;gap:0.4rem">
-      <input type="checkbox" name="active_only" id="active_only" value="true" {% if active_only %}checked{% endif %}>
-      <label for="active_only" style="font-weight:normal;margin-bottom:0">활성만</label>
+    <div style="display:flex;align-items:center;gap:5px;padding-bottom:2px">
+      <input type="checkbox" name="active_only" id="active_only" value="true"
+        {% if active_only %}checked{% endif %}>
+      <label for="active_only" style="font-size:12px;font-weight:normal;margin-bottom:0">활성만</label>
     </div>
-    <button type="submit" class="btn btn-secondary btn-sm">검색</button>
+    <button type="submit" class="btn btn-secondary btn-sm">
+      <i data-lucide="search"></i> 검색
+    </button>
   </form>
 </div>
 
-<!-- 우상단 버튼 -->
-<div class="flex" style="justify-content:flex-end;margin-bottom:0.75rem">
-  {% if "sender" in user_roles or "admin" in user_roles %}
-  <a href="/contacts/new" class="btn btn-primary btn-sm">+ 새 연락처</a>
-  <a href="/contacts/import" class="btn btn-secondary btn-sm">CSV 가져오기</a>
-  {% endif %}
-  <a href="/contacts/export" class="btn btn-secondary btn-sm">CSV 내보내기</a>
-</div>
+<div class="card" style="padding:0">
+  <div style="padding:8px 16px;border-bottom:1px solid var(--border)">
+    <span class="text-muted">총 {{ total }}명</span>
+  </div>
 
-<!-- 목록 -->
-<div class="card">
-  <div style="margin-bottom:0.5rem;font-size:13px;color:#666">총 {{ total }}명</div>
   {% if contacts %}
+  <div class="table-wrapper">
   <table>
     <thead>
       <tr>
@@ -46,9 +60,9 @@
         <th>전화번호</th>
         <th>이메일</th>
         <th>부서</th>
-        <th>상태</th>
-        <th>마지막 발송</th>
-        <th>관리</th>
+        <th style="width:60px">상태</th>
+        <th style="width:130px">마지막 발송</th>
+        <th style="width:100px">관리</th>
       </tr>
     </thead>
     <tbody>
@@ -65,11 +79,11 @@
           <span class="badge badge-fail">비활성</span>
           {% endif %}
         </td>
-        <td class="text-muted">
-          {% if c.last_sent_at %}{{ c.last_sent_at[:10] }} ({{ c.last_sent_channel or "" }}){% else %}—{% endif %}
+        <td class="text-muted mono" style="font-size:11px">
+          {% if c.last_sent_at %}{{ c.last_sent_at[:10] }}{% if c.last_sent_channel %} ({{ c.last_sent_channel }}){% endif %}{% else %}—{% endif %}
         </td>
         <td>
-          <div class="flex" style="gap:0.3rem">
+          <div class="flex" style="gap:3px">
             {% if "sender" in user_roles or "admin" in user_roles %}
             <a href="/contacts/{{ c.id }}/edit" class="btn btn-secondary btn-sm">편집</a>
             {% endif %}
@@ -86,25 +100,38 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
-  <!-- 페이지네이션 -->
   {% if total_pages > 1 %}
-  <div class="pagination">
-    {% if page > 1 %}
-    <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ page - 1 }}">이전</a>
-    {% endif %}
-    {% for p in range(1, total_pages + 1) %}
-    <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ p }}"
-       {% if p == page %}class="active"{% endif %}>{{ p }}</a>
-    {% endfor %}
-    {% if page < total_pages %}
-    <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ page + 1 }}">다음</a>
-    {% endif %}
+  <div style="padding:10px 16px;border-top:1px solid var(--border)">
+    <div class="pagination">
+      {% if page > 1 %}
+      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ page - 1 }}">이전</a>
+      {% endif %}
+      {% for p in range(1, total_pages + 1) %}
+      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ p }}"
+         {% if p == page %}class="active"{% endif %}>{{ p }}</a>
+      {% endfor %}
+      {% if page < total_pages %}
+      <a href="?search={{ search }}&department={{ department }}&active_only={{ active_only }}&page={{ page + 1 }}">다음</a>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
 
   {% else %}
-  <p class="text-muted">연락처가 없습니다.</p>
+  <div class="empty-state">
+    <i data-lucide="users-round"></i>
+    {% if search or department or active_only %}
+    <p>검색 조건에 맞는 연락처가 없습니다.</p>
+    <a href="/contacts" class="btn btn-secondary btn-sm">필터 초기화</a>
+    {% else %}
+    <p>등록된 연락처가 없습니다.</p>
+    {% if "sender" in user_roles or "admin" in user_roles %}
+    <a href="/contacts/new" class="btn btn-primary btn-sm">첫 연락처 추가</a>
+    {% endif %}
+    {% endif %}
+  </div>
   {% endif %}
 </div>
 {% endblock %}

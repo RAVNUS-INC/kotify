@@ -127,12 +127,34 @@ async def campaign_detail(
     )
 
 
+@router.get("/{campaign_id}/progress", response_class=HTMLResponse)
+async def campaign_progress(
+    campaign_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    _: None = Depends(require_setup_complete),
+) -> HTMLResponse:
+    """진행 카드 fragment (HTMX 폴링용)."""
+    campaign = db.get(Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(404)
+    if not _can_access_campaign(user, campaign):
+        raise HTTPException(403)
+    return templates.TemplateResponse(
+        request,
+        "campaigns/_progress.html",
+        {"campaign": campaign},
+    )
+
+
 @router.get("/{campaign_id}/recipients", response_class=HTMLResponse)
 async def campaign_recipients(
     campaign_id: int,
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
+    _: None = Depends(require_setup_complete),
     page: int = Query(1, ge=1),
 ) -> HTMLResponse:
     """HTMX fragment — 수신자 결과 테이블 (페이지네이션 50건)."""
@@ -177,6 +199,7 @@ async def campaign_refresh(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
+    _: None = Depends(require_setup_complete),
     _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
     """HTMX — 폴링 강제 트리거."""

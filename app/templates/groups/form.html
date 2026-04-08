@@ -1,15 +1,22 @@
 {% extends "base.html" %}
-{% block title %}{% if group %}그룹 편집{% else %}새 그룹{% endif %} — SMS 발송 시스템{% endblock %}
-{% block content %}
-<h1 class="page-title">{% if group %}그룹 편집{% else %}새 그룹 만들기{% endif %}</h1>
+{% block title %}{% if group %}그룹 편집{% else %}새 그룹{% endif %} — kotify{% endblock %}
+{% block page_title %}{% if group %}그룹 편집{% else %}새 그룹 만들기{% endif %}{% endblock %}
+{% block page_actions %}
+  <a href="{% if group %}/groups/{{ group.id }}{% else %}/groups{% endif %}"
+     class="btn btn-secondary btn-sm">
+    <i data-lucide="arrow-left"></i> 취소
+  </a>
+{% endblock %}
 
-<div class="card">
+{% block content %}
+<div class="card" style="max-width:480px">
   <form action="{{ action }}" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
     <div class="form-group">
-      <label for="name">그룹명 <span style="color:#dc2626">*</span></label>
-      <input type="text" name="name" id="name" value="{{ group.name if group else '' }}"
+      <label for="name">그룹명 <span style="color:var(--error)">*</span></label>
+      <input type="text" name="name" id="name"
+        value="{{ group.name if group else '' }}"
         placeholder="예: VIP 고객, 마케팅팀" required>
     </div>
 
@@ -19,8 +26,10 @@
         placeholder="그룹에 대한 간단한 설명">{{ group.description if group else '' }}</textarea>
     </div>
 
-    <div class="flex" style="margin-top:1rem">
-      <button type="submit" class="btn btn-primary">저장</button>
+    <div class="flex" style="margin-top:14px">
+      <button type="submit" class="btn btn-primary">
+        <i data-lucide="save"></i> 저장
+      </button>
       <a href="{% if group %}/groups/{{ group.id }}{% else %}/groups{% endif %}"
          class="btn btn-secondary">취소</a>
     </div>

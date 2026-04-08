@@ -1,34 +1,49 @@
-<div class="card" style="border-color: {% if can_send %}#86efac{% elif msg_error or not msg_ok %}#fca5a5{% else %}#ddd{% endif %}">
+<div class="card" style="border-color: {% if can_send %}var(--primary-border){% elif msg_error or not msg_ok %}#fca5a5{% else %}var(--border){% endif %}">
   {% if phone_error == "stub" %}
-  <div class="alert alert-warning">
-    ⚠ phone.py가 아직 구현되지 않았습니다 (stub). 번호 검증을 사용할 수 없습니다.
+  <div class="alert alert-warning" role="alert">
+    전화번호 검증 모듈(phone.py)이 아직 구현되지 않았습니다 (stub). 번호 검증을 사용할 수 없습니다.
   </div>
   {% else %}
-  <div style="margin-bottom:0.75rem">
-    <strong>번호 검증 결과</strong>
-    <div style="margin-top:0.4rem">
-      <span class="ok">✓ 유효: {{ valid_count }}명</span>
+  <div style="margin-bottom:10px">
+    <strong style="font-size:12px">번호 검증 결과</strong>
+    <div style="margin-top:5px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="ok">
+        <i data-lucide="check" style="width:12px;height:12px;vertical-align:middle"></i>
+        유효: <span id="current-valid-count">{{ valid_count }}</span>명
+      </span>
       {% if invalid_numbers %}
-      &nbsp;
-      <span class="err">✗ 잘못된 번호: {{ invalid_numbers|length }}개</span>
-      <details style="margin-top:0.4rem">
-        <summary class="text-muted" style="cursor:pointer">잘못된 번호 목록 보기</summary>
-        <ul style="margin:0.5rem 0 0 1rem; font-family:monospace; font-size:12px; color:#991b1b">
-          {% for num in invalid_numbers %}
-          <li>{{ num }}</li>
-          {% endfor %}
-        </ul>
-      </details>
+      <span class="err">
+        <i data-lucide="x" style="width:12px;height:12px;vertical-align:middle"></i>
+        잘못된 번호: {{ invalid_numbers|length }}개
+      </span>
       {% endif %}
     </div>
+
+    {% if invalid_numbers %}
+    <details style="margin-top:6px">
+      <summary class="text-muted" style="cursor:pointer;font-size:11px">잘못된 번호 목록 보기</summary>
+      <ul style="margin:5px 0 0 14px;font-size:11px;color:#991b1b;font-family:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace">
+        {% for num in invalid_numbers %}
+        <li>{{ num }}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    <div style="margin-top:6px">
+      <button type="button" class="btn btn-secondary btn-sm" id="remove-invalid-btn"
+        onclick="removeInvalidNumbers({{ invalid_numbers | tojson }})">
+        <i data-lucide="trash-2"></i>
+        잘못된 번호 {{ invalid_numbers|length }}개 자동 제거
+      </button>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 
-  <div>
-    <strong>메시지 정보</strong>
-    <div style="margin-top:0.4rem">
+  <div style="margin-bottom:8px">
+    <strong style="font-size:12px">메시지 정보</strong>
+    <div style="margin-top:5px">
       {% if msg_ok %}
-      <span class="ok">{{ byte_len }} byte</span>
+      <span class="ok mono">{{ byte_len }} byte</span>
       &nbsp;→&nbsp;
       {% if message_type == "SMS" %}
       <span class="badge badge-success">SMS</span>
@@ -38,17 +53,18 @@
       <span class="text-muted">(≤ 2000 byte)</span>
       {% endif %}
       {% else %}
-      <span class="err">✗ {{ msg_error }}</span>
+      <span class="err">{{ msg_error }}</span>
       {% endif %}
     </div>
   </div>
 
   {% if too_many %}
-  <div class="alert alert-error" style="margin-top:0.75rem; margin-bottom:0; background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; padding:0.75rem; border-radius:4px;">
-    ✗ 수신자가 {{ valid_count }}명으로 1회 최대 {{ max_recipients }}명을 초과합니다. 수신자 수를 줄이세요.
+  <div class="alert alert-error" role="alert" style="margin-bottom:0">
+    <i data-lucide="alert-circle" style="width:12px;height:12px;vertical-align:middle"></i>
+    수신자가 {{ valid_count }}명으로 1회 최대 {{ max_recipients }}명을 초과합니다. 수신자 수를 줄이세요.
   </div>
   {% elif not can_send %}
-  <div class="alert alert-error" style="margin-top:0.75rem; margin-bottom:0">
+  <div class="alert alert-error" role="alert" style="margin-bottom:0">
     {% if invalid_numbers %}
     잘못된 번호를 수정하거나 제거한 뒤 발송하세요.
     {% elif valid_count == 0 %}
@@ -57,5 +73,28 @@
     메시지 오류를 수정하세요.
     {% endif %}
   </div>
+  {% elif can_send %}
+  <div class="alert alert-success" role="alert" style="margin-bottom:0;padding:6px 10px">
+    <i data-lucide="check-circle" style="width:12px;height:12px;vertical-align:middle"></i>
+    발송 가능 — {{ valid_count }}명에게 {{ message_type }} 발송합니다.
+  </div>
   {% endif %}
 </div>
+
+<script>
+// #U3: 잘못된 번호 자동 제거
+function removeInvalidNumbers(invalidList) {
+  var ta = document.getElementById('recipients_text');
+  if (!ta) return;
+  var lines = ta.value.split(/[\n,]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+  // 정규화하여 비교 (숫자만)
+  var invalidNormalized = invalidList.map(function(n) { return n.replace(/\D/g, ''); });
+  var filtered = lines.filter(function(line) {
+    return !invalidNormalized.includes(line.replace(/\D/g, ''));
+  });
+  ta.value = filtered.join('\n');
+  // HTMX로 미리보기 갱신
+  ta.dispatchEvent(new Event('change'));
+}
+if (typeof lucide !== 'undefined') lucide.createIcons();
+</script>

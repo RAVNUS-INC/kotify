@@ -1,22 +1,26 @@
 {% extends "base.html" %}
-{% block title %}새 발송 — SMS 발송 시스템{% endblock %}
-{% block content %}
-<h1 class="page-title">신규 공지 발송</h1>
+{% block title %}새 발송 — kotify{% endblock %}
+{% block page_title %}신규 공지 발송{% endblock %}
 
-{% if request.query_params.get("error") %}
-<div class="alert alert-error">
-  오류: {{ request.query_params.get("error") }}
+{% block content %}
+{% if error_slug %}
+<div class="alert alert-error" role="alert">
+  <i data-lucide="alert-circle" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>
+  {{ t_error(error_slug) }}
 </div>
 {% endif %}
 
 <div class="card">
   <form id="compose-form" action="/compose/send" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
     <div class="form-group">
       <label for="caller_id">발신번호</label>
       <select name="caller_id" id="caller_id" required>
         {% for c in callers %}
-        <option value="{{ c.id }}" {% if default_caller and c.id == default_caller.id %}selected{% endif %}>
+        <option value="{{ c.id }}"
+          {% if preserved_caller_id and c.id == preserved_caller_id %}selected
+          {% elif not preserved_caller_id and default_caller and c.id == default_caller.id %}selected{% endif %}>
           {{ c.label }} ({{ c.number }})
         </option>
         {% endfor %}
@@ -26,24 +30,37 @@
     <!-- 수신자 선택 방식 -->
     <div class="form-group">
       <label>수신자 선택 방식</label>
-      <div class="flex" style="gap:1.25rem;flex-wrap:wrap;margin-top:0.25rem">
-        <label style="font-weight:normal"><input type="radio" name="source" value="manual" {% if preselect_group_id == 0 %}checked{% endif %} onchange="toggleSource()"> 직접 입력</label>
-        <label style="font-weight:normal"><input type="radio" name="source" value="groups" {% if preselect_group_id != 0 %}checked{% endif %} onchange="toggleSource()"> 그룹 선택</label>
-        <label style="font-weight:normal"><input type="radio" name="source" value="contacts" onchange="toggleSource()"> 개별 연락처</label>
+      <div class="flex" style="gap:16px;flex-wrap:wrap;margin-top:4px">
+        <label style="font-weight:normal;display:flex;align-items:center;gap:5px">
+          <input type="radio" name="source" value="manual"
+            {% if preselect_group_id == 0 %}checked{% endif %}
+            onchange="toggleSource()"> 직접 입력
+        </label>
+        <label style="font-weight:normal;display:flex;align-items:center;gap:5px">
+          <input type="radio" name="source" value="groups"
+            {% if preselect_group_id != 0 %}checked{% endif %}
+            onchange="toggleSource()"> 그룹 선택
+        </label>
+        <label style="font-weight:normal;display:flex;align-items:center;gap:5px">
+          <input type="radio" name="source" value="contacts" onchange="toggleSource()"> 개별 연락처
+        </label>
       </div>
     </div>
 
     <!-- 직접 입력 -->
     <div id="source-manual" class="source-section" {% if preselect_group_id != 0 %}style="display:none"{% endif %}>
       <div class="form-group">
-        <label for="recipients_text">수신자 번호 <span class="text-muted">(한 줄에 한 번호 또는 콤마 구분)</span></label>
-        <textarea name="recipients_text" id="recipients_text" rows="6"
+        <label for="recipients_text">
+          수신자 번호
+          <span class="text-muted">(한 줄에 한 번호 또는 콤마 구분)</span>
+        </label>
+        <textarea name="recipients_text" id="recipients_text" rows="5"
           placeholder="010-1234-5678&#10;01087654321&#10;+82-10-9999-8888"
           hx-post="/compose/preview"
           hx-trigger="change delay:800ms"
           hx-target="#preview-result"
           hx-include="#compose-form"
-          hx-swap="innerHTML"></textarea>
+          hx-swap="innerHTML">{{ recipients_text or "" }}</textarea>
       </div>
     </div>
 
@@ -52,10 +69,11 @@
       <div class="form-group">
         <label>그룹 선택 <span class="text-muted">(Ctrl+클릭으로 다중 선택)</span></label>
         {% if groups %}
-        <select name="group_ids" multiple size="6"
-          style="width:100%;border:1px solid #ccc;border-radius:4px;padding:0.25rem">
+        <select name="group_ids" multiple size="6">
           {% for g in groups %}
-          <option value="{{ g.id }}" {% if g.id == preselect_group_id %}selected{% endif %}>{{ g.name }} ({{ g.member_count }}명)</option>
+          <option value="{{ g.id }}" {% if g.id == preselect_group_id %}selected{% endif %}>
+            {{ g.name }} ({{ g.member_count }}명)
+          </option>
           {% endfor %}
         </select>
         {% else %}
@@ -70,10 +88,9 @@
         <label>개별 연락처 <span class="text-muted">(Ctrl+클릭으로 다중 선택)</span></label>
         <input type="text" id="contact-filter" placeholder="이름/전화번호 검색..."
           onkeyup="filterContacts(this.value)"
-          style="margin-bottom:0.4rem">
+          style="margin-bottom:6px;padding:4px 8px;border:1px solid var(--border-strong);border-radius:var(--radius);font-size:12px;width:100%">
         {% if contacts %}
-        <select name="contact_ids" multiple size="10" id="contact-select"
-          style="width:100%;border:1px solid #ccc;border-radius:4px;padding:0.25rem">
+        <select name="contact_ids" multiple size="10" id="contact-select">
           {% for c in contacts %}
           <option value="{{ c.id }}">{{ c.name }} ({{ c.phone or "번호없음" }}{% if c.department %} · {{ c.department }}{% endif %})</option>
           {% endfor %}
@@ -84,19 +101,21 @@
       </div>
     </div>
 
+    <!-- 본문 -->
     <div class="form-group">
-      <label for="content">본문</label>
-      <textarea name="content" id="content" rows="5"
+      <label for="content-textarea">본문</label>
+      <textarea name="content" id="content-textarea" rows="5"
         placeholder="메시지를 입력하세요 (SMS: 90byte 이하, LMS: 2000byte 이하)"
         hx-post="/compose/preview"
         hx-trigger="keyup delay:600ms"
         hx-target="#preview-result"
         hx-include="#compose-form"
-        hx-swap="innerHTML"></textarea>
+        hx-swap="innerHTML">{{ content or "" }}</textarea>
+      <div id="byte-counter" class="byte-counter ok">0 byte (SMS)</div>
     </div>
 
     <!-- 미리보기 결과 영역 -->
-    <div id="preview-result" style="margin-bottom:1rem">
+    <div id="preview-result" style="margin-bottom:12px">
       {% if preview %}
         {% include "_compose_preview.html" %}
       {% endif %}
@@ -108,9 +127,12 @@
         hx-target="#preview-result"
         hx-include="#compose-form"
         hx-swap="innerHTML">
-        미리보기 <span class="htmx-indicator spinner"></span>
+        <i data-lucide="eye"></i>
+        미리보기
+        <span class="htmx-indicator spinner"></span>
       </button>
       <button type="submit" class="btn btn-primary" id="send-btn">
+        <i data-lucide="send"></i>
         발송하기
       </button>
     </div>
@@ -124,6 +146,7 @@ function toggleSource() {
   document.getElementById('source-groups').style.display = source === 'groups' ? '' : 'none';
   document.getElementById('source-contacts').style.display = source === 'contacts' ? '' : 'none';
 }
+
 function filterContacts(query) {
   query = query.toLowerCase();
   var select = document.getElementById('contact-select');
@@ -133,5 +156,39 @@ function filterContacts(query) {
     opt.style.display = opt.text.toLowerCase().includes(query) ? '' : 'none';
   }
 }
+
+// ── 본문 byte 카운터 (#U2) ──────────────────────────────────────────────────
+function measureEucKrBytes(text) {
+  var bytes = 0;
+  for (var i = 0; i < text.length; i++) {
+    bytes += text.charCodeAt(i) > 127 ? 2 : 1;
+  }
+  return bytes;
+}
+var contentTa = document.getElementById('content-textarea');
+var byteCounter = document.getElementById('byte-counter');
+function updateByteCounter() {
+  if (!contentTa || !byteCounter) return;
+  var bytes = measureEucKrBytes(contentTa.value);
+  var type = bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과');
+  byteCounter.textContent = bytes + ' byte (' + type + ')';
+  byteCounter.className = 'byte-counter ' + (bytes > 2000 ? 'err' : (bytes > 90 ? 'warn' : 'ok'));
+}
+if (contentTa) {
+  contentTa.addEventListener('input', updateByteCounter);
+  updateByteCounter();
+}
+
+// ── 발송 확인 다이얼로그 (#U1) ───────────────────────────────────────────────
+document.getElementById('compose-form').addEventListener('submit', function(e) {
+  var previewCard = document.querySelector('#preview-result .card');
+  // preview 결과에서 valid-count 읽기 (없으면 그냥 통과)
+  var validEl = document.getElementById('current-valid-count');
+  var validCount = validEl ? parseInt(validEl.textContent || '0', 10) : null;
+  if (validCount === null || validCount === 0) return;
+  if (!confirm('수신자 ' + validCount + '명에게 실제로 발송합니다.\n\n발송 후 취소할 수 없습니다. 계속하시겠습니까?')) {
+    e.preventDefault();
+  }
+});
 </script>
 {% endblock %}

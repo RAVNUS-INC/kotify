@@ -70,11 +70,18 @@ async def dashboard(
         )
     ).scalar_one() or 0
 
-    # 이번 달 총 수신자 수 (KST 기준)
+    # 이번 달 실제 발송 성공 수신자 수 (KST 기준) — SUM(ok_count) 사용 (#I1)
     month_recipients = db.execute(
-        select(func.sum(Campaign.total_count)).where(
+        select(func.sum(Campaign.ok_count)).where(
             Campaign.created_at >= month_start_utc,
             Campaign.created_at < next_month_utc,
+        )
+    ).scalar_one() or 0
+
+    # 대기 중인 캠페인 수 (#I2)
+    pending_count = db.execute(
+        select(func.count(Campaign.id)).where(
+            Campaign.state.in_(["DISPATCHING", "DISPATCHED"])
         )
     ).scalar_one() or 0
 
@@ -93,5 +100,6 @@ async def dashboard(
             "today_count": today_count,
             "month_count": month_count,
             "month_recipients": month_recipients,
+            "pending_count": pending_count,
         },
     )

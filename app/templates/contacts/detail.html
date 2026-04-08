@@ -1,39 +1,44 @@
 {% extends "base.html" %}
-{% block title %}{{ contact.name }} — 주소록 — SMS 발송 시스템{% endblock %}
-{% block content %}
-<h1 class="page-title">{{ contact.name }}</h1>
-
-{% if request.query_params.get("created") %}
-<div class="alert alert-success">연락처가 추가되었습니다.</div>
-{% elif request.query_params.get("updated") %}
-<div class="alert alert-success">연락처가 수정되었습니다.</div>
-{% endif %}
-
-<div class="flex" style="justify-content:flex-end;margin-bottom:0.75rem">
+{% block title %}{{ contact.name }} — 주소록 — kotify{% endblock %}
+{% block page_title %}{{ contact.name }}{% endblock %}
+{% block page_actions %}
   {% if "sender" in user_roles or "admin" in user_roles %}
-  <a href="/contacts/{{ contact.id }}/edit" class="btn btn-secondary btn-sm">편집</a>
+  <a href="/contacts/{{ contact.id }}/edit" class="btn btn-secondary btn-sm">
+    <i data-lucide="edit-2"></i> 편집
+  </a>
   {% endif %}
   {% if "admin" in user_roles %}
   <form action="/contacts/{{ contact.id }}/delete" method="post" style="display:inline"
     onsubmit="return confirm('이 연락처를 삭제하시겠습니까?')">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <button type="submit" class="btn btn-danger btn-sm">삭제</button>
+    <button type="submit" class="btn btn-danger btn-sm">
+      <i data-lucide="trash-2"></i> 삭제
+    </button>
   </form>
   {% endif %}
   <a href="/contacts" class="btn btn-secondary btn-sm">목록으로</a>
-</div>
+{% endblock %}
+
+{% block content %}
+{% if request.query_params.get("created") %}
+<div class="alert alert-success" role="alert">연락처가 추가되었습니다.</div>
+{% elif request.query_params.get("updated") %}
+<div class="alert alert-success" role="alert">연락처가 수정되었습니다.</div>
+{% endif %}
 
 <!-- 기본 정보 -->
 <div class="card">
   <div class="card-title">기본 정보</div>
-  <table>
+  <div class="table-wrapper">
+  <table style="width:auto;min-width:320px">
     <tbody>
-      <tr><th style="width:120px">이름</th><td>{{ contact.name }}</td></tr>
-      <tr><th>전화번호</th><td class="mono">{{ contact.phone or "—" }}</td></tr>
-      <tr><th>이메일</th><td>{{ contact.email or "—" }}</td></tr>
-      <tr><th>부서</th><td>{{ contact.department or "—" }}</td></tr>
-      <tr><th>메모</th><td>{{ contact.notes or "—" }}</td></tr>
-      <tr><th>상태</th>
+      <tr><th style="width:100px;font-weight:600;background:var(--bg-elevated)">이름</th><td>{{ contact.name }}</td></tr>
+      <tr><th style="background:var(--bg-elevated)">전화번호</th><td class="mono">{{ contact.phone or "—" }}</td></tr>
+      <tr><th style="background:var(--bg-elevated)">이메일</th><td>{{ contact.email or "—" }}</td></tr>
+      <tr><th style="background:var(--bg-elevated)">부서</th><td>{{ contact.department or "—" }}</td></tr>
+      <tr><th style="background:var(--bg-elevated)">메모</th><td>{{ contact.notes or "—" }}</td></tr>
+      <tr>
+        <th style="background:var(--bg-elevated)">상태</th>
         <td>
           {% if contact.active %}
           <span class="badge badge-success">활성</span>
@@ -42,39 +47,45 @@
           {% endif %}
         </td>
       </tr>
-      <tr><th>마지막 발송</th>
-        <td>
+      <tr>
+        <th style="background:var(--bg-elevated)">마지막 발송</th>
+        <td class="mono text-muted" style="font-size:11px">
           {% if contact.last_sent_at %}
-            {{ contact.last_sent_at[:19] }} ({{ contact.last_sent_channel or "" }})
+            {{ contact.last_sent_at|kst_dt }}{% if contact.last_sent_channel %} ({{ contact.last_sent_channel }}){% endif %}
           {% else %}—{% endif %}
         </td>
       </tr>
-      <tr><th>등록일</th><td class="text-muted">{{ contact.created_at[:10] }}</td></tr>
+      <tr>
+        <th style="background:var(--bg-elevated)">등록일</th>
+        <td class="mono text-muted" style="font-size:11px">{{ contact.created_at|kst_dt }}</td>
+      </tr>
     </tbody>
   </table>
+  </div>
 </div>
 
 <!-- 소속 그룹 -->
 <div class="card">
   <div class="card-title">소속 그룹</div>
   {% if groups %}
-  <div class="flex" style="flex-wrap:wrap;gap:0.5rem">
+  <div class="flex" style="flex-wrap:wrap;gap:6px">
     {% for g in groups %}
     <a href="/groups/{{ g.id }}" class="badge badge-dispatched" style="text-decoration:none">{{ g.name }}</a>
     {% endfor %}
   </div>
   {% else %}
-  <p class="text-muted">소속된 그룹이 없습니다.</p>
+  <div class="empty-state" style="padding:20px">
+    <p>소속된 그룹이 없습니다.</p>
+  </div>
   {% endif %}
 </div>
 
-<!-- 발송하기 바로가기 -->
-{% if "sender" in user_roles or "admin" in user_roles %}
-{% if contact.phone %}
-<div class="card">
-  <div class="card-title">발송</div>
-  <a href="/compose" class="btn btn-primary btn-sm">이 번호로 새 발송</a>
+<!-- 발송 바로가기 -->
+{% if ("sender" in user_roles or "admin" in user_roles) and contact.phone %}
+<div class="card" style="padding:12px 16px">
+  <a href="/compose" class="btn btn-primary btn-sm">
+    <i data-lucide="send"></i> 이 번호로 새 발송
+  </a>
 </div>
-{% endif %}
 {% endif %}
 {% endblock %}

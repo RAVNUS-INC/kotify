@@ -3,27 +3,72 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>오류 {{ status_code }} — SMS 발송 시스템</title>
+  <title>오류 {{ status_code }} — kotify</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
   <style>
+    :root {
+      --primary: #3b008b;
+      --error:   #dc2626;
+      --border:  #e5e5e5;
+      --text:    #1a1a2e;
+      --text-muted: #888;
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #222; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 3rem 1rem; }
-    .error-box { background: #fff; border: 1px solid #ddd; border-radius: 8px; width: 100%; max-width: 560px; padding: 2.5rem; text-align: center; }
-    .error-code { font-size: 4rem; font-weight: 700; color: #dc2626; margin-bottom: 0.5rem; }
-    .error-title { font-size: 1.3rem; font-weight: 600; margin-bottom: 1rem; }
-    .error-detail { color: #555; font-size: 14px; margin-bottom: 1.5rem; white-space: pre-wrap; text-align: left; background: #f8f8f8; padding: 0.75rem; border-radius: 4px; }
-    .stub-notice { background: #fef9c3; border: 1px solid #fde047; border-radius: 6px; padding: 1rem; text-align: left; margin-bottom: 1.5rem; }
-    .stub-notice h3 { color: #713f12; margin-bottom: 0.5rem; }
-    .stub-notice p { color: #713f12; font-size: 13px; }
-    .stub-location { font-family: monospace; font-size: 12px; background: #fff; padding: 0.4rem; border-radius: 3px; margin-top: 0.5rem; display: block; }
-    .ncp-notice { background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 1rem; text-align: left; margin-bottom: 1.5rem; }
-    .ncp-notice h3 { color: #991b1b; margin-bottom: 0.5rem; }
-    .ncp-notice p { color: #991b1b; font-size: 13px; }
-    .btn { display: inline-block; padding: 0.5rem 1.25rem; border-radius: 4px; border: 1px solid transparent; cursor: pointer; font-size: 14px; text-decoration: none; }
-    .btn-primary { background: #2563eb; color: #fff; }
-    .btn-primary:hover { background: #1d4ed8; }
-    .btn-secondary { background: #fff; color: #333; border-color: #ccc; }
-    .btn-secondary:hover { background: #f0f0f0; }
-    .actions { display: flex; gap: 0.75rem; justify-content: center; }
+    body {
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
+      background: #f5f5f5;
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: 3rem 1rem;
+    }
+    .error-box {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      width: 100%;
+      max-width: 560px;
+      padding: 2.5rem;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    }
+    .error-code { font-size: 3.5rem; font-weight: 700; color: var(--error); margin-bottom: 0.4rem; }
+    .error-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; }
+    .error-detail {
+      color: #555; font-size: 13px; margin-bottom: 1.5rem;
+      white-space: pre-wrap; text-align: left;
+      background: #f8f8f8; padding: 0.75rem; border-radius: 4px;
+    }
+    .stub-notice {
+      background: #fef9c3; border: 1px solid #fde047;
+      border-radius: 4px; padding: 1rem; text-align: left; margin-bottom: 1.5rem;
+    }
+    .stub-notice h3 { color: #92400e; margin-bottom: 0.4rem; font-size: 14px; }
+    .stub-notice p  { color: #92400e; font-size: 13px; }
+    .stub-location  {
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 11px; background: #fff; padding: 0.35rem;
+      border-radius: 3px; margin-top: 0.4rem; display: block;
+    }
+    .ncp-notice {
+      background: #fee2e2; border: 1px solid #fca5a5;
+      border-radius: 4px; padding: 1rem; text-align: left; margin-bottom: 1.5rem;
+    }
+    .ncp-notice h3 { color: #991b1b; margin-bottom: 0.4rem; font-size: 14px; }
+    .ncp-notice p  { color: #991b1b; font-size: 13px; }
+    .ncp-notice ul { margin: 0.5rem 0 0 1rem; font-size: 12px; color: #991b1b; }
+    .btn {
+      display: inline-block; padding: 0.45rem 1.1rem; border-radius: 4px;
+      border: 1px solid transparent; cursor: pointer; font-size: 13px;
+      text-decoration: none; font-family: inherit;
+    }
+    .btn-primary   { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: #2a0066; }
+    .btn-secondary { background: #fff; color: var(--text); border-color: #ccc; }
+    .btn-secondary:hover { background: #f5f5f5; }
+    .actions { display: flex; gap: 8px; justify-content: center; margin-top: 1rem; }
   </style>
 </head>
 <body>
@@ -32,25 +77,30 @@
 
   {% if status_code == 403 %}
   <div class="error-title">접근 권한이 없습니다</div>
-  <p style="color:#555;font-size:14px;margin-bottom:1.5rem">이 페이지에 접근할 권한이 없습니다. 필요한 경우 관리자에게 권한 부여를 요청하세요.</p>
+  <p style="color:#555;font-size:13px;margin-bottom:1.5rem">
+    이 페이지에 접근할 권한이 없습니다. 관리자에게 권한 부여를 요청하세요.
+  </p>
 
   {% elif status_code == 404 %}
   <div class="error-title">페이지를 찾을 수 없습니다</div>
-  <p style="color:#555;font-size:14px;margin-bottom:1.5rem">요청하신 페이지가 존재하지 않습니다.</p>
+  <p style="color:#555;font-size:13px;margin-bottom:1.5rem">
+    요청하신 페이지가 존재하지 않습니다.
+  </p>
 
   {% elif status_code == 501 and is_stub_error is defined and is_stub_error %}
   <div class="error-title">아직 구현되지 않은 기능</div>
   <div class="stub-notice">
-    <h3>⚙️ Stub 미구현 안내</h3>
+    <h3>Stub 미구현 안내</h3>
     <p>이 기능은 사용자가 직접 구현해야 하는 stub 함수를 호출했습니다.</p>
     {% if stub_message %}
-    <p style="margin-top:0.5rem"><strong>메시지:</strong> {{ stub_message }}</p>
+    <p style="margin-top:0.4rem"><strong>메시지:</strong> {{ stub_message }}</p>
     {% endif %}
     {% if stub_location %}
     <code class="stub-location">{{ stub_location }}</code>
     {% endif %}
-    <p style="margin-top:0.75rem">
-      <code>app/util/phone.py</code>의 <code>normalize_phone()</code> 및 <code>parse_phone_list()</code>를 구현한 뒤 재시도하세요.<br>
+    <p style="margin-top:0.6rem">
+      <code>app/util/phone.py</code>의 <code>normalize_phone()</code> 및
+      <code>parse_phone_list()</code>를 구현한 뒤 재시도하세요.<br>
       <code>app/ncp/signature.py</code>의 <code>make_headers()</code>도 마찬가지입니다.
     </p>
   </div>
@@ -58,9 +108,9 @@
   {% elif status_code == 503 and is_ncp_auth_error is defined and is_ncp_auth_error %}
   <div class="error-title">NCP 인증 오류</div>
   <div class="ncp-notice">
-    <h3>🔑 NCP 인증 오류</h3>
+    <h3>NCP 인증 오류</h3>
     <p>NCP API 인증에 실패했습니다. 다음을 확인하세요:</p>
-    <ul style="margin-top:0.5rem;margin-left:1rem;font-size:13px;color:#991b1b">
+    <ul>
       <li>NCP Access Key / Secret Key가 올바른지 확인</li>
       <li>서버 시간이 NTP 동기화 되어 있는지 확인 (5분 drift 시 401)</li>
       <li>signature.py가 올바르게 구현되어 있는지 확인</li>

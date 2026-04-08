@@ -1,8 +1,15 @@
 {% extends "base.html" %}
-{% block title %}대시보드 — SMS 발송 시스템{% endblock %}
-{% block content %}
-<h1 class="page-title">대시보드</h1>
+{% block title %}대시보드 — kotify{% endblock %}
+{% block page_title %}대시보드{% endblock %}
+{% block page_actions %}
+  {% if "sender" in user_roles or "admin" in user_roles %}
+  <a href="/compose" class="btn btn-primary btn-sm">
+    <i data-lucide="send"></i> 새 발송
+  </a>
+  {% endif %}
+{% endblock %}
 
+{% block content %}
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-value">{{ today_count }}</div>
@@ -14,22 +21,27 @@
   </div>
   <div class="stat-card">
     <div class="stat-value">{{ month_recipients }}</div>
-    <div class="stat-label">이번 달 총 수신자</div>
+    <div class="stat-label">이번 달 발송 성공</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="{% if pending_count > 0 %}color:var(--warning){% endif %}">{{ pending_count }}</div>
+    <div class="stat-label">진행 중</div>
   </div>
 </div>
 
 <div class="card">
   <div class="card-title">최근 발송 이력</div>
   {% if recent_campaigns %}
+  <div class="table-wrapper">
   <table>
     <thead>
       <tr>
         <th>#</th>
         <th>발신번호</th>
         <th>유형</th>
-        <th>수신자</th>
-        <th>성공</th>
-        <th>실패</th>
+        <th class="text-right">수신자</th>
+        <th class="text-right">성공</th>
+        <th class="text-right">실패</th>
         <th>상태</th>
         <th>발송 시각</th>
       </tr>
@@ -46,9 +58,9 @@
           <span class="badge badge-dispatched">LMS</span>
           {% endif %}
         </td>
-        <td>{{ c.total_count }}</td>
-        <td>{{ c.ok_count }}</td>
-        <td>{{ c.fail_count }}</td>
+        <td class="mono text-right">{{ c.total_count }}</td>
+        <td class="mono text-right ok">{{ c.ok_count }}</td>
+        <td class="mono text-right {% if c.fail_count > 0 %}err{% else %}text-muted{% endif %}">{{ c.fail_count }}</td>
         <td>
           {% if c.state == "COMPLETED" %}
           <span class="badge badge-completed">완료</span>
@@ -64,21 +76,25 @@
           <span class="badge">{{ c.state }}</span>
           {% endif %}
         </td>
-        <td class="text-muted">{{ c.created_at[:16].replace("T", " ") }}</td>
+        <td class="mono text-muted">{{ c.created_at|kst_dt }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
-  <div style="margin-top:1rem">
-    <a href="/campaigns" class="btn btn-secondary btn-sm">전체 이력 보기</a>
+  </div>
+  <div style="margin-top:10px">
+    <a href="/campaigns" class="btn btn-secondary btn-sm">
+      <i data-lucide="list"></i> 전체 이력 보기
+    </a>
   </div>
   {% else %}
-  <p class="text-muted">아직 발송 이력이 없습니다.</p>
-  {% if "sender" in user_roles or "admin" in user_roles %}
-  <div style="margin-top:0.75rem">
+  <div class="empty-state">
+    <i data-lucide="inbox"></i>
+    <p>아직 발송 이력이 없습니다.</p>
+    {% if "sender" in user_roles or "admin" in user_roles %}
     <a href="/compose" class="btn btn-primary btn-sm">첫 발송 시작</a>
+    {% endif %}
   </div>
-  {% endif %}
   {% endif %}
 </div>
 {% endblock %}

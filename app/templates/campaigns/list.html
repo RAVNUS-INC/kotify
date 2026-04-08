@@ -1,15 +1,23 @@
 {% extends "base.html" %}
-{% block title %}발송 이력 — SMS 발송 시스템{% endblock %}
-{% block content %}
-<h1 class="page-title">발송 이력</h1>
+{% block title %}발송 이력 — kotify{% endblock %}
+{% block page_title %}발송 이력{% endblock %}
+{% block page_actions %}
+  {% if "sender" in user_roles or "admin" in user_roles %}
+  <a href="/compose" class="btn btn-primary btn-sm">
+    <i data-lucide="send"></i> 새 발송
+  </a>
+  {% endif %}
+{% endblock %}
 
-<!-- 필터 -->
-<div class="card">
-  <form method="get" action="/campaigns" class="flex" style="flex-wrap:wrap;gap:0.5rem">
+{% block content %}
+<!-- 필터 바 -->
+<div class="card" style="padding:10px 16px">
+  <form method="get" action="/campaigns" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
     <div>
-      <label style="font-size:12px;color:#666">상태</label>
-      <select name="status" style="padding:0.3rem 0.5rem;border:1px solid #ccc;border-radius:4px;font-size:13px">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">상태</label>
+      <select name="status" class="ctrl">
         <option value="">전체</option>
+        <option value="DISPATCHING" {% if status_filter == "DISPATCHING" %}selected{% endif %}>발송 중</option>
         <option value="DISPATCHED" {% if status_filter == "DISPATCHED" %}selected{% endif %}>발송됨</option>
         <option value="COMPLETED" {% if status_filter == "COMPLETED" %}selected{% endif %}>완료</option>
         <option value="FAILED" {% if status_filter == "FAILED" %}selected{% endif %}>실패</option>
@@ -17,45 +25,47 @@
       </select>
     </div>
     <div>
-      <label style="font-size:12px;color:#666">시작일</label>
-      <input type="date" name="date_from" value="{{ date_from or '' }}" style="padding:0.3rem;border:1px solid #ccc;border-radius:4px;font-size:13px">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">시작일</label>
+      <input type="date" name="date_from" value="{{ date_from or '' }}" class="ctrl">
     </div>
     <div>
-      <label style="font-size:12px;color:#666">종료일</label>
-      <input type="date" name="date_to" value="{{ date_to or '' }}" style="padding:0.3rem;border:1px solid #ccc;border-radius:4px;font-size:13px">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">종료일</label>
+      <input type="date" name="date_to" value="{{ date_to or '' }}" class="ctrl">
     </div>
-    <button type="submit" class="btn btn-secondary btn-sm">검색</button>
-    <a href="/campaigns" class="btn btn-secondary btn-sm">초기화</a>
+    <div style="display:flex;gap:4px">
+      <button type="submit" class="btn btn-secondary btn-sm">
+        <i data-lucide="search"></i> 검색
+      </button>
+      <a href="/campaigns" class="btn btn-secondary btn-sm">초기화</a>
+    </div>
   </form>
 </div>
 
-<div class="card">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+<div class="card" style="padding:0">
+  <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
     <span class="text-muted">총 {{ total_count }}건</span>
-    {% if "sender" in user_roles or "admin" in user_roles %}
-    <a href="/compose" class="btn btn-primary btn-sm">새 발송</a>
-    {% endif %}
   </div>
 
   {% if campaigns %}
+  <div class="table-wrapper">
   <table>
     <thead>
       <tr>
-        <th>#</th>
+        <th style="width:60px">#</th>
         {% if is_admin %}<th>작성자</th>{% endif %}
         <th>발신번호</th>
-        <th>유형</th>
-        <th>수신자</th>
-        <th>성공 / 실패 / 대기</th>
-        <th>상태</th>
-        <th>발송 시각</th>
+        <th style="width:60px">유형</th>
+        <th class="text-right" style="width:60px">수신자</th>
+        <th class="text-right" style="width:120px">성공 / 실패 / 대기</th>
+        <th style="width:90px">상태</th>
+        <th style="width:130px">발송 시각</th>
       </tr>
     </thead>
     <tbody>
       {% for c in campaigns %}
       <tr>
         <td><a href="/campaigns/{{ c.id }}">#{{ c.id }}</a></td>
-        {% if is_admin %}<td class="text-muted">{{ c.created_by[:8] }}…</td>{% endif %}
+        {% if is_admin %}<td class="text-muted mono truncate" style="max-width:100px">{{ c.created_by[:12] }}…</td>{% endif %}
         <td class="mono">{{ c.caller_number }}</td>
         <td>
           {% if c.message_type == "SMS" %}
@@ -64,11 +74,13 @@
           <span class="badge badge-dispatched">LMS</span>
           {% endif %}
         </td>
-        <td>{{ c.total_count }}</td>
-        <td>
-          <span class="ok">{{ c.ok_count }}</span> /
-          <span class="err">{{ c.fail_count }}</span> /
-          <span style="color:#713f12">{{ c.pending_count }}</span>
+        <td class="mono text-right">{{ c.total_count }}</td>
+        <td class="text-right">
+          <span class="ok mono">{{ c.ok_count }}</span>
+          <span class="text-muted"> / </span>
+          <span class="{% if c.fail_count > 0 %}err{% else %}text-muted{% endif %} mono">{{ c.fail_count }}</span>
+          <span class="text-muted"> / </span>
+          <span class="mono" style="color:var(--warning)">{{ c.pending_count }}</span>
         </td>
         <td>
           {% if c.state == "COMPLETED" %}<span class="badge badge-completed">완료</span>
@@ -78,27 +90,40 @@
           {% elif c.state == "DISPATCHING" %}<span class="badge badge-pending">발송중</span>
           {% else %}<span class="badge">{{ c.state }}</span>{% endif %}
         </td>
-        <td class="text-muted">{{ c.created_at[:16].replace("T", " ") }}</td>
+        <td class="mono text-muted">{{ c.created_at|kst_dt }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
-  <!-- 페이지네이션 -->
   {% if total_count > per_page %}
-  <div class="pagination">
-    {% if page > 1 %}
-    <a href="?page={{ page - 1 }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">이전</a>
-    {% endif %}
-    <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
-    {% if page * per_page < total_count %}
-    <a href="?page={{ page + 1 }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">다음</a>
-    {% endif %}
+  <div style="padding:10px 16px;border-top:1px solid var(--border)">
+    <div class="pagination">
+      {% if page > 1 %}
+      <a href="?page={{ page - 1 }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">이전</a>
+      {% endif %}
+      <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
+      {% if page * per_page < total_count %}
+      <a href="?page={{ page + 1 }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}">다음</a>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
 
   {% else %}
-  <p class="text-muted">조건에 맞는 발송 이력이 없습니다.</p>
+  <div class="empty-state">
+    <i data-lucide="inbox"></i>
+    {% if status_filter or date_from or date_to %}
+    <p>조건에 맞는 발송 이력이 없습니다.</p>
+    <a href="/campaigns" class="btn btn-secondary btn-sm">필터 초기화</a>
+    {% else %}
+    <p>발송 이력이 없습니다.</p>
+    {% if "sender" in user_roles or "admin" in user_roles %}
+    <a href="/compose" class="btn btn-primary btn-sm">첫 발송 시작</a>
+    {% endif %}
+    {% endif %}
+  </div>
   {% endif %}
 </div>
 {% endblock %}

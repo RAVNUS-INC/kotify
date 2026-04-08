@@ -32,23 +32,27 @@ def _parse_roles(user: User) -> list[str]:
         return []
 
 
-@router.get("/compose", response_class=HTMLResponse)
-async def compose_page(
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(_sender_dep),
-    _: None = Depends(require_setup_complete),
-    group_id: int = Query(0),
-) -> HTMLResponse:
-    """발송 작성 화면."""
+def _get_compose_context(
+    db: Session,
+    user: User,
+    group_id: int = 0,
+    error_slug: str | None = None,
+    content: str = "",
+    recipients_text: str = "",
+    preserved_caller_id: int | None = None,
+) -> dict:
+    """compose.html에 필요한 공통 컨텍스트를 구성한다."""
     callers = list(
         db.execute(
             select(Caller).where(Caller.active == 1).order_by(Caller.is_default.desc())
         ).scalars().all()
     )
-    default_caller = next((c for c in callers if c.is_default), callers[0] if callers else None)
+    # 보존된 발신번호 또는 기본 발신번호
+    if preserved_caller_id:
+        default_caller = next((c for c in callers if c.id == preserved_caller_id), None)
+    else:
+        default_caller = next((c for c in callers if c.is_default), callers[0] if callers else None)
 
-    # 그룹/연락처 드롭다운용 데이터
     from app.services.contacts import list_contacts
     from app.services.groups import get_group_size, list_groups
     groups_raw, _ = list_groups(db, per_page=500)
@@ -58,19 +62,35 @@ async def compose_page(
     ]
     contacts, _ = list_contacts(db, per_page=1000)
 
+    return {
+        "user": user,
+        "user_roles": _parse_roles(user),
+        "callers": callers,
+        "default_caller": default_caller,
+        "preview": None,
+        "groups": groups,
+        "contacts": contacts,
+        "preselect_group_id": group_id,
+        "error_slug": error_slug,
+        "content": content,
+        "recipients_text": recipients_text,
+        "preserved_caller_id": preserved_caller_id,
+    }
+
+
+@router.get("/compose", response_class=HTMLResponse)
+async def compose_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(_sender_dep),
+    _: None = Depends(require_setup_complete),
+    group_id: int = Query(0),
+) -> HTMLResponse:
+    """발송 작성 화면."""
     return templates.TemplateResponse(
         request,
         "compose.html",
-        {
-            "user": user,
-            "user_roles": _parse_roles(user),
-            "callers": callers,
-            "default_caller": default_caller,
-            "preview": None,
-            "groups": groups,
-            "contacts": contacts,
-            "preselect_group_id": group_id,
-        },
+        _get_compose_context(db, user, group_id=group_id),
     )
 
 
@@ -125,7 +145,7 @@ async def compose_preview(
     return templates.TemplateResponse(request, "_compose_preview.html", context)
 
 
-@router.post("/compose/send")
+@router.post("/compose/send", response_model=None)
 async def compose_send(
     request: Request,
     db: Session = Depends(get_db),
@@ -136,8 +156,8 @@ async def compose_send(
     content: str = Form(...),
     recipients_text: str = Form(""),
     source: str = Form("manual"),
-) -> RedirectResponse:
-    """실제 발송 처리."""
+) -> HTMLResponse | RedirectResponse:
+    """실제 발송 처리. 검증 실패 시 form 보존하여 재렌더링 (#I9)."""
     from app.services.compose import dispatch_campaign
 
     # form에서 다중 값 추출
@@ -146,6 +166,23 @@ async def compose_send(
     raw_contact_ids = form_data.getlist("contact_ids")
     group_ids = [int(v) for v in raw_group_ids if v]
     contact_ids = [int(v) for v in raw_contact_ids if v]
+
+    def _render_error(slug: str) -> HTMLResponse:
+        """검증 실패 시 입력 보존하여 compose.html 재렌더링."""
+        ctx = _get_compose_context(
+            db,
+            user,
+            error_slug=slug,
+            content=content,
+            recipients_text=recipients_text,
+            preserved_caller_id=caller_id,
+        )
+        return templates.TemplateResponse(
+            request,
+            "compose.html",
+            ctx,
+            status_code=422,
+        )
 
     # 발신번호 확인
     caller = db.get(Caller, caller_id)
@@ -158,7 +195,7 @@ async def compose_send(
             detail={"rejected": True, "reason": "invalid_caller"},
         )
         db.commit()
-        return RedirectResponse("/compose?error=invalid_caller", status_code=303)
+        return _render_error("invalid_caller")
 
     # 수신자 해석
     valid_numbers, invalid_numbers, marking_ids = resolve_recipients(
@@ -174,12 +211,10 @@ async def compose_send(
             detail={"rejected": True, "reason": "invalid_numbers", "count": len(invalid_numbers)},
         )
         db.commit()
-        return RedirectResponse(
-            f"/compose?error=invalid_numbers&count={len(invalid_numbers)}",
-            status_code=303,
-        )
+        return _render_error("invalid_numbers")
+
     if not valid_numbers:
-        return RedirectResponse("/compose?error=no_recipients", status_code=303)
+        return _render_error("no_recipients")
 
     # 1,000명 초과 사전 차단 (C4)
     if len(valid_numbers) > MAX_RECIPIENTS_PER_CAMPAIGN:
@@ -191,18 +226,18 @@ async def compose_send(
             detail={"rejected": True, "reason": "too_many_recipients", "count": len(valid_numbers)},
         )
         db.commit()
-        return RedirectResponse("/compose?error=too_many_recipients", status_code=303)
+        return _render_error("too_many_recipients")
 
     # 메시지 검증
     msg_result = validate_message(content)
     if not msg_result["ok"]:
-        return RedirectResponse("/compose?error=invalid_message", status_code=303)
+        return _render_error("invalid_message")
 
-    # 싱글턴 NCP 클라이언트 사용 (C3) — circular import 방지를 위해 함수 안에서 import
+    # 싱글턴 NCP 클라이언트 사용 — circular import 방지를 위해 함수 안에서 import
     from app.main import get_ncp_client  # noqa: PLC0415
     ncp_client = get_ncp_client()
     if ncp_client is None:
-        return RedirectResponse("/compose?error=ncp_not_configured", status_code=303)
+        return _render_error("ncp_not_configured")
 
     try:
         campaign = await dispatch_campaign(
@@ -223,4 +258,4 @@ async def compose_send(
 
         return RedirectResponse(f"/campaigns/{campaign.id}", status_code=303)
     except ValueError as exc:
-        return RedirectResponse(f"/compose?error={exc}", status_code=303)
+        return _render_error(str(exc))
