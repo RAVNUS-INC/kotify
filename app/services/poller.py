@@ -10,22 +10,39 @@ import asyncio
 import fcntl
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import Campaign, Message, NcpRequest
 
 logger = logging.getLogger(__name__)
 
-# Backoff 스케줄 (poll_count → 다음 폴링까지 초)
-_BACKOFF: list[int] = [5, 10, 30, 60]  # 0,1,2,3
-_BACKOFF_4_9 = 300   # 4-9
-_BACKOFF_10_PLUS = 900  # 10+
+# Backoff 스케줄 (poll_count → 다음 폴링까지 초).
+# NCP 공식 권장(ncp-research.md §4.7 폴링 패턴): 5초 → 15초 → 30초 → 1분 → 5분 → 30분.
+_BACKOFF: list[int] = [5, 15, 30, 60]  # poll_count 0,1,2,3
+_BACKOFF_4_9 = 300   # poll_count 4-9 (5분)
+_BACKOFF_10_PLUS = 1800  # poll_count 10+ (30분). 70분 cutoff가 먼저 끊음.
 
 # 메인 루프 sleep 간격 (초)
 _TICK = 5
+
+# force_refresh 쿨다운: 같은 campaign_id로 10초 내 재요청 무시 (NCP 429 예방).
+_FORCE_REFRESH_COOLDOWN_SECONDS = 10
+
+# 발송 후 70분 경과 시 결과 확인 포기 (공식 권장 60분 + 안전 버퍼 10분).
+# 기준: ncp_request.sent_at — NCP는 API 이력을 90일만 보관하므로 무한 폴링 금지.
+_CUTOFF_SECONDS = 70 * 60
+
+# 포기 시 기록할 설명 메시지 (NCP statusMessage를 받지 못한 상태이므로 우리가 생성).
+_UNCONFIRMED_MESSAGE = "70분 동안 NCP로부터 수신 확인을 받지 못했습니다"
+
+# 더 이상 폴링하지 않는 최종 상태들.
+# - COMPLETED: NCP가 결과(성공/실패)를 확정한 상태
+# - UNKNOWN: 발송 API 호출 자체가 실패한 상태 (compose 단계)
+# - DELIVERY_UNCONFIRMED: 70분 cutoff 도달 (수신 결과 확인 포기)
+_FINAL_STATUSES: tuple[str, ...] = ("COMPLETED", "UNKNOWN", "DELIVERY_UNCONFIRMED")
 
 def _backoff_interval(poll_count: int) -> int:
     """poll_count 기준 다음 폴링까지 대기 시간(초)를 반환한다."""
@@ -69,6 +86,9 @@ class Poller:
         self._task: asyncio.Task | None = None
         # 강제 새로고침 큐: campaign_id set
         self._force_refresh: set[int] = set()
+        # I4: 쿨다운 추적 — campaign_id → 마지막 force_refresh 수락 시각.
+        # 10초 내 재요청은 무시하여 연타로 NCP 429를 유발하지 못하게 한다.
+        self._force_refresh_at: dict[int, datetime] = {}
         # 파일 락 (#11)
         self._lock_fd = None
 
@@ -118,9 +138,29 @@ class Poller:
             self._lock_fd = None
         logger.info("폴링 워커 종료")
 
-    def add_force_refresh(self, campaign_id: int) -> None:
-        """특정 캠페인을 다음 tick에 강제 폴링하도록 큐에 추가한다."""
+    def add_force_refresh(self, campaign_id: int) -> bool:
+        """특정 캠페인을 다음 tick에 강제 폴링하도록 큐에 추가한다.
+
+        쿨다운(10초) 내 재요청은 조용히 무시한다. 연타로 NCP 429를 유발할 수 없도록
+        방어하는 것이 목적이다.
+
+        Returns:
+            실제로 큐에 추가됐으면 True, 쿨다운으로 무시됐으면 False.
+        """
+        now = _now()
+        last = self._force_refresh_at.get(campaign_id)
+        if last is not None:
+            elapsed = (now - last).total_seconds()
+            if elapsed < _FORCE_REFRESH_COOLDOWN_SECONDS:
+                logger.debug(
+                    "force_refresh 쿨다운: campaign_id=%d 무시 (last=%.1fs 전)",
+                    campaign_id,
+                    elapsed,
+                )
+                return False
         self._force_refresh.add(campaign_id)
+        self._force_refresh_at[campaign_id] = now
+        return True
 
     async def _loop(self) -> None:
         """메인 폴링 루프."""
@@ -163,12 +203,24 @@ class Poller:
         """
         now = _now()
 
+        # 70분 cutoff sweep: sent_at 기준으로 만료된 메시지를 먼저 정리.
+        # 이걸 먼저 해야 아래 ncp_requests 쿼리에서 만료된 것들이 제외된다.
+        expired_campaign_ids = self._expire_stuck_messages(db, now)
+        if expired_campaign_ids:
+            db.commit()
+            for cid in expired_campaign_ids:
+                try:
+                    await self._update_campaign(db, cid)
+                    db.commit()
+                except Exception as exc:
+                    db.rollback()
+                    logger.warning("만료 sweep 캠페인 집계 실패 (campaign_id=%s): %s", cid, exc)
+
         # 미완료 메시지가 있는 ncp_requests 조회
-        final_statuses = ("COMPLETED", "UNKNOWN")
         stmt = (
             select(NcpRequest)
             .join(Message, Message.ncp_request_id == NcpRequest.id)
-            .where(Message.status.notin_(final_statuses))
+            .where(Message.status.notin_(_FINAL_STATUSES))
             .where(NcpRequest.request_id.isnot(None))
             .distinct()
         )
@@ -202,12 +254,11 @@ class Poller:
         force = campaign_id in force_ids
 
         # 해당 ncp_request의 messages 조회
-        final_statuses = ("COMPLETED", "UNKNOWN")
         messages = list(
             db.execute(
                 select(Message).where(
                     Message.ncp_request_id == ncp_req.id,
-                    Message.status.notin_(final_statuses),
+                    Message.status.notin_(_FINAL_STATUSES),
                 )
             ).scalars().all()
         )
@@ -241,6 +292,7 @@ class Poller:
             msg_by_to.setdefault(msg.to_number, []).append(msg)
 
         poll_time = _now().isoformat()
+        matched_ids: set[int] = set()
 
         for item in list_resp.messages:
             # message_id 우선 매칭, 없으면 to_number 리스트에서 pop
@@ -262,6 +314,17 @@ class Poller:
             msg.result_message = item.status_message
             msg.telco_code = item.telco_code
             msg.complete_time = item.complete_time
+            msg.last_polled_at = poll_time
+            msg.poll_count = (msg.poll_count or 0) + 1
+            matched_ids.add(msg.id)
+
+        # C3: NCP 응답에 포함되지 않은 메시지도 폴링은 "시도"된 것이므로
+        # poll_count/last_polled_at을 증가시켜야 한다. 그렇지 않으면 해당 메시지의
+        # poll_count가 영원히 0에 머물러 backoff가 _BACKOFF[0]=5초에 고정 — 핫루프.
+        # NCP list 응답 누락은 70분 cutoff가 최종적으로 처리한다.
+        for msg in messages:
+            if msg.id in matched_ids:
+                continue
             msg.last_polled_at = poll_time
             msg.poll_count = (msg.poll_count or 0) + 1
 
@@ -287,12 +350,14 @@ class Poller:
             )
         ).scalar_one()
 
-        # 실패 건수: final state이고 success가 아닌 것
+        # 실패 건수: final state이고 success가 아닌 것.
+        # SQL NULL 주의: `result_status != 'success'`는 NULL일 때 NULL로 평가되어 빠짐.
+        # DELIVERY_UNCONFIRMED는 result_status=None이므로 IS NULL 조건을 OR로 명시.
         fail_count = db.execute(
             select(_func.count()).select_from(Message).where(
                 Message.campaign_id == campaign_id,
-                Message.status.in_(("COMPLETED", "UNKNOWN")),
-                Message.result_status != "success",
+                Message.status.in_(_FINAL_STATUSES),
+                (Message.result_status != "success") | Message.result_status.is_(None),
             )
         ).scalar_one()
 
@@ -300,7 +365,7 @@ class Poller:
         pending_count = db.execute(
             select(_func.count()).select_from(Message).where(
                 Message.campaign_id == campaign_id,
-                Message.status.notin_(("COMPLETED", "UNKNOWN")),
+                Message.status.notin_(_FINAL_STATUSES),
             )
         ).scalar_one()
 
@@ -323,3 +388,53 @@ class Poller:
             campaign.completed_at = _now().isoformat()
 
         db.flush()
+
+    def _expire_stuck_messages(self, db: Session, now: datetime) -> set[int]:
+        """70분 cutoff: sent_at 기준으로 만료된 미완료 메시지를 DELIVERY_UNCONFIRMED로 전환.
+
+        NCP는 결과 확인이 보통 수초~수분 내 끝난다. 70분 넘게 결과가 확정되지
+        않은 메시지는 폴링을 포기한다. 근거:
+        - NCP 공식 권장 1시간 (ncp-research.md §4.7 폴링 패턴)
+        - NCP API 이력 보관 90일 → 그 이후엔 조회 자체가 404
+        - 무한 폴링 시 월 10,000건 quota 낭비
+
+        Args:
+            db: 세션
+            now: 현재 시각 (UTC)
+
+        Returns:
+            영향받은 메시지의 campaign_id 집합. 호출자는 캠페인 카운터를 재집계해야 한다.
+        """
+        cutoff = now - timedelta(seconds=_CUTOFF_SECONDS)
+        cutoff_iso = cutoff.isoformat()
+
+        # 만료 대상 조회 (campaign_id 수집용)
+        stale_rows = db.execute(
+            select(Message.id, Message.campaign_id)
+            .join(NcpRequest, Message.ncp_request_id == NcpRequest.id)
+            .where(Message.status.notin_(_FINAL_STATUSES))
+            .where(NcpRequest.sent_at < cutoff_iso)
+        ).all()
+
+        if not stale_rows:
+            return set()
+
+        stale_ids = [row[0] for row in stale_rows]
+        affected_campaigns: set[int] = {row[1] for row in stale_rows}
+
+        # 벌크 UPDATE로 한 번에 전환
+        db.execute(
+            update(Message)
+            .where(Message.id.in_(stale_ids))
+            .values(
+                status="DELIVERY_UNCONFIRMED",
+                result_message=_UNCONFIRMED_MESSAGE,
+                last_polled_at=now.isoformat(),
+            )
+        )
+        logger.info(
+            "70분 cutoff: %d건을 DELIVERY_UNCONFIRMED로 전환 (campaigns=%s)",
+            len(stale_ids),
+            sorted(affected_campaigns),
+        )
+        return affected_campaigns

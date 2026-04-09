@@ -216,11 +216,17 @@ async def campaign_recipients(
     offset = (page - 1) * per_page
 
     # C2: status 필터 적용
+    # fail 필터는 NCP가 명시적으로 fail을 돌려준 경우 + 70분 cutoff로 포기한 경우 모두 포함
+    # (사용자 관점에서 둘 다 "성공하지 않은 결과")
     base_stmt = select(Message).where(Message.campaign_id == campaign_id)
     if status == "success":
         base_stmt = base_stmt.where(Message.result_status == "success")
     elif status == "fail":
-        base_stmt = base_stmt.where(Message.result_status == "fail")
+        base_stmt = base_stmt.where(
+            (Message.result_status == "fail")
+            | (Message.status == "UNKNOWN")
+            | (Message.status == "DELIVERY_UNCONFIRMED")
+        )
     elif status == "pending":
         base_stmt = base_stmt.where(Message.status.in_(["PENDING", "READY", "PROCESSING"]))
 
@@ -274,7 +280,11 @@ async def campaign_export(
     if status == "success":
         base_stmt = base_stmt.where(Message.result_status == "success")
     elif status == "fail":
-        base_stmt = base_stmt.where(Message.result_status == "fail")
+        base_stmt = base_stmt.where(
+            (Message.result_status == "fail")
+            | (Message.status == "UNKNOWN")
+            | (Message.status == "DELIVERY_UNCONFIRMED")
+        )
     elif status == "pending":
         base_stmt = base_stmt.where(Message.status.in_(["PENDING", "READY", "PROCESSING"]))
 
