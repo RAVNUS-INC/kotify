@@ -50,10 +50,21 @@
   </div>
 </div>
 
-<!-- 메시지 본문 -->
+<!-- 메시지 -->
 <div class="card">
-  <div class="card-title">메시지 본문</div>
-  <pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;background:var(--bg-elevated);padding:10px;border-radius:var(--radius);border:1px solid var(--border)">{{ campaign.content }}</pre>
+  <div class="card-title">메시지</div>
+  {% if campaign.subject %}
+  <div style="margin-bottom:8px">
+    <div class="text-muted" style="font-size:11px;margin-bottom:2px">제목</div>
+    <div style="font-size:13px;font-weight:600">{{ campaign.subject }}</div>
+  </div>
+  {% endif %}
+  <div>
+    {% if campaign.subject %}
+    <div class="text-muted" style="font-size:11px;margin-bottom:2px">본문</div>
+    {% endif %}
+    <pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;background:var(--bg-elevated);padding:10px;border-radius:var(--radius);border:1px solid var(--border);margin:0">{{ campaign.content }}</pre>
+  </div>
 </div>
 
 <!-- 진행 현황 (HTMX fragment) -->
