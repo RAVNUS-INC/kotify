@@ -22,7 +22,7 @@ templates.env.globals["csrf_token"] = get_csrf_token
 # 오류 슬러그 → 한국어 메시지
 templates.env.globals["t_error"] = t_error
 
-# NCP 결과 코드 → 한국어 설명
+# NCP 수신결과 표시 헬퍼 (NCP statusMessage 우선, fallback은 raw 코드)
 templates.env.globals["describe_ncp"] = describe
 
 # KST 날짜 필터

@@ -123,56 +123,176 @@ GET /sms/v2/services/{serviceId}/messages?requestId={requestId}
 
 `pageSize`가 `requestId` 입력 시 자동 1000으로 설정되어 단일 페이지에 100건 모두 들어옴.
 
-### 4.3 messages[] 응답 필드
-| Field | 설명 |
-|---|---|
-| `requestId` | |
-| `messageId` | |
-| `requestTime` | |
-| `to` | 수신번호 |
-| `from` | 발신번호 |
-| `completeTime` | 완료 시각 |
-| `telcoCode` | 통신사 |
-| `status` | **READY / PROCESSING / COMPLETED** (발송 서버 처리 단계) |
-| `statusCode` | 수신 결과 코드 (`0`, `3001`, `3023` 등) |
-| `statusName` | success / fail (단말 수신) |
-| `statusMessage` | 사람이 읽을 수 있는 사유 |
+### 4.3 최상위 응답 필드 (단건 조회 기준)
+| Field | Type | Required | 설명 |
+|---|---|---|---|
+| `statusCode` | String | Required | HTTP 상태 코드 (`200` 성공, 그 외 실패) |
+| `statusName` | String | Required | `success` / `reserved` / `fail` |
+| `messages` | Array | Required | 메시지 정보 배열 |
 
-### 4.4 status vs statusName 구분 (매우 중요)
-- `status`: 발송 서버 처리 단계 (READY → PROCESSING → COMPLETED)
-- `statusName`: 단말 수신 성공/실패 (`status=COMPLETED` 후 채워짐)
+> ⚠️ **주의:** 최상위 `statusCode`/`statusName`(API 호출 성공 여부)과 `messages[].statusCode`/`statusName`(단말 수신 결과)은 **완전히 다른 의미**다. 이름이 같아서 혼동되기 쉬움.
+
+### 4.4 messages[] 응답 필드 (단건/목록 공통)
+| Field | Type | Required | 설명 |
+|---|---|---|---|
+| `requestId` | String | Required | 요청 아이디 |
+| `messageId` | String | Required | 메시지 아이디 |
+| `requestTime` | String | Required | `YYYY-MM-dd HH:mm:ss` |
+| `contentType` | String | Required | `COMM`(일반) / `AD`(광고) |
+| `type` | String | Required | `SMS` / `LMS` / `MMS` |
+| `subject` | String | Required | 메시지 제목 |
+| `content` | String | Required | 메시지 내용 |
+| `countryCode` | String | Required | 국가 코드 |
+| `from` | String | Required | 발신 번호 |
+| `to` | String | Required | 수신 번호 |
+| `completeTime` | String | Optional | `YYYY-MM-dd HH:mm:ss` |
+| `telcoCode` | String | Optional | 통신사 코드 (ETC 등) |
+| `files` | Array | Optional | 첨부 파일 목록 (`fileId`, `name`) |
+| `status` | String | Required | **`READY` / `PROCESSING` / `COMPLETED`** (발송 서버 처리 단계) |
+| `statusCode` | String | Optional | **수신 결과 코드** (아래 4.7 참조) |
+| `statusName` | String | Optional | `success` / `fail` (단말 수신 결과) |
+| `statusMessage` | String | Optional | 사람이 읽을 수 있는 사유 |
+
+### 4.5 status vs statusName 구분 (매우 중요)
+- `messages[].status`: 발송 서버 처리 단계 (READY → PROCESSING → COMPLETED)
+- `messages[].statusName`: 단말 수신 성공/실패 (`status=COMPLETED` 후 채워짐)
 - **`status=COMPLETED` ≠ 성공.** 진짜 성공은 `statusName=success` AND `statusCode=0`.
+- 최상위 `statusName`에는 `reserved` 값이 존재 → 예약 발송 건 구분용 (messages[] 레벨에는 없음).
 
-### 4.5 시간 윈도우 제약
+### 4.6 시간 윈도우 제약
 - `requestStartTime` ~ `requestEndTime`: 최대 30일
 - `completeStartTime` ~ `completeEndTime`: 최대 24시간
 - 이력 보관: API 90일 / 콘솔 30일
 
-### 4.6 수신결과 코드 (주요)
+### 4.7 수신 결과 코드 (EMMA v3.5.1+)
+
+공식 문서는 수신 결과 코드를 **3개 계층**으로 분리한다:
+1. **IB G/W Report Code**: 이통사에 메시지를 전송한 후 반환되는 결과 코드 (최종 단말 결과)
+2. **IB G/W Response Code**: 중계사 게이트웨이가 메시지를 수신한 후 반환하는 결과 코드
+3. **IB EMMA Code**: EMMA가 메시지 전송 요청을 처리하는 과정에서 발생한 오류 코드
+
+#### 4.7.1 IB G/W Report Code (이통사 → 단말 최종 결과)
+
 | Code | 분류 | 설명 |
 |---|---|---|
 | `0` | success | 성공 |
-| `2000` | failure | Delivery timeout |
-| `2001-2002` | failure | 통신망 실패 |
-| `2003` | failure | 단말 전원 OFF |
-| `2004` | failure | 단말 버퍼 풀 |
+| `2000` | failure | 전송 시간 초과 |
+| `2001` | failure | 전송 실패 (무선망단) |
+| `2002` | failure | 전송 실패 (무선망 → 단말기단) |
+| `2003` | failure | 단말기 전원 꺼짐 |
+| `2004` | failure | 단말기 메시지 버퍼 풀 |
 | `2005` | failure | 음영지역 |
-| `3000` | invalid | Delivery unavailable |
-| `3001` | invalid | **결번** |
-| `3002` | invalid | 성인 인증 실패 |
-| `3003` | invalid | **수신번호 형식 오류** |
-| `3008` | invalid | 단말 문제 |
-| `3009` | invalid | 메시지 형식 오류 |
-| `3012` | invalid | 스팸 분류 |
-| `3017` | invalid | 발신번호 스푸핑 방지 위반 |
-| `3018` | invalid | 발신번호 스푸핑 방지 가입 번호 |
-| `3019` | invalid | KISA 차단 발신번호 |
-| `3022` | invalid | Charset 변환 오류 |
-| `3023` | invalid | **사전 등록 안 된 발신번호** |
+| `2006` | failure | 메시지 삭제됨 |
+| `2007` | failure | 일시적인 단말 문제 |
+| `3000` | Invalid | 전송할 수 없음 |
+| `3001` | Invalid | **가입자 없음 (결번)** |
+| `3002` | Invalid | 성인 인증 실패 |
+| `3003` | Invalid | **수신 번호 형식 오류** |
+| `3004` | Invalid | 단말기 서비스 일시 정지 |
+| `3005` | Invalid | 단말기 호 처리 상태 |
+| `3006` | Invalid | 착신 거절 |
+| `3007` | Invalid | Callback URL을 받을 수 없는 폰 |
+| `3008` | Invalid | 기타 단말기 문제 |
+| `3009` | Invalid | 메시지 형식 오류 |
+| `3010` | Invalid | MMS 미지원 단말 |
+| `3011` | Invalid | 서버 오류 |
+| `3012` | Invalid | 스팸 |
+| `3013` | Invalid | 서비스 거부 |
+| `3014` | Invalid | 기타 |
+| `3015` | Invalid | 전송 경로 없음 |
+| `3016` | Invalid | 첨부 파일 사이즈 제한 실패 |
+| `3017` | Invalid | 발신 번호 변작 방지 세칙 위반 |
+| `3018` | Invalid | 발신 번호 변작 방지 서비스에 가입된 휴대폰 개인가입자 번호 |
+| `3019` | Invalid | KISA/미래부 차단 요청 발신 번호 |
+| `3022` | Invalid | Charset Conversion Error |
+| `3023` | Invalid | **발신 번호 사전등록제를 통해 등록되지 않은 번호** |
 
-EMMA 코드: `E901` 수신번호 없음, `E904` 본문 없음, `E915` 중복 메시지, `E916/E917` 차단 번호.
+#### 4.7.2 IB G/W Response Code (중계사 게이트웨이)
 
-출처: https://api.ncloud-docs.com/docs/en/sens-sms-list, https://api.ncloud-docs.com/docs/en/sens-sms-get
+| Code | 설명 |
+|---|---|
+| `1001` | Server Busy (RS 내부 저장 Queue Full) |
+| `1002` | 수신 번호 형식 오류 |
+| `1003` | 회신번호 형식 오류 |
+| `1004` | 스팸 |
+| `1005` | 사용 건수 초과 |
+| `1006` | 첨부 파일 없음 |
+| `1007` | 첨부 파일 있음 |
+| `1008` | 첨부 파일 저장 실패 |
+| `1009` | CLIENT_MSG_KEY 없음 |
+| `1010` | CONTENT 없음 |
+| `1011` | CALLBACK 없음 |
+| `1012` | RECIPIENT_INFO 없음 |
+| `1013` | SUBJECT 없음 |
+| `1014` | 첨부 파일 키 없음 |
+| `1015` | 첨부 파일 이름 없음 |
+| `1016` | 첨부 파일 크기 없음 |
+| `1017` | 첨부 파일 Content 없음 |
+| `1018` | 전송 권한 없음 |
+| `1019` | TTL 초과 |
+| `1020` | charset conversion error |
+| `S000` | 중계사 요청 실패 (서버 오류) |
+| `S001` | 중계사 요청 실패 (서버 오류) |
+| `S002` | 중계사 요청 실패 (잘못된 요청) |
+| `S003` | 중계사 요청 실패 (스팸 처리) |
+| `S004` | 쿼터 초과 |
+| `S005` | 잘못된 MMS 파일 |
+| `S006` | MMS 파일을 찾을 수 없음 |
+| `S007` | MMS 파일 만료 |
+| `S008` | MMS 파일 크기 초과 |
+| `S009` | MMS 파일 해상도 초과 |
+| `S010` | MMS 파일 업로드 쿼터 초과 |
+| `S011` | MMS 파일 업로드 실패 |
+| `S012` | 발신 번호 세칙 오류 |
+| `S998` | 예기치 못한 서버 오류 |
+| `S999` | 기타 오류 |
+
+#### 4.7.3 IB EMMA Code (NCP EMMA 내부 검증)
+
+| Code | 설명 |
+|---|---|
+| `E900` | Invalid - IB 전송키가 없는 경우 |
+| `E901` | 수신 번호가 없는 경우 |
+| `E902` | 동보인 경우, 수신 번호 순번이 없는 경우 |
+| `E903` | 제목이 없는 경우 |
+| `E904` | 메시지가 없는 경우 |
+| `E905` | 회신번호가 없는 경우 |
+| `E906` | 메시지 키가 없는 경우 |
+| `E907` | 동보 여부가 없는 경우 |
+| `E908` | 서비스 타입이 없는 경우 |
+| `E909` | 전송 요청 시각이 없는 경우 |
+| `E910` | TTL 타임이 없는 경우 |
+| `E911` | MMS MT인데 첨부 파일 확장자가 없는 경우 |
+| `E912` | MMS MT인데 attach_file 폴더에 첨부 파일이 없는 경우 |
+| `E913` | MMS MT인데 첨부 파일 사이즈가 0인 경우 |
+| `E914` | MMS MT인데 파일 그룹 키는 있으나 파일 테이블에 데이터가 없는 경우 |
+| `E915` | **중복 메시지** |
+| `E916` | **인증 서버 차단 번호** |
+| `E917` | **고객 DB 차단 번호** |
+| `E918` | USER CALLBACK FAIL |
+| `E919` | 발송 제한 시간인 경우, 메시지 재발송 처리 금지 |
+| `E920` | LMS MT인데 메시지 테이블에 파일 그룹 키가 있는 경우 |
+| `E921` | MMS MT인데 메시지 테이블에 파일 그룹 키가 없는 경우 |
+| `E922` | 동보 단어 제약 문자 사용 오류 |
+| `E999` | 기타 오류 |
+
+#### 4.7.4 재시도 분류 권장
+
+| 계층 | 분류 | 재시도 가능성 |
+|---|---|---|
+| Report `0` | success | — (종결) |
+| Report `2xxx` | 일시적 네트워크/단말 장애 | ✅ 재시도 유효 |
+| Report `3xxx` | 영구적 번호/메시지/정책 오류 | ❌ 재시도 무의미 |
+| Response `1xxx` | 요청 형식/쿼터/권한 오류 | ❌ 수정 후 재전송 |
+| Response `S0xx` | 중계사 서버 오류 | ⚠️ backoff 후 재시도 |
+| Response `S9xx` | 알 수 없는 서버 오류 | ⚠️ backoff 후 재시도 |
+| EMMA `E9xx` | 전송 요청 데이터 누락/검증 실패 | ❌ 수정 후 재전송 |
+| EMMA `E915` | 중복 | ❌ 재시도 금지 (동일 key 거부됨) |
+| EMMA `E916/E917` | 차단 번호 | ❌ 재시도 금지 (차단 해제 필요) |
+
+출처:
+- https://api.ncloud-docs.com/docs/en/sens-sms-get (메시지 발송 결과 조회, 단건)
+- https://api.ncloud-docs.com/docs/en/sens-sms-list (메시지 발송 목록 조회)
 
 ---
 
