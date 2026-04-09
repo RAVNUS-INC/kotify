@@ -69,17 +69,23 @@ class Campaign(Base):
         Text, ForeignKey("users.sub"), nullable=False
     )
     caller_number: Mapped[str] = mapped_column(Text, nullable=False)
-    message_type: Mapped[str] = mapped_column(Text, nullable=False)  # SMS | LMS
-    subject: Mapped[str | None] = mapped_column(Text, nullable=True)  # LMS 전용
+    message_type: Mapped[str] = mapped_column(Text, nullable=False)  # SMS | LMS | MMS
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)  # LMS/MMS 전용
     content: Mapped[str] = mapped_column(Text, nullable=False)
     total_count: Mapped[int] = mapped_column(Integer, nullable=False)
     ok_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fail_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # DRAFT | DISPATCHING | DISPATCHED | COMPLETED | PARTIAL_FAILED | FAILED
+    # DRAFT | RESERVED | RESERVE_CANCELED | RESERVE_FAILED
+    # | DISPATCHING | DISPATCHED | COMPLETED | PARTIAL_FAILED | FAILED
     state: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 예약 발송 (NCP SENS v2). nullable이면 즉시 발송 캠페인.
+    # reserve_time: 로컬 'YYYY-MM-DD HH:mm' (NCP 요청 포맷)
+    # reserve_timezone: 'Asia/Seoul' 등 (NCP 기본값)
+    reserve_time: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reserve_timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     creator: Mapped[User] = relationship("User", back_populates="campaigns")
     ncp_requests: Mapped[list[NcpRequest]] = relationship(
