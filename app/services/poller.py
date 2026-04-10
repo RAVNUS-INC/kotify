@@ -18,9 +18,21 @@ from sqlalchemy.orm import Session
 from app.models import Campaign, Message, NcpRequest
 
 # Phase B2 가드: 예약 캠페인은 아직 실행되지 않았으므로 정상 폴링 루프에서
-# 완전히 제외한다. Phase B3에서 reserve-status 전환 로직이 RESERVED→DISPATCHING
+# 완전히 제외한다. Phase B3의 reserve-status 전환 로직이 RESERVED→DISPATCHING
 # 전환을 수행하면 그 시점부터 자동으로 정상 폴링이 집는다.
 _SKIP_CAMPAIGN_STATES: tuple[str, ...] = ("RESERVED",)
+
+# Phase B3: 예약 상태 조회 backoff 간격.
+# - 예약 실행까지 5분 초과 남음: 10분마다 조회 (거의 변할 일 없음)
+# - 5분 이내: 1분마다 조회 (곧 PROCESSING 으로 넘어감)
+_RESERVE_POLL_FAR_INTERVAL = 10 * 60
+_RESERVE_POLL_NEAR_INTERVAL = 1 * 60
+_RESERVE_POLL_NEAR_WINDOW = 5 * 60  # "near" 경계 (초)
+
+# NCP reserveStatus 값들 (Phase B3).
+_RESERVE_STATUS_ACTIVE = ("DONE", "PROCESSING")  # 정상 폴링 루프로 이관
+_RESERVE_STATUS_CANCELED = ("CANCELED",)
+_RESERVE_STATUS_FAILED = ("FAIL", "STALE", "SKIP")
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +219,11 @@ class Poller:
         한 청크 실패해도 다른 청크는 계속 처리된다.
         """
         now = _now()
+
+        # Phase B3: 예약 캠페인 상태 전환을 먼저 처리.
+        # reserveStatus=DONE/PROCESSING 이면 campaign.state=DISPATCHING 으로 전환되어
+        # 아래 정상 폴링 루프가 자동으로 이어받는다.
+        await self._poll_reservations(db, ncp_client, now)
 
         # 70분 cutoff sweep: sent_at 기준으로 만료된 메시지를 먼저 정리.
         # 이걸 먼저 해야 아래 ncp_requests 쿼리에서 만료된 것들이 제외된다.
@@ -396,6 +413,139 @@ class Poller:
             campaign.completed_at = _now().isoformat()
 
         db.flush()
+
+    async def _poll_reservations(
+        self, db: Session, ncp_client: object, now: datetime
+    ) -> None:
+        """예약(RESERVED) 캠페인의 상태를 NCP에서 조회하여 전환한다.
+
+        각 캠페인은 N개의 NcpRequest(청크)를 가질 수 있고, 각각이 독립된 reserveId다.
+        청크별 reserveStatus 를 전부 조회한 뒤 "가장 진행이 앞선 상태"로 결정한다:
+
+        - 하나라도 DONE/PROCESSING → campaign.state = DISPATCHING
+          (여기서부터 정상 폴링 루프가 자동으로 이어받는다)
+        - 전부 CANCELED → RESERVE_CANCELED
+        - 전부 FAIL/STALE/SKIP → RESERVE_FAILED
+        - 그 외(READY 포함 혼합) → 변경 없음 (다음 틱에 재조회)
+
+        Backoff:
+        - 예약 실행까지 5분 초과 남음: 10분 간격
+        - 5분 이내: 1분 간격
+        - last_polled_at 은 messages 테이블의 값을 재활용한다.
+        """
+        reserved_campaigns = list(
+            db.execute(
+                select(Campaign).where(Campaign.state == "RESERVED")
+            ).scalars().all()
+        )
+        for campaign in reserved_campaigns:
+            try:
+                await self._check_reservation(db, campaign, ncp_client, now)
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                logger.warning(
+                    "예약 상태 확인 실패 (campaign_id=%s): %s", campaign.id, exc
+                )
+
+    async def _check_reservation(
+        self,
+        db: Session,
+        campaign: Campaign,
+        ncp_client: object,
+        now: datetime,
+    ) -> None:
+        """단일 RESERVED 캠페인의 상태 확인."""
+        reqs = list(
+            db.execute(
+                select(NcpRequest).where(
+                    NcpRequest.campaign_id == campaign.id,
+                    NcpRequest.request_id.isnot(None),
+                )
+            ).scalars().all()
+        )
+        if not reqs:
+            return
+
+        # 예약 실행 시각 — sent_at 에 UTC ISO로 저장됨 (compose.py 설계 결정).
+        exec_dt = _parse_dt(reqs[0].sent_at)
+        if exec_dt and exec_dt.tzinfo is None:
+            exec_dt = exec_dt.replace(tzinfo=UTC)
+
+        # Backoff 간격 결정
+        if exec_dt is not None:
+            remaining = (exec_dt - now).total_seconds()
+            interval = (
+                _RESERVE_POLL_NEAR_INTERVAL
+                if remaining < _RESERVE_POLL_NEAR_WINDOW
+                else _RESERVE_POLL_FAR_INTERVAL
+            )
+        else:
+            interval = _RESERVE_POLL_FAR_INTERVAL
+
+        # 마지막 폴링 시각 — 이 캠페인의 messages 중 가장 최근 last_polled_at 사용
+        req_ids = [r.id for r in reqs]
+        last_polled_strs = list(
+            db.execute(
+                select(Message.last_polled_at)
+                .where(Message.ncp_request_id.in_(req_ids))
+                .where(Message.last_polled_at.isnot(None))
+            ).scalars().all()
+        )
+        if last_polled_strs:
+            parsed = [_parse_dt(s) for s in last_polled_strs]
+            parsed = [p for p in parsed if p is not None]
+            if parsed:
+                latest = max(parsed)
+                if latest.tzinfo is None:
+                    latest = latest.replace(tzinfo=UTC)
+                if (now - latest).total_seconds() < interval:
+                    return  # backoff
+
+        # 각 청크의 reserveStatus 조회
+        statuses: list[str] = []
+        for req in reqs:
+            try:
+                resp = await ncp_client.get_reserve_status(req.request_id)  # type: ignore[attr-defined]
+                statuses.append(resp.reserve_status)
+            except Exception as exc:
+                logger.warning(
+                    "get_reserve_status 실패 (request_id=%s): %s",
+                    req.request_id,
+                    exc,
+                )
+
+        if not statuses:
+            return
+
+        # 폴링 시각 기록 (backoff 계산용)
+        db.execute(
+            update(Message)
+            .where(Message.ncp_request_id.in_(req_ids))
+            .values(last_polled_at=now.isoformat())
+        )
+
+        # "가장 진행이 앞선 상태가 이긴다"
+        if any(s in _RESERVE_STATUS_ACTIVE for s in statuses):
+            old = campaign.state
+            campaign.state = "DISPATCHING"
+            logger.info(
+                "예약 전환: campaign_id=%s %s → DISPATCHING (statuses=%s)",
+                campaign.id,
+                old,
+                statuses,
+            )
+        elif statuses and all(s in _RESERVE_STATUS_CANCELED for s in statuses):
+            campaign.state = "RESERVE_CANCELED"
+            logger.info("예약 취소 감지: campaign_id=%s", campaign.id)
+        elif statuses and all(s in _RESERVE_STATUS_FAILED for s in statuses):
+            campaign.state = "RESERVE_FAILED"
+            logger.info(
+                "예약 실패 감지: campaign_id=%s statuses=%s",
+                campaign.id,
+                statuses,
+            )
+        # 그 외: RESERVED 유지 (READY 혼합 등)
 
     def _expire_stuck_messages(self, db: Session, now: datetime) -> set[int]:
         """70분 cutoff: sent_at 기준으로 만료된 미완료 메시지를 DELIVERY_UNCONFIRMED로 전환.

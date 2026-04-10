@@ -18,11 +18,14 @@
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">상태</label>
       <select name="status" class="ctrl">
         <option value="">전체</option>
+        <option value="RESERVED" {% if status_filter == "RESERVED" %}selected{% endif %}>예약됨</option>
         <option value="DISPATCHING" {% if status_filter == "DISPATCHING" %}selected{% endif %}>발송 중</option>
         <option value="DISPATCHED" {% if status_filter == "DISPATCHED" %}selected{% endif %}>발송됨</option>
         <option value="COMPLETED" {% if status_filter == "COMPLETED" %}selected{% endif %}>완료</option>
         <option value="FAILED" {% if status_filter == "FAILED" %}selected{% endif %}>실패</option>
         <option value="PARTIAL_FAILED" {% if status_filter == "PARTIAL_FAILED" %}selected{% endif %}>부분 실패</option>
+        <option value="RESERVE_CANCELED" {% if status_filter == "RESERVE_CANCELED" %}selected{% endif %}>예약 취소됨</option>
+        <option value="RESERVE_FAILED" {% if status_filter == "RESERVE_FAILED" %}selected{% endif %}>예약 실패</option>
       </select>
     </div>
     <div>
@@ -126,6 +129,9 @@
           {% elif c.state == "PARTIAL_FAILED" %}<span class="badge badge-partial">부분실패</span>
           {% elif c.state == "DISPATCHED" %}<span class="badge badge-dispatched">발송됨</span>
           {% elif c.state == "DISPATCHING" %}<span class="badge badge-pending">발송중</span>
+          {% elif c.state == "RESERVED" %}<span class="badge badge-pending">예약됨{% if c.reserve_time %}<br><small class="text-muted" style="font-size:10px">{{ c.reserve_time }}</small>{% endif %}</span>
+          {% elif c.state == "RESERVE_CANCELED" %}<span class="badge">예약취소</span>
+          {% elif c.state == "RESERVE_FAILED" %}<span class="badge badge-failed">예약실패</span>
           {% else %}<span class="badge">{{ c.state }}</span>{% endif %}
         </td>
         <td class="mono text-muted">{{ c.created_at|kst_dt }}</td>

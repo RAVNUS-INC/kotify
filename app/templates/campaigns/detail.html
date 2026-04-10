@@ -2,6 +2,16 @@
 {% block title %}캠페인 #{{ campaign.id }} — kotify{% endblock %}
 {% block page_title %}캠페인 #{{ campaign.id }}{% endblock %}
 {% block page_actions %}
+  {% if campaign.state == "RESERVED" and ("sender" in user_roles or "admin" in user_roles) %}
+  <button type="button" class="btn btn-secondary btn-sm"
+    hx-post="/campaigns/{{ campaign.id }}/cancel-reservation"
+    hx-headers='{"x-csrf-token": "{{ csrf_token(request) }}"}'
+    hx-confirm="예약을 취소하시겠습니까? 취소 후에는 되돌릴 수 없습니다."
+    hx-target="#cancel-result"
+    hx-swap="innerHTML">
+    <i data-lucide="x-circle"></i> 예약 취소
+  </button>
+  {% endif %}
   {% if campaign.fail_count > 0 and ("sender" in user_roles or "admin" in user_roles) %}
   <a href="/compose?resend_campaign={{ campaign.id }}&status=fail" class="btn btn-secondary btn-sm">
     <i data-lucide="refresh-cw"></i> 실패 수신자 재발송
@@ -36,6 +46,12 @@
       <div class="text-muted" style="margin-bottom:2px">완료 시각 (KST)</div>
       <div class="mono">{{ campaign.completed_at|kst_dt if campaign.completed_at else "—" }}</div>
     </div>
+    {% if campaign.reserve_time %}
+    <div>
+      <div class="text-muted" style="margin-bottom:2px">예약 시각 ({{ campaign.reserve_timezone or "Asia/Seoul" }})</div>
+      <div class="mono" style="font-size:14px;font-weight:600">{{ campaign.reserve_time }}</div>
+    </div>
+    {% endif %}
     <div>
       <div class="text-muted" style="margin-bottom:2px">상태</div>
       <div>
@@ -44,10 +60,15 @@
         {% elif campaign.state == "PARTIAL_FAILED" %}<span class="badge badge-partial">부분 실패</span>
         {% elif campaign.state == "DISPATCHED" %}<span class="badge badge-dispatched">발송됨</span>
         {% elif campaign.state == "DISPATCHING" %}<span class="badge badge-pending">발송 중</span>
+        {% elif campaign.state == "RESERVED" %}<span class="badge badge-pending">예약됨</span>
+        {% elif campaign.state == "RESERVE_CANCELED" %}<span class="badge">예약 취소됨</span>
+        {% elif campaign.state == "RESERVE_FAILED" %}<span class="badge badge-failed">예약 실패</span>
         {% else %}<span class="badge">{{ campaign.state }}</span>{% endif %}
       </div>
     </div>
   </div>
+  <!-- 예약 취소 결과 영역 (HTMX 응답) -->
+  <div id="cancel-result" style="margin-top:10px"></div>
 </div>
 
 <!-- 메시지 -->
@@ -76,7 +97,7 @@
     <span style="font-size:13px;font-weight:700">수신자 결과</span>
   </div>
   <div id="recipients-table"
-    {% if campaign.state in ('DISPATCHING', 'DISPATCHED', 'PARTIAL_FAILED') %}
+    {% if campaign.state in ('DISPATCHING', 'DISPATCHED', 'PARTIAL_FAILED', 'RESERVED') %}
     hx-get="/campaigns/{{ campaign.id }}/recipients"
     hx-trigger="every 5s"
     hx-swap="innerHTML"

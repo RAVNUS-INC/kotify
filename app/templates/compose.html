@@ -165,6 +165,23 @@
       {% endif %}
     </div>
 
+    <!-- 예약 발송 -->
+    <div class="form-group" id="reserve-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600">
+        <input type="checkbox" name="reserve_enabled" id="reserve-enabled" value="on"
+          onchange="toggleReserve()">
+        예약 발송
+      </label>
+      <div id="reserve-input-wrap" style="display:none;margin-top:6px">
+        <input type="datetime-local" name="reserve_time" id="reserve-time-input"
+          class="ctrl" style="max-width:240px">
+        <input type="hidden" name="reserve_timezone" value="Asia/Seoul">
+        <div class="form-hint">
+          현재 시각 기준 최소 10분 이후로 설정하세요. 타임존은 <b>Asia/Seoul (KST)</b>로 고정됩니다.
+        </div>
+      </div>
+    </div>
+
     {# M13: HTMX 자동 미리보기가 이미 있으므로 수동 "미리보기" 버튼 제거.
        발송하기 버튼만 유지. #}
     <div class="flex">
@@ -213,12 +230,12 @@
         </tbody>
       </table>
       <div class="alert alert-warning" style="margin-top:10px;margin-bottom:0;font-size:11px">
-        발송 후 취소할 수 없습니다. 내용을 확인하고 진행하세요.
+        <span id="modal-warn-text">발송 후 취소할 수 없습니다. 내용을 확인하고 진행하세요.</span>
       </div>
     </div>
     <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
       <button onclick="closeSendModal()" class="btn btn-secondary">취소</button>
-      <button onclick="confirmSend()" class="btn btn-primary">
+      <button id="modal-confirm-btn" onclick="confirmSend()" class="btn btn-primary">
         <i data-lucide="send"></i> 예, 발송합니다
       </button>
     </div>
@@ -226,6 +243,43 @@
 </div>
 
 <script>
+// ── 예약 발송 토글 + 최소 시각 설정 ────────────────────────────────────────
+function toggleReserve() {
+  var enabled = document.getElementById('reserve-enabled').checked;
+  var wrap = document.getElementById('reserve-input-wrap');
+  var input = document.getElementById('reserve-time-input');
+  wrap.style.display = enabled ? '' : 'none';
+  if (enabled) {
+    // 현재 시각 + 15분을 기본 최소값/초기값으로 제안
+    var now = new Date(Date.now() + 15 * 60 * 1000);
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    var minStr = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate())
+      + 'T' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+    input.min = minStr;
+    if (!input.value) input.value = minStr;
+    input.required = true;
+  } else {
+    input.required = false;
+    input.value = '';
+  }
+  updateSendButtonLabel();
+}
+
+function updateSendButtonLabel() {
+  var enabled = document.getElementById('reserve-enabled');
+  var btn = document.getElementById('send-btn');
+  if (!btn) return;
+  // 기존 자식 노드 제거 후 safe DOM 생성
+  while (btn.firstChild) btn.removeChild(btn.firstChild);
+  var icon = document.createElement('i');
+  icon.setAttribute('data-lucide', 'send');
+  btn.appendChild(icon);
+  btn.appendChild(document.createTextNode(
+    (enabled && enabled.checked) ? ' 예약 등록' : ' 발송하기'
+  ));
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
 function toggleSource() {
   var source = document.querySelector('input[name="source"]:checked').value;
   document.getElementById('source-manual').style.display = source === 'manual' ? '' : 'none';
@@ -303,6 +357,32 @@ function openSendModal() {
   document.getElementById('modal-count').textContent = validCount > 0 ? validCount + '명' : '미리보기 없음 (발송 전 확인 권장)';
   document.getElementById('modal-type').textContent = msgType;
   document.getElementById('modal-content').textContent = contentPreview || '(비어있음)';
+
+  // 예약 모드일 때 확인 버튼 문구/경고 메시지 교체
+  var reserveEnabled = document.getElementById('reserve-enabled');
+  var reserveInput = document.getElementById('reserve-time-input');
+  var warn = document.getElementById('modal-warn-text');
+  var confirmBtn = document.getElementById('modal-confirm-btn');
+  if (reserveEnabled && reserveEnabled.checked && reserveInput && reserveInput.value) {
+    var localStr = reserveInput.value.replace('T', ' ');
+    if (warn) warn.textContent = localStr + ' 에 자동 발송됩니다. 예약 취소는 캠페인 상세에서 가능합니다.';
+    if (confirmBtn) {
+      while (confirmBtn.firstChild) confirmBtn.removeChild(confirmBtn.firstChild);
+      var icon = document.createElement('i');
+      icon.setAttribute('data-lucide', 'calendar-clock');
+      confirmBtn.appendChild(icon);
+      confirmBtn.appendChild(document.createTextNode(' 예, 예약합니다'));
+    }
+  } else {
+    if (warn) warn.textContent = '발송 후 취소할 수 없습니다. 내용을 확인하고 진행하세요.';
+    if (confirmBtn) {
+      while (confirmBtn.firstChild) confirmBtn.removeChild(confirmBtn.firstChild);
+      var icon2 = document.createElement('i');
+      icon2.setAttribute('data-lucide', 'send');
+      confirmBtn.appendChild(icon2);
+      confirmBtn.appendChild(document.createTextNode(' 예, 발송합니다'));
+    }
+  }
 
   var modal = document.getElementById('send-modal');
   modal.style.display = 'flex';

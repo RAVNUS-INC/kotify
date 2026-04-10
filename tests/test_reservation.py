@@ -1,9 +1,10 @@
-"""Phase B2 예약 발송 테스트.
+"""Phase B2/B3 예약 발송 테스트.
 
 - parse_reserve_time: 포맷/타임존/과거 시각 검증
 - dispatch_campaign 예약 경로: state=RESERVED, sent_at=미래UTC, send_sms에 reserve 파라미터 전달
 - NCPClient.send_sms: reserve 파라미터가 request body에 포함되는지
 - NCPClient.cancel_reservation / get_reserve_status: HTTP 호출 검증
+- Poller._poll_reservations: reserveStatus → campaign.state 전환 매핑
 """
 from __future__ import annotations
 
@@ -422,3 +423,224 @@ class TestDispatchReserved:
             db.close()
 
 
+# ── Phase B3: Poller._poll_reservations ─────────────────────────────────────
+
+
+def _make_reserved_campaign(
+    db, user_sub: str, caller_number: str, *, request_id: str = "RES-1",
+    exec_hours_from_now: float = 2.0,
+):
+    """테스트 헬퍼: RESERVED 캠페인 + NcpRequest + Message 1건 생성."""
+    from app.models import Campaign, Message, NcpRequest
+
+    exec_utc = datetime.now(UTC) + timedelta(hours=exec_hours_from_now)
+    campaign = Campaign(
+        created_by=user_sub,
+        caller_number=caller_number,
+        message_type="SMS",
+        content="예약 테스트",
+        total_count=1,
+        ok_count=0,
+        fail_count=0,
+        pending_count=1,
+        state="RESERVED",
+        created_at=datetime.now(UTC).isoformat(),
+        reserve_time=exec_utc.strftime("%Y-%m-%d %H:%M"),
+        reserve_timezone="Asia/Seoul",
+    )
+    db.add(campaign)
+    db.flush()
+
+    ncp_req = NcpRequest(
+        campaign_id=campaign.id,
+        chunk_index=0,
+        request_id=request_id,
+        request_time=datetime.now(UTC).isoformat(),
+        http_status=202,
+        status_code="202",
+        status_name="success",
+        sent_at=exec_utc.isoformat(),  # 예약 실행 시각 (UTC)
+    )
+    db.add(ncp_req)
+    db.flush()
+
+    msg = Message(
+        campaign_id=campaign.id,
+        ncp_request_id=ncp_req.id,
+        to_number="01011112222",
+        to_number_raw="01011112222",
+        status="PENDING",
+    )
+    db.add(msg)
+    db.commit()
+    return campaign
+
+
+class TestPollerReservations:
+    """_poll_reservations 의 reserveStatus → campaign.state 매핑 검증."""
+
+    def _make_client(self, reserve_status: str) -> MagicMock:
+        from app.ncp.client import ReserveStatusResponse
+        client = MagicMock()
+        client.list_by_request_id = AsyncMock(return_value=None)
+
+        async def fake_status(reserve_id):
+            return ReserveStatusResponse(
+                reserve_id=reserve_id,
+                reserve_timezone="Asia/Seoul",
+                reserve_time="2099-06-15 14:30",
+                reserve_status=reserve_status,
+            )
+
+        client.get_reserve_status = fake_status
+        return client
+
+    def _make_poller(self, session_factory, client):
+        from app.services.poller import Poller
+        return Poller(
+            db_factory=session_factory,
+            ncp_client_factory=lambda: client,
+        )
+
+    @pytest.mark.asyncio
+    async def test_ready_keeps_reserved(
+        self, session_factory, sample_user, sample_caller
+    ):
+        """READY 상태면 RESERVED 유지."""
+        db = session_factory()
+        try:
+            c = _make_reserved_campaign(db, sample_user.sub, sample_caller.number)
+            cid = c.id
+        finally:
+            db.close()
+
+        client = self._make_client("READY")
+        poller = self._make_poller(session_factory, client)
+        await poller.run_once()
+
+        verify = session_factory()
+        try:
+            from app.models import Campaign
+            assert verify.get(Campaign, cid).state == "RESERVED"
+        finally:
+            verify.close()
+
+    @pytest.mark.asyncio
+    async def test_done_transitions_to_dispatching(
+        self, session_factory, sample_user, sample_caller
+    ):
+        """DONE → DISPATCHING (정상 폴링 루프로 이관)."""
+        db = session_factory()
+        try:
+            c = _make_reserved_campaign(db, sample_user.sub, sample_caller.number)
+            cid = c.id
+        finally:
+            db.close()
+
+        client = self._make_client("DONE")
+        poller = self._make_poller(session_factory, client)
+        await poller.run_once()
+
+        verify = session_factory()
+        try:
+            from app.models import Campaign
+            assert verify.get(Campaign, cid).state == "DISPATCHING"
+        finally:
+            verify.close()
+
+    @pytest.mark.asyncio
+    async def test_processing_transitions_to_dispatching(
+        self, session_factory, sample_user, sample_caller
+    ):
+        """PROCESSING 역시 DISPATCHING 로 전환."""
+        db = session_factory()
+        try:
+            c = _make_reserved_campaign(db, sample_user.sub, sample_caller.number)
+            cid = c.id
+        finally:
+            db.close()
+
+        client = self._make_client("PROCESSING")
+        poller = self._make_poller(session_factory, client)
+        await poller.run_once()
+
+        verify = session_factory()
+        try:
+            from app.models import Campaign
+            assert verify.get(Campaign, cid).state == "DISPATCHING"
+        finally:
+            verify.close()
+
+    @pytest.mark.asyncio
+    async def test_canceled_transitions_to_reserve_canceled(
+        self, session_factory, sample_user, sample_caller
+    ):
+        db = session_factory()
+        try:
+            c = _make_reserved_campaign(db, sample_user.sub, sample_caller.number)
+            cid = c.id
+        finally:
+            db.close()
+
+        client = self._make_client("CANCELED")
+        poller = self._make_poller(session_factory, client)
+        await poller.run_once()
+
+        verify = session_factory()
+        try:
+            from app.models import Campaign
+            assert verify.get(Campaign, cid).state == "RESERVE_CANCELED"
+        finally:
+            verify.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["FAIL", "STALE", "SKIP"])
+    async def test_failed_states_transition_to_reserve_failed(
+        self, session_factory, sample_user, sample_caller, status
+    ):
+        db = session_factory()
+        try:
+            c = _make_reserved_campaign(db, sample_user.sub, sample_caller.number)
+            cid = c.id
+        finally:
+            db.close()
+
+        client = self._make_client(status)
+        poller = self._make_poller(session_factory, client)
+        await poller.run_once()
+
+        verify = session_factory()
+        try:
+            from app.models import Campaign
+            assert verify.get(Campaign, cid).state == "RESERVE_FAILED"
+        finally:
+            verify.close()
+
+    @pytest.mark.asyncio
+    async def test_normal_poll_skips_reserved_campaigns(
+        self, session_factory, sample_user, sample_caller
+    ):
+        """RESERVED 캠페인의 messages 는 정상 폴링 루프(list_by_request_id)가 건들지 않는다."""
+        db = session_factory()
+        try:
+            c = _make_reserved_campaign(db, sample_user.sub, sample_caller.number)
+            cid = c.id
+        finally:
+            db.close()
+
+        # READY 유지 → normal poll 에서 list_by_request_id 가 호출되지 않아야 함
+        client = self._make_client("READY")
+        list_mock = AsyncMock()
+        client.list_by_request_id = list_mock
+
+        poller = self._make_poller(session_factory, client)
+        await poller.run_once()
+
+        list_mock.assert_not_called()
+
+        verify = session_factory()
+        try:
+            from app.models import Campaign
+            assert verify.get(Campaign, cid).state == "RESERVED"
+        finally:
+            verify.close()
