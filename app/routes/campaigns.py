@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, Message, User
+from app.models import Campaign, Message, NcpRequest, User
 from app.security.csrf import verify_csrf
 from app.web import templates
 
@@ -311,6 +311,132 @@ async def campaign_export(
         media_type="text/csv; charset=utf-8-sig",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.post("/{campaign_id}/cancel-reservation", response_class=HTMLResponse)
+async def campaign_cancel_reservation(
+    campaign_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    _: None = Depends(require_setup_complete),
+    _csrf: None = Depends(verify_csrf),
+) -> HTMLResponse:
+    """예약 발송을 취소한다 (sender/admin 전용).
+
+    권한/상태 체크:
+    - 권한: sender/admin (본인 캠페인이거나 admin)
+    - 상태: ``campaign.state == "RESERVED"`` 인 경우만 허용
+    - 캠페인에는 청크 수만큼 NcpRequest가 있고, 각각이 별도의 NCP 예약이다.
+      모든 NcpRequest.request_id 에 대해 개별적으로 취소를 시도한다.
+    """
+    from app.ncp.client import NCPBadRequest, NCPError
+    from app.services import audit
+
+    campaign = db.get(Campaign, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="캠페인을 찾을 수 없습니다.")
+    if not _can_access_campaign(user, campaign):
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
+    # sender/admin 역할 체크 (viewer는 자기 캠페인이어도 취소 불가)
+    try:
+        roles = set(json.loads(user.roles))
+    except (json.JSONDecodeError, TypeError):
+        roles = set()
+    if not (roles & {"sender", "admin"}):
+        raise HTTPException(status_code=403, detail="예약 취소 권한이 없습니다.")
+
+    if campaign.state != "RESERVED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"예약 상태({campaign.state})가 아니므로 취소할 수 없습니다.",
+        )
+
+    from app.main import get_ncp_client  # noqa: PLC0415
+    ncp_client = get_ncp_client()
+    if ncp_client is None:
+        raise HTTPException(status_code=503, detail="NCP 설정이 완료되지 않았습니다.")
+
+    # 해당 캠페인의 모든 예약 ncp_requests 조회
+    ncp_reqs = list(
+        db.execute(
+            select(NcpRequest).where(NcpRequest.campaign_id == campaign_id)
+        ).scalars().all()
+    )
+
+    # 각 예약에 대해 NCP cancel 호출 + 결과 수집
+    successes: list[str] = []
+    already_gone: list[str] = []      # NCP가 READY가 아니라고 응답 (이미 실행/취소됨)
+    other_errors: list[tuple[str, str]] = []  # (request_id, error message)
+
+    for req in ncp_reqs:
+        if not req.request_id:
+            continue
+        try:
+            await ncp_client.cancel_reservation(req.request_id)
+            successes.append(req.request_id)
+        except NCPBadRequest as exc:
+            # READY 상태가 아닌 예약 — 이미 실행되었거나 이미 취소됨
+            already_gone.append(req.request_id)
+        except NCPError as exc:
+            other_errors.append((req.request_id, str(exc)))
+
+    # ── 상태 전환 정책 (B: 정밀) ──────────────────────────────────────────────
+    # already_gone 의 각 예약에 대해 get_reserve_status 로 재조회하여
+    # "이미 실행됨(DONE/PROCESSING)" vs "이미 취소됨(CANCELED/FAIL/STALE/SKIP)"
+    # 을 구분한다.
+    #
+    # - DONE/PROCESSING 이 하나라도 있으면: 이 캠페인은 실제로 이미 발송이
+    #   시작/완료된 것 → state = DISPATCHING 으로 넘겨 정상 폴링 루프에 맡긴다.
+    # - 그 외(전부 CANCELED/FAIL/STALE/SKIP)이면: RESERVE_CANCELED.
+    # - other_errors 가 있으면 HTTPException 으로 재시도 요청 (DB 변경 없음).
+    resolved_done = 0
+    for rid in already_gone:
+        try:
+            st = await ncp_client.get_reserve_status(rid)
+            if st.reserve_status in ("DONE", "PROCESSING"):
+                resolved_done += 1
+        except Exception:
+            # 조회 실패는 무시 — 재시도 여지를 남기려고 errors에 누적하지 않음.
+            pass
+
+    if other_errors:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{len(other_errors)}개 예약 취소가 일시 오류로 실패했습니다. "
+                "잠시 후 다시 시도해주세요."
+            ),
+        )
+
+    if resolved_done > 0:
+        # 일부/전체가 이미 실행됨 — 폴러가 정상 루프에서 집음.
+        campaign.state = "DISPATCHING"
+        final_msg = (
+            f"일부 예약이 이미 실행되었습니다 "
+            f"(취소 {len(successes)}건, 실행 {resolved_done}건). "
+            "결과는 곧 갱신됩니다."
+        )
+    else:
+        campaign.state = "RESERVE_CANCELED"
+        final_msg = f"예약이 취소되었습니다 ({len(successes)}건)."
+
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action=audit.CANCEL_RESERVE,
+        target=f"campaign:{campaign.id}",
+        detail={
+            "successes": len(successes),
+            "already_gone": len(already_gone),
+            "resolved_done": resolved_done,
+            "final_state": campaign.state,
+        },
+    )
+    db.commit()
+    return HTMLResponse(f'<span class="ok">✓ {final_msg}</span>')
 
 
 @router.post("/{campaign_id}/refresh", response_class=HTMLResponse)

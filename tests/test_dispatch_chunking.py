@@ -14,7 +14,7 @@ class TestDispatchChunking:
         """send_sms 호출을 추적하는 mock NCP 클라이언트."""
         client = MagicMock()
 
-        async def fake_send_sms(from_number, content, to_numbers, message_type="SMS", subject=None):
+        async def fake_send_sms(from_number, content, to_numbers, message_type="SMS", subject=None, reserve_time=None, reserve_time_zone=None):
             call_tracker.append(len(to_numbers))
             return SendResponse(
                 request_id=f"REQ-{len(call_tracker):04d}",
@@ -146,7 +146,8 @@ class TestDispatchChunking:
         call_count = 0
 
         async def fail_first_succeed_rest(
-            from_number, content, to_numbers, message_type="SMS", subject=None
+            from_number, content, to_numbers, message_type="SMS", subject=None,
+            reserve_time=None, reserve_time_zone=None,
         ):
             nonlocal call_count
             call_count += 1

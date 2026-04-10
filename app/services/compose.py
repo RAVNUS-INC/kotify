@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -76,6 +77,56 @@ CHUNK_SIZE = 100
 # 1회 발송 최대 수신자 수 (SPEC §0)
 MAX_RECIPIENTS_PER_CAMPAIGN = 1000
 
+# 예약 발송 최소 리드타임 (현재 시각 + 이 값) 이후만 허용.
+# NCP 자체 제약은 10분이지만, 클라이언트/서버 시계 드리프트 버퍼 포함.
+RESERVE_MIN_LEAD_SECONDS = 10 * 60
+
+
+def parse_reserve_time(
+    reserve_time_local: str, reserve_timezone: str
+) -> tuple[str, str]:
+    """예약 시각을 검증하고 (NCP 전송용 문자열, 실행 시각의 UTC ISO)를 반환한다.
+
+    Args:
+        reserve_time_local: 로컬 시각 문자열.
+            허용 형식: 'YYYY-MM-DD HH:mm' 또는 'YYYY-MM-DDTHH:mm'
+            (HTML datetime-local 인풋은 'T' 구분자를 쓴다).
+        reserve_timezone: 'Asia/Seoul' 같은 IANA 타임존 ID.
+
+    Returns:
+        (ncp_reserve_time, reserve_execution_utc_iso) 튜플.
+        - ncp_reserve_time: NCP에 전달할 'YYYY-MM-DD HH:mm' 포맷.
+        - reserve_execution_utc_iso: 70분 cutoff 기준으로 쓸 UTC isoformat.
+
+    Raises:
+        ValueError: 포맷 오류, 알 수 없는 타임존, 과거/너무 가까운 시각.
+    """
+    try:
+        tz = ZoneInfo(reserve_timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"알 수 없는 타임존: {reserve_timezone}") from exc
+
+    raw = reserve_time_local.strip().replace("T", " ")
+    try:
+        naive = datetime.strptime(raw, "%Y-%m-%d %H:%M")
+    except ValueError as exc:
+        raise ValueError(
+            f"예약 시각 포맷 오류 (기대: 'YYYY-MM-DD HH:mm'): {reserve_time_local}"
+        ) from exc
+
+    local_dt = naive.replace(tzinfo=tz)
+    utc_dt = local_dt.astimezone(UTC)
+
+    now_utc = datetime.now(UTC)
+    if (utc_dt - now_utc).total_seconds() < RESERVE_MIN_LEAD_SECONDS:
+        minutes = RESERVE_MIN_LEAD_SECONDS // 60
+        raise ValueError(
+            f"예약 시각은 현재로부터 최소 {minutes}분 이후여야 합니다."
+        )
+
+    ncp_format = local_dt.strftime("%Y-%m-%d %H:%M")
+    return ncp_format, utc_dt.isoformat()
+
 
 async def dispatch_campaign(
     db: Session,
@@ -86,6 +137,8 @@ async def dispatch_campaign(
     recipients: list[str],
     message_type: str,
     subject: str | None = None,
+    reserve_time_local: str | None = None,
+    reserve_timezone: str | None = None,
 ) -> Campaign:
     """캠페인을 생성하고 NCP에 발송한다.
 
@@ -122,6 +175,18 @@ async def dispatch_campaign(
     if len(recipients) > MAX_RECIPIENTS_PER_CAMPAIGN:
         raise ValueError(f"1회 최대 {MAX_RECIPIENTS_PER_CAMPAIGN}명까지 발송할 수 있습니다.")
 
+    # 0.5 예약 파라미터 검증/변환
+    # 예약 경로와 즉시 경로를 한 곳에서 가른다. reserve_time_local 이 있으면 예약.
+    is_reserved = reserve_time_local is not None
+    ncp_reserve_time: str | None = None
+    reserve_execution_utc_iso: str | None = None
+    if is_reserved:
+        if not reserve_timezone:
+            raise ValueError("예약 발송 시 reserve_timezone은 필수입니다.")
+        ncp_reserve_time, reserve_execution_utc_iso = parse_reserve_time(
+            reserve_time_local, reserve_timezone  # type: ignore[arg-type]
+        )
+
     # 1. 발신번호 활성 여부 검증 (UI 우회 방지)
     caller = db.execute(
         select(Caller).where(
@@ -138,7 +203,9 @@ async def dispatch_campaign(
 
     now = _now_iso()
 
-    # 3. Campaign 생성 (DISPATCHING)
+    # 3. Campaign 생성
+    # 예약이면 RESERVED, 아니면 DISPATCHING.
+    initial_state = "RESERVED" if is_reserved else "DISPATCHING"
     campaign = Campaign(
         created_by=created_by,
         caller_number=caller_number,
@@ -149,9 +216,11 @@ async def dispatch_campaign(
         ok_count=0,
         fail_count=0,
         pending_count=len(recipients),
-        state="DISPATCHING",
+        state=initial_state,
         created_at=now,
         completed_at=None,
+        reserve_time=ncp_reserve_time if is_reserved else None,
+        reserve_timezone=reserve_timezone if is_reserved else None,
     )
     db.add(campaign)
     db.flush()  # campaign.id 확보
@@ -164,7 +233,10 @@ async def dispatch_campaign(
     failed_chunk_sizes: list[int] = []
 
     for chunk_idx, chunk in enumerate(chunks):
-        sent_at = _now_iso()
+        # 예약이면 sent_at = 예약 실행 시각(UTC). 즉시 발송이면 지금.
+        # 이래야 poller의 70분 cutoff가 "예약 실행 +70분" 을 의미하여
+        # 예약 전 구간에는 자동으로 cutoff 되지 않는다.
+        sent_at = reserve_execution_utc_iso if is_reserved else _now_iso()
         try:
             # send_sms는 단일 청크(≤100건)만 처리 (#2)
             send_resp = await ncp_client.send_sms(
@@ -173,6 +245,8 @@ async def dispatch_campaign(
                 to_numbers=chunk,
                 message_type=message_type,  # type: ignore[arg-type]
                 subject=subject,
+                reserve_time=ncp_reserve_time,
+                reserve_time_zone=reserve_timezone if is_reserved else None,
             )
 
             ncp_req = NcpRequest(
@@ -189,8 +263,28 @@ async def dispatch_campaign(
             db.add(ncp_req)
             db.flush()
 
-            # 5. messageId 수집 (발송 직후 1회 list 호출)
-            if send_resp and send_resp.request_id:
+            # 5. messageId 수집 (발송 직후 1회 list 호출).
+            # 예약 경로에서는 스킵 — NCP는 예약 실행 전까지 messages가 비어 있다.
+            # Phase B3의 reserve-status 폴링이 DONE을 감지하면 그때 정상 폴링 루프로 진입.
+            if is_reserved:
+                for to_num in chunk:
+                    msg = Message(
+                        campaign_id=campaign.id,
+                        ncp_request_id=ncp_req.id,
+                        to_number=to_num,
+                        to_number_raw=to_num,
+                        message_id=None,
+                        status="PENDING",
+                        result_status=None,
+                        result_code=None,
+                        result_message=None,
+                        telco_code=None,
+                        complete_time=None,
+                        last_polled_at=None,
+                        poll_count=0,
+                    )
+                    db.add(msg)
+            elif send_resp and send_resp.request_id:
                 try:
                     list_resp = await ncp_client.list_by_request_id(send_resp.request_id)
                     # to_number → (message_id, status) 매핑 (#19: 같은 번호 여러 개 대응)
@@ -359,12 +453,15 @@ async def dispatch_campaign(
                 raise
 
     # 6. Campaign state 업데이트
+    # 예약 경로: 모두 성공했으면 RESERVED 유지, 일부/전체 실패는 기존과 동일 분류.
+    # (예약 등록 실패 = NCP 쪽 4xx/5xx; "예약됨" 상태로 남기면 안 됨)
     total_chunks = len(chunks)
     if len(failed_chunks) == 0:
-        campaign.state = "DISPATCHED"
+        campaign.state = "RESERVED" if is_reserved else "DISPATCHED"
     elif len(failed_chunks) == total_chunks:
-        campaign.state = "FAILED"
+        campaign.state = "RESERVE_FAILED" if is_reserved else "FAILED"
     else:
+        # 부분 실패 — 예약이어도 일부는 NCP에 등록됐으니 PARTIAL_FAILED 그대로.
         campaign.state = "PARTIAL_FAILED"
 
     # #13: pending_count는 실패 청크의 실제 건수 기반으로 계산

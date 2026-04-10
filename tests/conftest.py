@@ -90,7 +90,15 @@ def mock_ncp_client():
 
     client = MagicMock()
 
-    async def fake_send_sms(from_number, content, to_numbers, message_type="SMS", subject=None):
+    async def fake_send_sms(
+        from_number,
+        content,
+        to_numbers,
+        message_type="SMS",
+        subject=None,
+        reserve_time=None,
+        reserve_time_zone=None,
+    ):
         # send_sms는 단일 청크(≤100건)만 처리 — SendResponse 단일 객체 반환
         return SendResponse(
             request_id="REQ-0000",

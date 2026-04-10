@@ -17,6 +17,10 @@ from app.ncp.signature import make_headers
 _BASE_URL = "https://sens.apigw.ntruss.com"
 _SEND_PATH = "/sms/v2/services/{service_id}/messages"
 _LIST_PATH = "/sms/v2/services/{service_id}/messages"
+_RESERVE_STATUS_PATH = (
+    "/sms/v2/services/{service_id}/reservations/{reserve_id}/reserve-status"
+)
+_RESERVE_CANCEL_PATH = "/sms/v2/services/{service_id}/reservations/{reserve_id}"
 
 # 단일 호출당 최대 수신자 수 (NCP 제약)
 _CHUNK_SIZE = 100
@@ -93,6 +97,20 @@ class ListResponse:
     messages: list[MessageItem] = field(default_factory=list)
 
 
+@dataclass
+class ReserveStatusResponse:
+    """GET /reservations/{reserveId}/reserve-status 응답.
+
+    reserve_status 가능 값 (NCP SENS v2):
+        READY | PROCESSING | CANCELED | FAIL | DONE | STALE | SKIP
+    """
+
+    reserve_id: str
+    reserve_timezone: str
+    reserve_time: str        # "YYYY-MM-DD HH:mm" 로컬
+    reserve_status: str
+
+
 # ── 클라이언트 ───────────────────────────────────────────────────────────────
 
 
@@ -158,11 +176,16 @@ class NCPClient:
         to_numbers: list[str],
         message_type: Literal["SMS", "LMS"] = "SMS",
         subject: str | None = None,
+        reserve_time: str | None = None,
+        reserve_time_zone: str | None = None,
     ) -> SendResponse:
         """SMS/LMS를 단일 청크(최대 100건)로 발송한다.
 
         이슈 #2: 청크 분할은 dispatch_campaign이 전담한다.
         100건 초과 시 ValueError를 raise한다.
+
+        예약 발송: reserve_time 이 주어지면 NCP는 즉시 발송하지 않고 예약 큐에
+        등록한다. 응답의 request_id는 이후 reserveId로 사용된다.
 
         Args:
             from_number: 발신번호 (숫자만, 예: ``"0212345678"``).
@@ -170,12 +193,16 @@ class NCPClient:
             to_numbers: 수신번호 목록 (정규화된 숫자만, 최대 100건).
             message_type: ``"SMS"`` 또는 ``"LMS"``.
             subject: LMS 제목 (message_type=LMS 시 권장).
+            reserve_time: 예약 시각 ``"YYYY-MM-DD HH:mm"`` (로컬).
+                None이면 즉시 발송.
+            reserve_time_zone: 예약 타임존, 예 ``"Asia/Seoul"``.
+                reserve_time 지정 시 필수.
 
         Returns:
             SendResponse.
 
         Raises:
-            ValueError: 100건 초과.
+            ValueError: 100건 초과 또는 reserve 파라미터 불일치.
             NotImplementedError: signature.py가 아직 구현되지 않은 경우.
             NCPAuthError: 인증 실패.
             NCPBadRequest: 요청 오류.
@@ -187,6 +214,10 @@ class NCPClient:
                 f"send_sms는 최대 {_CHUNK_SIZE}건을 처리합니다. "
                 f"청크 분할은 dispatch_campaign이 전담합니다. "
                 f"요청 건수: {len(to_numbers)}"
+            )
+        if (reserve_time is None) != (reserve_time_zone is None):
+            raise ValueError(
+                "reserve_time 과 reserve_time_zone 은 함께 지정하거나 함께 None이어야 합니다."
             )
 
         path = self._send_path()
@@ -201,6 +232,9 @@ class NCPClient:
         }
         if subject and message_type == "LMS":
             body["subject"] = subject
+        if reserve_time is not None:
+            body["reserveTime"] = reserve_time
+            body["reserveTimeZone"] = reserve_time_zone
 
         headers = make_headers("POST", path, self._access_key, self._secret_key)
 
@@ -264,3 +298,58 @@ class NCPClient:
             status_name=data.get("statusName", ""),
             messages=items,
         )
+
+    async def get_reserve_status(self, reserve_id: str) -> ReserveStatusResponse:
+        """예약 발송의 현재 상태를 조회한다.
+
+        Args:
+            reserve_id: send_sms(reserve_time=...) 호출의 request_id.
+
+        Returns:
+            ReserveStatusResponse.
+
+        Raises:
+            NCPAuthError / NCPError: API 오류.
+        """
+        safe_id = quote(reserve_id, safe="")
+        path = _RESERVE_STATUS_PATH.format(
+            service_id=self._service_id, reserve_id=safe_id
+        )
+        headers = make_headers("GET", path, self._access_key, self._secret_key)
+
+        response = await self._client.get(path, headers=headers)
+        self._raise_for_status(response)
+
+        data = response.json()
+        return ReserveStatusResponse(
+            reserve_id=data.get("reserveId", reserve_id),
+            reserve_timezone=data.get("reserveTimeZone", ""),
+            reserve_time=data.get("reserveTime", ""),
+            reserve_status=data.get("reserveStatus", ""),
+        )
+
+    async def cancel_reservation(self, reserve_id: str) -> None:
+        """예약 발송을 취소한다.
+
+        NCP는 ``reserveStatus == READY`` 인 예약만 취소 가능하다.
+        이미 PROCESSING/DONE 으로 넘어간 예약은 400을 돌려준다.
+
+        Args:
+            reserve_id: send_sms(reserve_time=...) 호출의 request_id.
+
+        Raises:
+            NCPBadRequest: 이미 취소/실행된 예약.
+            NCPAuthError: 인증 실패.
+            NCPError: 기타 API 오류.
+        """
+        safe_id = quote(reserve_id, safe="")
+        path = _RESERVE_CANCEL_PATH.format(
+            service_id=self._service_id, reserve_id=safe_id
+        )
+        headers = make_headers("DELETE", path, self._access_key, self._secret_key)
+
+        response = await self._client.delete(path, headers=headers)
+        # 성공은 200 또는 204
+        if response.status_code in (200, 204):
+            return
+        self._raise_for_status(response)

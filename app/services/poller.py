@@ -17,6 +17,11 @@ from sqlalchemy.orm import Session
 
 from app.models import Campaign, Message, NcpRequest
 
+# Phase B2 가드: 예약 캠페인은 아직 실행되지 않았으므로 정상 폴링 루프에서
+# 완전히 제외한다. Phase B3에서 reserve-status 전환 로직이 RESERVED→DISPATCHING
+# 전환을 수행하면 그 시점부터 자동으로 정상 폴링이 집는다.
+_SKIP_CAMPAIGN_STATES: tuple[str, ...] = ("RESERVED",)
+
 logger = logging.getLogger(__name__)
 
 # Backoff 스케줄 (poll_count → 다음 폴링까지 초).
@@ -216,12 +221,15 @@ class Poller:
                     db.rollback()
                     logger.warning("만료 sweep 캠페인 집계 실패 (campaign_id=%s): %s", cid, exc)
 
-        # 미완료 메시지가 있는 ncp_requests 조회
+        # 미완료 메시지가 있는 ncp_requests 조회.
+        # 예약(RESERVED) 캠페인은 제외 — 아직 NCP가 발송을 실행하지 않은 상태.
         stmt = (
             select(NcpRequest)
             .join(Message, Message.ncp_request_id == NcpRequest.id)
+            .join(Campaign, Campaign.id == NcpRequest.campaign_id)
             .where(Message.status.notin_(_FINAL_STATUSES))
             .where(NcpRequest.request_id.isnot(None))
+            .where(Campaign.state.notin_(_SKIP_CAMPAIGN_STATES))
             .distinct()
         )
         ncp_requests: list[NcpRequest] = list(db.execute(stmt).scalars().all())

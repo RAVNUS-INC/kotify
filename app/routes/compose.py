@@ -192,6 +192,9 @@ async def compose_send(
     subject: str = Form(""),
     recipients_text: str = Form(""),
     source: str = Form("manual"),
+    reserve_enabled: str = Form(""),           # "on" 이면 예약 모드
+    reserve_time: str = Form(""),              # datetime-local: "YYYY-MM-DDTHH:mm"
+    reserve_timezone: str = Form("Asia/Seoul"),
 ) -> HTMLResponse | RedirectResponse:
     """실제 발송 처리. 검증 실패 시 form 보존하여 재렌더링 (#I9)."""
     from app.services.compose import dispatch_campaign
@@ -279,6 +282,12 @@ async def compose_send(
     # subject는 LMS일 때만 의미 있음 (SMS는 제목 미지원)
     final_subject = subject.strip() if msg_result["message_type"] == "LMS" else None
 
+    # 예약 발송 파라미터 처리.
+    # 체크박스가 켜져 있고 reserve_time이 비어 있지 않을 때만 예약으로 간주.
+    is_reserved = reserve_enabled == "on" and bool(reserve_time.strip())
+    reserve_time_arg: str | None = reserve_time.strip() if is_reserved else None
+    reserve_tz_arg: str | None = reserve_timezone if is_reserved else None
+
     try:
         campaign = await dispatch_campaign(
             db=db,
@@ -289,6 +298,8 @@ async def compose_send(
             recipients=valid_numbers,
             message_type=msg_result["message_type"],
             subject=final_subject,
+            reserve_time_local=reserve_time_arg,
+            reserve_timezone=reserve_tz_arg,
         )
 
         # 연락처 last_sent_at 업데이트
