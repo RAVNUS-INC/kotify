@@ -111,6 +111,8 @@
         <td>
           {% if c.message_type == "SMS" %}
           <span class="badge badge-success">SMS</span>
+          {% elif c.message_type == "MMS" %}
+          <span class="badge badge-partial">MMS</span>
           {% else %}
           <span class="badge badge-dispatched">LMS</span>
           {% endif %}

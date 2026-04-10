@@ -35,6 +35,7 @@
       <div class="text-muted" style="margin-bottom:2px">유형</div>
       <div>
         {% if campaign.message_type == "SMS" %}<span class="badge badge-success">SMS</span>
+        {% elif campaign.message_type == "MMS" %}<span class="badge badge-partial">MMS</span>
         {% else %}<span class="badge badge-dispatched">LMS</span>{% endif %}
       </div>
     </div>
@@ -86,6 +87,20 @@
     {% endif %}
     <pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;background:var(--bg-elevated);padding:10px;border-radius:var(--radius);border:1px solid var(--border);margin:0">{{ campaign.content }}</pre>
   </div>
+  {% if campaign.message_type == "MMS" and campaign.attachments %}
+  {% set att = campaign.attachments[0] %}
+  <div style="margin-top:10px">
+    <div class="text-muted" style="font-size:11px;margin-bottom:4px">첨부 이미지</div>
+    <a href="/campaigns/{{ campaign.id }}/attachment/{{ att.id }}" target="_blank">
+      <img src="/campaigns/{{ campaign.id }}/attachment/{{ att.id }}"
+        alt="{{ att.original_filename }}"
+        style="max-width:300px;max-height:240px;border:1px solid var(--border);border-radius:var(--radius)">
+    </a>
+    <div class="text-muted" style="font-size:11px;margin-top:4px">
+      {{ att.original_filename }} · {{ att.width }}×{{ att.height }} · {{ (att.file_size_bytes / 1024) | round(0, 'floor') | int }}KB
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 <!-- 진행 현황 (HTMX fragment) -->

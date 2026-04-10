@@ -134,14 +134,35 @@
       </div>
     </div>
 
-    <!-- LMS 제목 (항상 렌더, SMS일 때 disabled + opacity) -->
+    <!-- LMS/MMS 제목 (항상 렌더, SMS일 때 disabled + opacity) -->
     <div class="form-group" id="subject-group" style="opacity:0.4">
-      <label for="subject-input">제목 <span class="text-muted" style="font-weight:normal">(LMS 전용)</span></label>
+      <label for="subject-input">제목 <span class="text-muted" style="font-weight:normal">(LMS/MMS 전용)</span></label>
       <input type="text" name="subject" id="subject-input" maxlength="40"
-        placeholder="LMS 메시지 제목 (선택)"
+        placeholder="LMS/MMS 메시지 제목 (선택)"
         value="{{ subject or '' }}"
         disabled>
-      <div class="form-hint">SMS(90 byte 이하)일 때는 비활성됩니다. 90 byte 초과 시 자동 활성됩니다.</div>
+      <div class="form-hint">SMS(90 byte 이하)일 때는 비활성됩니다. 90 byte 초과 또는 첨부 시 자동 활성됩니다.</div>
+    </div>
+
+    <!-- MMS 첨부 이미지 -->
+    <div class="form-group">
+      <label for="attachment-file">
+        첨부 이미지
+        <span class="text-muted" style="font-weight:normal">(MMS 전용 — 1장, JPG/PNG/GIF, 자동 전처리)</span>
+      </label>
+      <input type="file" id="attachment-file" accept="image/jpeg,image/jpg,image/png,image/gif"
+        onchange="uploadAttachment()">
+      <input type="hidden" name="attachment_id" id="attachment-id" value="0">
+      <div id="attachment-status" class="form-hint"></div>
+      <div id="attachment-preview" style="margin-top:8px;display:none">
+        <img id="attachment-thumb" src="" alt="첨부 미리보기"
+          style="max-width:240px;max-height:180px;border:1px solid var(--border);border-radius:var(--radius)">
+        <div style="margin-top:4px">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="clearAttachment()">
+            <i data-lucide="x"></i> 첨부 제거
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 본문 -->
@@ -243,6 +264,87 @@
 </div>
 
 <script>
+// ── MMS 첨부 이미지 업로드 ──────────────────────────────────────────────────
+function uploadAttachment() {
+  var fileInput = document.getElementById('attachment-file');
+  var statusEl = document.getElementById('attachment-status');
+  var hiddenId = document.getElementById('attachment-id');
+  var preview = document.getElementById('attachment-preview');
+  var thumb = document.getElementById('attachment-thumb');
+  if (!fileInput.files || fileInput.files.length === 0) return;
+
+  var file = fileInput.files[0];
+  // 클라이언트 사이드 1차 가드 (서버가 최종 결정)
+  if (file.size > 10 * 1024 * 1024) {
+    statusEl.textContent = '파일이 너무 큽니다 (최대 10MB).';
+    statusEl.className = 'form-hint err';
+    return;
+  }
+
+  statusEl.textContent = '업로드 중...';
+  statusEl.className = 'form-hint';
+
+  var formData = new FormData();
+  formData.append('file', file);
+
+  // CSRF 토큰을 form 의 hidden input 에서 가져옴
+  var csrfToken = document.querySelector('input[name="csrf_token"]').value;
+
+  fetch('/compose/upload-attachment', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrfToken },
+    body: formData,
+  })
+    .then(function (resp) {
+      return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+    })
+    .then(function (result) {
+      if (!result.ok) {
+        statusEl.textContent = '실패: ' + (result.data.error || '알 수 없는 오류');
+        statusEl.className = 'form-hint err';
+        return;
+      }
+      hiddenId.value = result.data.attachment_id;
+      var sizeKb = Math.round(result.data.file_size_bytes / 1024);
+      statusEl.textContent = '✓ 업로드 완료 — '
+        + result.data.width + '×' + result.data.height
+        + ', ' + sizeKb + 'KB (자동 변환됨)';
+      statusEl.className = 'form-hint ok';
+      // 미리보기 — BLOB URL 사용 (이미 전처리된 결과는 서버에만 있으므로 원본 표시)
+      var url = URL.createObjectURL(file);
+      thumb.src = url;
+      preview.style.display = '';
+      // MMS 모드 진입 — subject 활성, byte counter 갱신
+      forceMmsMode(true);
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    })
+    .catch(function (err) {
+      statusEl.textContent = '네트워크 오류: ' + err.message;
+      statusEl.className = 'form-hint err';
+    });
+}
+
+function clearAttachment() {
+  document.getElementById('attachment-file').value = '';
+  document.getElementById('attachment-id').value = '0';
+  document.getElementById('attachment-status').textContent = '';
+  document.getElementById('attachment-preview').style.display = 'none';
+  forceMmsMode(false);
+}
+
+// MMS 모드 진입/해제 — subject 활성/비활성, byte counter 표시 갱신
+function forceMmsMode(on) {
+  var subjectGroup = document.getElementById('subject-group');
+  var subjectInput = document.getElementById('subject-input');
+  if (!subjectGroup || !subjectInput) return;
+  if (on) {
+    subjectGroup.style.opacity = '1';
+    subjectInput.disabled = false;
+  }
+  // off 인 경우는 byte counter 가 자체적으로 다시 결정하도록 둔다
+  updateByteCounter();
+}
+
 // ── 예약 발송 토글 + 최소 시각 설정 ────────────────────────────────────────
 function toggleReserve() {
   var enabled = document.getElementById('reserve-enabled').checked;
@@ -311,14 +413,17 @@ var byteCounter = document.getElementById('byte-counter');
 function updateByteCounter() {
   if (!contentTa || !byteCounter) return;
   var bytes = measureEucKrBytes(contentTa.value);
-  var type = bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과');
+  // 첨부가 있으면 MMS 로 강제 — byte 길이로 SMS/LMS 자동 판정 무시
+  var hasAttachment = (document.getElementById('attachment-id') || {}).value;
+  var isMms = hasAttachment && hasAttachment !== '0';
+  var type = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과'));
   byteCounter.textContent = bytes + ' byte (' + type + ')';
-  byteCounter.className = 'byte-counter ' + (bytes > 2000 ? 'err' : (bytes > 90 ? 'warn' : 'ok'));
-  // H10: LMS(>90 byte)일 때 제목 입력란 활성 + opacity 복원, SMS일 때 비활성
+  byteCounter.className = 'byte-counter ' + (bytes > 2000 ? 'err' : (bytes > 90 || isMms ? 'warn' : 'ok'));
+  // H10 + MMS: subject 입력란 활성 조건
   var subjectGroup = document.getElementById('subject-group');
   var subjectInput = document.getElementById('subject-input');
   if (subjectGroup && subjectInput) {
-    if (bytes > 90) {
+    if (bytes > 90 || isMms) {
       subjectGroup.style.opacity = '1';
       subjectInput.disabled = false;
     } else {
@@ -345,9 +450,11 @@ function openSendModal() {
   var callerSel = document.getElementById('caller_id');
   var callerText = callerSel ? callerSel.options[callerSel.selectedIndex].text : '—';
 
-  // 메시지 유형 읽기 (byte counter로 판단)
+  // 메시지 유형 읽기 (byte counter + 첨부 여부로 판단)
   var bytes = contentTa ? measureEucKrBytes(contentTa.value) : 0;
-  var msgType = bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과');
+  var hasAttachment = (document.getElementById('attachment-id') || {}).value;
+  var isMms = hasAttachment && hasAttachment !== '0';
+  var msgType = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과'));
 
   // 본문 미리보기 (80자 이상이면 말줄임)
   var content = contentTa ? contentTa.value : '';
