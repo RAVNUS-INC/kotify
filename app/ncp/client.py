@@ -21,6 +21,7 @@ _RESERVE_STATUS_PATH = (
     "/sms/v2/services/{service_id}/reservations/{reserve_id}/reserve-status"
 )
 _RESERVE_CANCEL_PATH = "/sms/v2/services/{service_id}/reservations/{reserve_id}"
+_UPLOAD_FILE_PATH = "/sms/v2/services/{service_id}/files"
 
 # 단일 호출당 최대 수신자 수 (NCP 제약)
 _CHUNK_SIZE = 100
@@ -111,6 +112,20 @@ class ReserveStatusResponse:
     reserve_status: str
 
 
+@dataclass
+class UploadFileResponse:
+    """POST /files 성공 응답.
+
+    NCP는 약 6일간 파일을 보관한 뒤 자동 삭제한다 (expireTime).
+    """
+
+    file_id: str
+    file_name: str
+    file_size: int
+    create_time: str
+    expire_time: str
+
+
 # ── 클라이언트 ───────────────────────────────────────────────────────────────
 
 
@@ -174,10 +189,11 @@ class NCPClient:
         from_number: str,
         content: str,
         to_numbers: list[str],
-        message_type: Literal["SMS", "LMS"] = "SMS",
+        message_type: Literal["SMS", "LMS", "MMS"] = "SMS",
         subject: str | None = None,
         reserve_time: str | None = None,
         reserve_time_zone: str | None = None,
+        file_ids: list[str] | None = None,
     ) -> SendResponse:
         """SMS/LMS를 단일 청크(최대 100건)로 발송한다.
 
@@ -230,11 +246,17 @@ class NCPClient:
             "content": content,
             "messages": [{"to": num} for num in to_numbers],
         }
-        if subject and message_type == "LMS":
+        # subject 는 LMS/MMS 둘 다 지원 (NCP 명세).
+        if subject and message_type in ("LMS", "MMS"):
             body["subject"] = subject
         if reserve_time is not None:
             body["reserveTime"] = reserve_time
             body["reserveTimeZone"] = reserve_time_zone
+        # MMS 첨부 — fileId 목록 전달
+        if file_ids:
+            if message_type != "MMS":
+                raise ValueError("file_ids 는 MMS 메시지에만 사용할 수 있습니다.")
+            body["files"] = [{"fileId": fid} for fid in file_ids]
 
         headers = make_headers("POST", path, self._access_key, self._secret_key)
 
@@ -353,3 +375,44 @@ class NCPClient:
         if response.status_code in (200, 204):
             return
         self._raise_for_status(response)
+
+    async def upload_attachment(
+        self, file_name: str, content: bytes
+    ) -> UploadFileResponse:
+        """MMS 첨부 파일을 NCP에 업로드한다.
+
+        NCP는 이 API에 base64 인코딩된 본문을 받고, fileId를 돌려준다.
+        파일은 약 6일간 보관되며, 그 안에 send_sms(file_ids=...)로 사용해야 한다.
+
+        Args:
+            file_name: 사용자에게 보일 파일명. 확장자(.jpg)를 포함하는 것이 권장.
+            content: 이미 NCP 제약(JPEG, ≤300KB, ≤1500x1440)에 맞춰 전처리된 바이트.
+
+        Returns:
+            UploadFileResponse — fileId 와 만료 시각 포함.
+
+        Raises:
+            NCPBadRequest: 형식/크기 위반.
+            NCPAuthError: 인증 실패.
+            NCPError: 기타 API 오류.
+        """
+        import base64
+
+        path = _UPLOAD_FILE_PATH.format(service_id=self._service_id)
+        body = {
+            "fileName": file_name,
+            "fileBody": base64.b64encode(content).decode("ascii"),
+        }
+        headers = make_headers("POST", path, self._access_key, self._secret_key)
+
+        response = await self._client.post(path, json=body, headers=headers)
+        self._raise_for_status(response)
+
+        data = response.json()
+        return UploadFileResponse(
+            file_id=data["fileId"],
+            file_name=data.get("fileName", file_name),
+            file_size=int(data.get("fileSize", len(content))),
+            create_time=data.get("createTime", ""),
+            expire_time=data.get("expireTime", ""),
+        )

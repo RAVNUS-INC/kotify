@@ -252,6 +252,7 @@ class TestDispatchReserved:
         async def fake_send(
             from_number, content, to_numbers, message_type="SMS",
             subject=None, reserve_time=None, reserve_time_zone=None,
+            file_ids=None,
         ):
             recorded["reserve_time"] = reserve_time
             recorded["reserve_time_zone"] = reserve_time_zone

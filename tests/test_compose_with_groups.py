@@ -205,7 +205,7 @@ class TestDispatchCampaignWithGroups:
         # mock NCP 클라이언트
         client = MagicMock()
 
-        async def fake_send(from_number, content, to_numbers, message_type="SMS", subject=None, reserve_time=None, reserve_time_zone=None):
+        async def fake_send(from_number, content, to_numbers, message_type="SMS", subject=None, reserve_time=None, reserve_time_zone=None, file_ids=None):
             return SendResponse(
                 request_id="REQ-GRP-0001",
                 request_time="2026-04-08T12:00:00",

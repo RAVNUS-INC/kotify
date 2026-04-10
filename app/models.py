@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Text,
     UniqueConstraint,
 )
@@ -93,6 +94,9 @@ class Campaign(Base):
     )
     messages: Mapped[list[Message]] = relationship(
         "Message", back_populates="campaign", lazy="select"
+    )
+    attachments: Mapped[list[Attachment]] = relationship(
+        "Attachment", back_populates="campaign", lazy="select"
     )
 
     __table_args__ = (
@@ -240,3 +244,36 @@ class AuditLog(Base):
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     ip: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Attachment(Base):
+    """MMS 첨부 이미지 — JPEG BLOB로 저장 (NCP 제약: ≤300KB, ≤1500x1440)."""
+
+    __tablename__ = "attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # 업로드 직후엔 캠페인 미생성 상태 → nullable
+    campaign_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("campaigns.id"), nullable=True
+    )
+    ncp_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    stored_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    content_blob: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    uploaded_by: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.sub"), nullable=False
+    )
+    uploaded_at: Mapped[str] = mapped_column(Text, nullable=False)
+    ncp_expires_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    campaign: Mapped[Campaign | None] = relationship(
+        "Campaign", back_populates="attachments"
+    )
+
+    __table_args__ = (
+        Index("idx_attachments_campaign_id", "campaign_id"),
+        Index("idx_attachments_uploaded_by", "uploaded_by"),
+    )

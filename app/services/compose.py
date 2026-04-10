@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Caller, Campaign, Message, NcpRequest
+from app.models import Attachment, Caller, Campaign, Message, NcpRequest
 from app.services import audit
 from app.util.phone import parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
@@ -139,6 +139,7 @@ async def dispatch_campaign(
     subject: str | None = None,
     reserve_time_local: str | None = None,
     reserve_timezone: str | None = None,
+    attachment_id: int | None = None,
 ) -> Campaign:
     """캠페인을 생성하고 NCP에 발송한다.
 
@@ -187,6 +188,27 @@ async def dispatch_campaign(
             reserve_time_local, reserve_timezone  # type: ignore[arg-type]
         )
 
+    # 0.7 첨부 파일 검증 (MMS 경로)
+    # attachment_id 가 있으면 message_type 은 MMS여야 한다. 권한 체크는
+    # 라우트 계층에서 먼저 수행되지만, 여기서 한 번 더 created_by 일치 검증.
+    attachment: Attachment | None = None
+    file_ids: list[str] | None = None
+    if attachment_id is not None:
+        if message_type != "MMS":
+            raise ValueError("첨부 파일은 MMS 메시지에만 사용할 수 있습니다.")
+        attachment = db.get(Attachment, attachment_id)
+        if attachment is None:
+            raise ValueError(f"첨부 파일 #{attachment_id} 을 찾을 수 없습니다.")
+        if attachment.uploaded_by != created_by:
+            raise ValueError("이 첨부 파일에 대한 권한이 없습니다.")
+        if attachment.campaign_id is not None:
+            raise ValueError("이 첨부 파일은 이미 다른 캠페인에 사용되었습니다.")
+        if not attachment.ncp_file_id:
+            raise ValueError("첨부 파일이 NCP에 업로드되지 않았습니다.")
+        file_ids = [attachment.ncp_file_id]
+    elif message_type == "MMS":
+        raise ValueError("MMS 메시지는 첨부 파일이 필요합니다.")
+
     # 1. 발신번호 활성 여부 검증 (UI 우회 방지)
     caller = db.execute(
         select(Caller).where(
@@ -224,6 +246,13 @@ async def dispatch_campaign(
     )
     db.add(campaign)
     db.flush()  # campaign.id 확보
+
+    # MMS: 캠페인 생성 직후 attachment 를 이 캠페인에 귀속시킨다.
+    # (campaign_id 가 묶이지 않은 attachment 는 orphan 으로 간주됨)
+    if attachment is not None:
+        attachment.campaign_id = campaign.id
+        db.flush()
+
     db.commit()  # Campaign을 먼저 커밋 (청크 실패 시에도 Campaign 기록 유지)
 
     # 4. 청크 단위 발송 — dispatch_campaign이 청크 분할 전담 (#2)
@@ -247,6 +276,7 @@ async def dispatch_campaign(
                 subject=subject,
                 reserve_time=ncp_reserve_time,
                 reserve_time_zone=reserve_timezone if is_reserved else None,
+                file_ids=file_ids,
             )
 
             ncp_req = NcpRequest(

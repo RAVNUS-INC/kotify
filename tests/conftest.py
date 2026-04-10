@@ -98,6 +98,7 @@ def mock_ncp_client():
         subject=None,
         reserve_time=None,
         reserve_time_zone=None,
+        file_ids=None,
     ):
         # send_sms는 단일 청크(≤100건)만 처리 — SendResponse 단일 객체 반환
         return SendResponse(

@@ -2,21 +2,28 @@
 from __future__ import annotations
 
 import json
+import uuid
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_role, require_setup_complete
 from app.db import get_db
-from app.models import Caller, User
+from app.models import Attachment, Caller, User
 from app.security.csrf import verify_csrf
 from app.services import audit
 from app.services.compose import (
     MAX_RECIPIENTS_PER_CAMPAIGN,
     resolve_recipients,
     validate_message,
+)
+from app.services.image import (
+    NCP_MMS_MAX_BYTES,
+    ImageProcessingError,
+    preprocess_mms_image,
 )
 from app.web import templates
 
@@ -195,6 +202,7 @@ async def compose_send(
     reserve_enabled: str = Form(""),           # "on" 이면 예약 모드
     reserve_time: str = Form(""),              # datetime-local: "YYYY-MM-DDTHH:mm"
     reserve_timezone: str = Form("Asia/Seoul"),
+    attachment_id: int = Form(0),              # 0 이면 첨부 없음
 ) -> HTMLResponse | RedirectResponse:
     """실제 발송 처리. 검증 실패 시 form 보존하여 재렌더링 (#I9)."""
     from app.services.compose import dispatch_campaign
@@ -273,14 +281,18 @@ async def compose_send(
     if not msg_result["ok"]:
         return _render_error("invalid_message")
 
+    # 첨부가 있으면 MMS 로 강제 — content type 자동 판정 결과를 덮어쓴다.
+    if attachment_id:
+        msg_result["message_type"] = "MMS"
+
     # 싱글턴 NCP 클라이언트 사용 — circular import 방지를 위해 함수 안에서 import
     from app.main import get_ncp_client  # noqa: PLC0415
     ncp_client = get_ncp_client()
     if ncp_client is None:
         return _render_error("ncp_not_configured")
 
-    # subject는 LMS일 때만 의미 있음 (SMS는 제목 미지원)
-    final_subject = subject.strip() if msg_result["message_type"] == "LMS" else None
+    # subject는 LMS/MMS 일 때만 의미 있음 (SMS는 제목 미지원)
+    final_subject = subject.strip() if msg_result["message_type"] in ("LMS", "MMS") else None
 
     # 예약 발송 파라미터 처리.
     # 체크박스가 켜져 있고 reserve_time이 비어 있지 않을 때만 예약으로 간주.
@@ -300,6 +312,7 @@ async def compose_send(
             subject=final_subject,
             reserve_time_local=reserve_time_arg,
             reserve_timezone=reserve_tz_arg,
+            attachment_id=attachment_id or None,
         )
 
         # 연락처 last_sent_at 업데이트
@@ -311,3 +324,89 @@ async def compose_send(
         return RedirectResponse(f"/campaigns/{campaign.id}", status_code=303)
     except ValueError as exc:
         return _render_error(str(exc))
+
+
+# 업로드 가능한 최대 원본 파일 크기 (전처리 전).
+# 너무 크면 메모리/CPU 낭비라서 컷. 전처리 후 NCP 제약(300KB)에 자동으로 맞춰진다.
+MAX_RAW_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
+
+
+@router.post("/compose/upload-attachment")
+async def compose_upload_attachment(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(_sender_dep),
+    _: None = Depends(require_setup_complete),
+    _csrf: None = Depends(verify_csrf),
+    file: UploadFile = File(...),
+) -> JSONResponse:
+    """MMS 첨부 이미지 업로드 (multipart/form-data).
+
+    파이프라인:
+    1. 원본 파일 읽기 (최대 10MB)
+    2. preprocess_mms_image() — Pillow 로 NCP 제약에 맞게 변환
+    3. NCPClient.upload_attachment() — base64 업로드, fileId 수신
+    4. attachments 테이블에 BLOB + 메타 저장
+    5. JSON 응답 — UI 가 attachment_id 를 form hidden 으로 보존
+    """
+    # 1. 원본 읽기 + 크기 체크
+    raw = await file.read()
+    if not raw:
+        return JSONResponse({"error": "빈 파일입니다."}, status_code=400)
+    if len(raw) > MAX_RAW_UPLOAD_BYTES:
+        return JSONResponse(
+            {"error": f"원본 파일이 너무 큽니다 (최대 {MAX_RAW_UPLOAD_BYTES // (1024 * 1024)}MB)."},
+            status_code=400,
+        )
+
+    # 2. 전처리
+    try:
+        processed, width, height = preprocess_mms_image(raw)
+    except ImageProcessingError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    # 3. NCP 업로드
+    from app.main import get_ncp_client  # noqa: PLC0415
+    from app.ncp.client import NCPError  # noqa: PLC0415
+
+    ncp_client = get_ncp_client()
+    if ncp_client is None:
+        return JSONResponse(
+            {"error": "NCP 설정이 완료되지 않았습니다."}, status_code=503
+        )
+
+    stored_filename = f"{uuid.uuid4().hex}.jpg"
+    try:
+        upload_resp = await ncp_client.upload_attachment(stored_filename, processed)
+    except NCPError as exc:
+        return JSONResponse(
+            {"error": f"NCP 업로드 실패: {exc}"}, status_code=502
+        )
+
+    # 4. DB 저장
+    now = datetime.now(UTC).isoformat()
+    attachment = Attachment(
+        campaign_id=None,  # compose_send 시점에 연결됨
+        ncp_file_id=upload_resp.file_id,
+        original_filename=file.filename or stored_filename,
+        stored_filename=stored_filename,
+        content_blob=processed,
+        file_size_bytes=len(processed),
+        width=width,
+        height=height,
+        uploaded_by=user.sub,
+        uploaded_at=now,
+        ncp_expires_at=upload_resp.expire_time or None,
+    )
+    db.add(attachment)
+    db.commit()
+
+    return JSONResponse(
+        {
+            "attachment_id": attachment.id,
+            "width": width,
+            "height": height,
+            "file_size_bytes": len(processed),
+            "original_filename": attachment.original_filename,
+        }
+    )

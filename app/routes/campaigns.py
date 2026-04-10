@@ -7,13 +7,13 @@ import json
 from datetime import UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, Message, NcpRequest, User
+from app.models import Attachment, Campaign, Message, NcpRequest, User
 from app.security.csrf import verify_csrf
 from app.web import templates
 
@@ -437,6 +437,36 @@ async def campaign_cancel_reservation(
     )
     db.commit()
     return HTMLResponse(f'<span class="ok">✓ {final_msg}</span>')
+
+
+@router.get("/{campaign_id}/attachment/{attachment_id}")
+async def campaign_attachment(
+    campaign_id: int,
+    attachment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    _: None = Depends(require_setup_complete),
+) -> Response:
+    """첨부 이미지 BLOB 스트리밍 (MMS 캠페인 상세에서 사용)."""
+    campaign = db.get(Campaign, campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="캠페인을 찾을 수 없습니다.")
+    if not _can_access_campaign(user, campaign):
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
+    attachment = db.get(Attachment, attachment_id)
+    if attachment is None or attachment.campaign_id != campaign_id:
+        raise HTTPException(status_code=404, detail="첨부 파일을 찾을 수 없습니다.")
+
+    return Response(
+        content=attachment.content_blob,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "Content-Length": str(attachment.file_size_bytes),
+        },
+    )
 
 
 @router.post("/{campaign_id}/refresh", response_class=HTMLResponse)
