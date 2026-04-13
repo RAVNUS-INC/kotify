@@ -36,7 +36,7 @@ dependencies = [
     "httpx>=0.28",
     "itsdangerous>=2.2",
     "cryptography>=44.0",
-    "pydantic>=2.10",
+    "pydantic>=2.12.5",
     "pydantic-settings>=2.6",
     "pillow>=10.0.0",
 ]
