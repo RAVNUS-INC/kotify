@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from fastapi.templating import Jinja2Templates
 
 from app.i18n import t_error
-from app.ncp.codes import describe
+from app.msghub.codes import describe
 from app.security.csrf import get_csrf_token
 
 templates = Jinja2Templates(directory="app/templates")
@@ -22,8 +22,8 @@ templates.env.globals["csrf_token"] = get_csrf_token
 # 오류 슬러그 → 한국어 메시지
 templates.env.globals["t_error"] = t_error
 
-# NCP 수신결과 표시 헬퍼 (NCP statusMessage 우선, fallback은 raw 코드)
-templates.env.globals["describe_ncp"] = describe
+# msghub 결과코드 표시 헬퍼 (resultCodeDesc 우선, fallback은 raw 코드)
+templates.env.globals["describe_result"] = describe
 
 # KST 날짜 필터
 _KST = timezone(timedelta(hours=9))

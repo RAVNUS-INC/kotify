@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM 모델 — SPEC §4 데이터 모델 구현.
+"""SQLAlchemy ORM 모델 — msghub 메시징 시스템.
 
 모든 날짜/시간은 ISO-8601 텍스트(UTC)로 저장한다.
 """
@@ -44,6 +44,8 @@ class Caller(Base):
     label: Mapped[str] = mapped_column(Text, nullable=False)
     active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rcs_enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rcs_chatbot_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -55,7 +57,6 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(Text, primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     is_secret: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # FK 없음 — "setup", user.sub, 또는 None 등 다양한 출처를 허용하는 메타데이터 컬럼
     updated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -70,8 +71,9 @@ class Campaign(Base):
         Text, ForeignKey("users.sub"), nullable=False
     )
     caller_number: Mapped[str] = mapped_column(Text, nullable=False)
-    message_type: Mapped[str] = mapped_column(Text, nullable=False)  # SMS | LMS | MMS
-    subject: Mapped[str | None] = mapped_column(Text, nullable=True)  # LMS/MMS 전용
+    # short | long | image (채널 중립 유형)
+    message_type: Mapped[str] = mapped_column(Text, nullable=False)
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)  # 장문/이미지 전용
     content: Mapped[str] = mapped_column(Text, nullable=False)
     total_count: Mapped[int] = mapped_column(Integer, nullable=False)
     ok_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -82,15 +84,21 @@ class Campaign(Base):
     state: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 예약 발송 (NCP SENS v2). nullable이면 즉시 발송 캠페인.
-    # reserve_time: 로컬 'YYYY-MM-DD HH:mm' (NCP 요청 포맷)
-    # reserve_timezone: 'Asia/Seoul' 등 (NCP 기본값)
+    # 예약 발송. nullable이면 즉시 발송.
+    # reserve_time: 'YYYY-MM-DD HH:mm' (KST)
     reserve_time: Mapped[str | None] = mapped_column(Text, nullable=True)
-    reserve_timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # msghub RCS 관련
+    rcs_messagebase_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 예약발송 시 msghub webReqId (취소/조회용)
+    web_req_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 비용 집계
+    total_cost: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rcs_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fallback_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     creator: Mapped[User] = relationship("User", back_populates="campaigns")
-    ncp_requests: Mapped[list[NcpRequest]] = relationship(
-        "NcpRequest", back_populates="campaign", lazy="select"
+    msghub_requests: Mapped[list[MsghubRequest]] = relationship(
+        "MsghubRequest", back_populates="campaign", lazy="select"
     )
     messages: Mapped[list[Message]] = relationship(
         "Message", back_populates="campaign", lazy="select"
@@ -105,32 +113,28 @@ class Campaign(Base):
     )
 
 
-class NcpRequest(Base):
-    """NCP API 호출 단위 — campaign 1개 = ncp_request N개 (청크)."""
+class MsghubRequest(Base):
+    """msghub API 호출 단위 — campaign 1개 = msghub_request N개 (10명 청크)."""
 
-    __tablename__ = "ncp_requests"
+    __tablename__ = "msghub_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     campaign_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("campaigns.id"), nullable=False
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    request_time: Mapped[str | None] = mapped_column(Text, nullable=True)
-    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    status_code: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[str] = mapped_column(Text, nullable=False)
 
-    campaign: Mapped[Campaign] = relationship("Campaign", back_populates="ncp_requests")
+    campaign: Mapped[Campaign] = relationship("Campaign", back_populates="msghub_requests")
     messages: Mapped[list[Message]] = relationship(
-        "Message", back_populates="ncp_request", lazy="select"
+        "Message", back_populates="msghub_request", lazy="select"
     )
 
     __table_args__ = (
-        UniqueConstraint("campaign_id", "chunk_index", name="uq_ncp_requests_chunk"),
-        Index("idx_ncp_requests_request_id", "request_id"),
+        UniqueConstraint("campaign_id", "chunk_index", name="uq_msghub_requests_chunk"),
     )
 
 
@@ -143,32 +147,40 @@ class Message(Base):
     campaign_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("campaigns.id"), nullable=False
     )
-    ncp_request_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("ncp_requests.id"), nullable=False
+    msghub_request_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("msghub_requests.id"), nullable=False
     )
-    to_number: Mapped[str] = mapped_column(Text, nullable=False)  # 정규화 후 숫자만
-    to_number_raw: Mapped[str] = mapped_column(Text, nullable=False)  # 사용자 원본
-    message_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # NCP messageId
-    # PENDING | READY | PROCESSING | COMPLETED | UNKNOWN
+    to_number: Mapped[str] = mapped_column(Text, nullable=False)
+    to_number_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    cli_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    msg_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # PENDING | REG | ING | DONE | FAILED
     status: Mapped[str] = mapped_column(Text, nullable=False, default="PENDING")
-    result_status: Mapped[str | None] = mapped_column(Text, nullable=True)   # success | fail
     result_code: Mapped[str | None] = mapped_column(Text, nullable=True)
-    result_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    telco_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_desc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 실제 발송 채널 (RCS/SMS/LMS/MMS) — 리포트 수신 후 결정
+    channel: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 과금 상품코드 (CHAT/SMS/LMS/MMS/ITMPL 등)
+    product_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 건당 비용 (원, 실패=0)
+    cost: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    telco: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON: fallback 사유 [{"ch":"RCS","fbResultCode":"51004","fbResultDesc":"..."}]
+    fb_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    report_dt: Mapped[str | None] = mapped_column(Text, nullable=True)
     complete_time: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_polled_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    poll_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     campaign: Mapped[Campaign] = relationship("Campaign", back_populates="messages")
-    ncp_request: Mapped[NcpRequest] = relationship(
-        "NcpRequest", back_populates="messages"
+    msghub_request: Mapped[MsghubRequest] = relationship(
+        "MsghubRequest", back_populates="messages"
     )
 
     __table_args__ = (
         Index("idx_messages_campaign_id", "campaign_id"),
         Index("idx_messages_status", "status"),
-        Index("idx_messages_message_id", "message_id"),
-        Index("idx_messages_ncp_request_id", "ncp_request_id"),
+        Index("idx_messages_msghub_request_id", "msghub_request_id"),
+        Index("idx_messages_cli_key", "cli_key"),
+        Index("idx_messages_msg_key", "msg_key"),
     )
 
 
@@ -179,13 +191,13 @@ class Contact(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    phone: Mapped[str | None] = mapped_column(Text, nullable=True)  # 정규화된 형태
+    phone: Mapped[str | None] = mapped_column(Text, nullable=True)
     email: Mapped[str | None] = mapped_column(Text, nullable=True)
     department: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     last_sent_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_sent_channel: Mapped[str | None] = mapped_column(Text, nullable=True)  # sms, email
+    last_sent_channel: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(Text, ForeignKey("users.sub"), nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
@@ -223,7 +235,7 @@ class ContactGroupMember(Base):
     contact_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True
     )
-    added_by: Mapped[str | None] = mapped_column(Text, nullable=True)  # FK 없음 (system 액션 등 허용)
+    added_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     added_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (
@@ -238,7 +250,6 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     actor_sub: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # LOGIN | SEND | CALLER_CREATE | CALLER_DELETE | SETTING_CHANGE | ...
     action: Mapped[str] = mapped_column(Text, nullable=False)
     target: Mapped[str | None] = mapped_column(Text, nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
@@ -247,16 +258,15 @@ class AuditLog(Base):
 
 
 class Attachment(Base):
-    """MMS 첨부 이미지 — JPEG BLOB로 저장 (NCP 제약: ≤300KB, ≤1500x1440)."""
+    """첨부 이미지 — RCS(≤1MB) 또는 MMS(≤300KB JPEG) BLOB 저장."""
 
     __tablename__ = "attachments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # 업로드 직후엔 캠페인 미생성 상태 → nullable
     campaign_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("campaigns.id"), nullable=True
     )
-    ncp_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    msghub_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     stored_filename: Mapped[str] = mapped_column(Text, nullable=False)
     content_blob: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -267,7 +277,9 @@ class Attachment(Base):
         Text, ForeignKey("users.sub"), nullable=False
     )
     uploaded_at: Mapped[str] = mapped_column(Text, nullable=False)
-    ncp_expires_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_expires_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # mms 또는 rcs
+    channel: Mapped[str | None] = mapped_column(Text, nullable=True, default="mms")
 
     campaign: Mapped[Campaign | None] = relationship(
         "Campaign", back_populates="attachments"
