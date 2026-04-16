@@ -21,7 +21,7 @@ from app.services.compose import (
     validate_message,
 )
 from app.services.image import (
-    NCP_MMS_MAX_BYTES,
+    MMS_MAX_BYTES,
     ImageProcessingError,
     preprocess_mms_image,
 )
@@ -323,7 +323,7 @@ async def compose_send(
 
 
 # 업로드 가능한 최대 원본 파일 크기 (전처리 전).
-# 너무 크면 메모리/CPU 낭비라서 컷. 전처리 후 NCP 제약(300KB)에 자동으로 맞춰진다.
+# 너무 크면 메모리/CPU 낭비라서 컷. 전처리 후 MMS 제약(300KB)에 자동으로 맞춰진다.
 MAX_RAW_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 
 
@@ -340,8 +340,8 @@ async def compose_upload_attachment(
 
     파이프라인:
     1. 원본 파일 읽기 (최대 10MB)
-    2. preprocess_mms_image() — Pillow 로 NCP 제약에 맞게 변환
-    3. NCPClient.upload_attachment() — base64 업로드, fileId 수신
+    2. preprocess_mms_image() — Pillow로 MMS 제약에 맞게 변환
+    3. msghub upload_file() — 파일 사전등록, fileId 수신
     4. attachments 테이블에 BLOB + 메타 저장
     5. JSON 응답 — UI 가 attachment_id 를 form hidden 으로 보존
     """

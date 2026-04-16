@@ -143,8 +143,10 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.groups import router as groups_router
 from app.routes.health import router as health_router
 from app.routes.setup import router as setup_router
+from app.routes.webhook import router as webhook_router
 
 app.include_router(health_router)
+app.include_router(webhook_router)
 app.include_router(setup_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
