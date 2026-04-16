@@ -110,11 +110,11 @@
         <td class="mono">{{ c.caller_number|phone_fmt }}</td>
         <td>
           {% if c.message_type == "SMS" %}
-          <span class="badge badge-success">SMS</span>
+          <span class="badge badge-success">단문</span>
           {% elif c.message_type == "MMS" %}
-          <span class="badge badge-partial">MMS</span>
+          <span class="badge badge-partial">이미지</span>
           {% else %}
-          <span class="badge badge-dispatched">LMS</span>
+          <span class="badge badge-dispatched">장문</span>
           {% endif %}
         </td>
         <td class="mono text-right">{{ c.total_count }}</td>
@@ -124,6 +124,9 @@
           <span class="{% if c.fail_count > 0 %}err{% else %}text-muted{% endif %} mono">{{ c.fail_count }}</span>
           <span class="text-muted"> / </span>
           <span class="mono" style="color:var(--warning)">{{ c.pending_count }}</span>
+          {% if c.total_cost > 0 %}
+          <span class="text-muted" style="font-size:10px;margin-left:4px">· {{ "{:,}".format(c.total_cost) }}원</span>
+          {% endif %}
         </td>
         <td>
           {% if c.state == "COMPLETED" %}<span class="badge badge-completed">완료</span>

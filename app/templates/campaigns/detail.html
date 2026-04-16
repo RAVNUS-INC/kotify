@@ -34,9 +34,9 @@
     <div>
       <div class="text-muted" style="margin-bottom:2px">유형</div>
       <div>
-        {% if campaign.message_type == "SMS" %}<span class="badge badge-success">SMS</span>
-        {% elif campaign.message_type == "MMS" %}<span class="badge badge-partial">MMS</span>
-        {% else %}<span class="badge badge-dispatched">LMS</span>{% endif %}
+        {% if campaign.message_type == "SMS" %}<span class="badge badge-success">단문</span>
+        {% elif campaign.message_type == "MMS" %}<span class="badge badge-partial">이미지</span>
+        {% else %}<span class="badge badge-dispatched">장문</span>{% endif %}
       </div>
     </div>
     <div>
@@ -68,6 +68,23 @@
       </div>
     </div>
   </div>
+  {% if campaign.total_cost > 0 %}
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+    <div class="text-muted" style="margin-bottom:6px;font-size:12px;font-weight:600">발송 비용</div>
+    <div style="font-size:18px;font-weight:700">{{ "{:,}".format(campaign.total_cost) }}원</div>
+    <div style="margin-top:6px;font-size:11px;color:var(--text-secondary);line-height:1.8">
+      {% if campaign.rcs_count > 0 %}
+      RCS {{ campaign.rcs_count }}건<br>
+      {% endif %}
+      {% if campaign.fallback_count > 0 %}
+      Fallback {{ campaign.fallback_count }}건 (SMS/LMS/MMS)<br>
+      {% endif %}
+      {% if campaign.fail_count > 0 %}
+      실패 {{ campaign.fail_count }}건 = 과금 제외
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
   <!-- 예약 취소 결과 영역 (HTMX 응답) -->
   <div id="cancel-result" style="margin-top:10px"></div>
 </div>

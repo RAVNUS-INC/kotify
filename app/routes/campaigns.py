@@ -292,14 +292,24 @@ async def campaign_export(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["번호(정규화)", "원본입력", "상태", "결과코드", "결과메시지", "완료시각"])
+    writer.writerow(["번호", "채널", "상태", "결과코드", "결과설명", "Fallback사유", "비용(원)", "완료시각"])
     for msg in messages:
+        fb_desc = ""
+        if msg.fb_reason:
+            import json as _json
+            try:
+                fb_list = _json.loads(msg.fb_reason)
+                fb_desc = "; ".join(f.get("fbResultDesc", f.get("fbResultCode", "")) for f in fb_list)
+            except (ValueError, TypeError):
+                fb_desc = ""
         writer.writerow([
             msg.to_number,
-            msg.to_number_raw,
+            msg.channel or "",
             msg.result_status or msg.status,
             msg.result_code or "",
-            msg.result_message or "",
+            msg.result_desc or "",
+            fb_desc,
+            msg.cost if msg.cost else 0,
             msg.complete_time or "",
         ])
 
@@ -327,7 +337,7 @@ async def campaign_cancel_reservation(
     권한/상태 체크:
     - 권한: sender/admin (본인 캠페인이거나 admin)
     - 상태: ``campaign.state == "RESERVED"`` 인 경우만 허용
-    - 캠페인에는 청크 수만큼 MsghubRequest가 있고, 각각이 별도의 NCP 예약이다.
+    - 캠페인에는 청크 수만큼 MsghubRequest가 있고, 각각이 별도의 msghub 예약이다.
       모든 MsghubRequest.request_id 에 대해 개별적으로 취소를 시도한다.
     """
     from app.msghub.schemas import MsghubBadRequest, MsghubError

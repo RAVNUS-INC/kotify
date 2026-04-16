@@ -71,6 +71,10 @@
       {% if pending_count > 0 %}<i data-lucide="external-link" style="width:10px;height:10px;opacity:0.5"></i>{% endif %}
     </div>
   </a>
+  <a href="/campaigns" class="stat-card" style="text-decoration:none;display:block">
+    <div class="stat-value" style="color:#3b82f6">{{ rcs_rate }}%</div>
+    <div class="stat-label">RCS 도달률</div>
+  </a>
 </div>
 
 <div class="card">
@@ -107,11 +111,11 @@
         <td class="mono">{{ c.caller_number|phone_fmt }}</td>
         <td>
           {% if c.message_type == "SMS" %}
-          <span class="badge badge-success">SMS</span>
+          <span class="badge badge-success">단문</span>
           {% elif c.message_type == "MMS" %}
-          <span class="badge badge-partial">MMS</span>
+          <span class="badge badge-partial">이미지</span>
           {% else %}
-          <span class="badge badge-dispatched">LMS</span>
+          <span class="badge badge-dispatched">장문</span>
           {% endif %}
         </td>
         <td class="mono text-right">{{ c.total_count }}</td>

@@ -87,12 +87,11 @@ async def test_keycloak(
         return HTMLResponse(f'<span class="err">✗ 연결 실패: {exc}</span>')
 
 
-@router.post("/setup/test-ncp", response_class=HTMLResponse)
-async def test_ncp(
+@router.post("/setup/test-msghub", response_class=HTMLResponse)
+async def test_msghub(
     request: Request,
-    ncp_access_key: str = Form(...),
-    ncp_secret_key: str = Form(...),
-    ncp_service_id: str = Form(...),
+    msghub_api_key: str = Form(...),
+    msghub_api_pwd: str = Form(...),
     _: None = Depends(require_setup_mode),
     _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
@@ -102,8 +101,8 @@ async def test_ncp(
 
     client = MsghubClient(
         env="production",
-        api_key=ncp_access_key,  # form 필드명은 추후 UI 교체 시 변경
-        api_pwd=ncp_secret_key,
+        api_key=msghub_api_key,
+        api_pwd=msghub_api_pwd,
     )
     try:
         await client.test_auth()
@@ -123,9 +122,11 @@ async def complete_setup(
     keycloak_issuer: str = Form(...),
     keycloak_client_id: str = Form(...),
     keycloak_client_secret: str = Form(...),
-    ncp_access_key: str = Form(...),
-    ncp_secret_key: str = Form(...),
-    ncp_service_id: str = Form(...),
+    msghub_api_key: str = Form(...),
+    msghub_api_pwd: str = Form(...),
+    msghub_env: str = Form("production"),
+    msghub_brand_id: str = Form(""),
+    msghub_chatbot_id: str = Form(""),
     app_public_url: str = Form(""),
     first_admin_email: str = Form(""),
     db: Session = Depends(get_db),
@@ -152,12 +153,13 @@ async def complete_setup(
         "keycloak.issuer": (keycloak_issuer, False),
         "keycloak.client_id": (keycloak_client_id, False),
         "keycloak.client_secret": (keycloak_client_secret, True),
-        "msghub.api_key": (ncp_access_key, True),
-        "msghub.api_pwd": (ncp_secret_key, True),
-        "msghub.env": ("production", False),
+        "msghub.api_key": (msghub_api_key, True),
+        "msghub.api_pwd": (msghub_api_pwd, True),
+        "msghub.env": (msghub_env, False),
+        "msghub.brand_id": (msghub_brand_id, False),
+        "msghub.chatbot_id": (msghub_chatbot_id, False),
         "app.public_url": (app_public_url or "", False),
         "session.secret": (session_secret, True),
-        # #9: 첫 admin 이메일 저장
         "setup.first_admin_email": (first_admin_email or "", False),
         "setup.pending_first_admin": ("true", False),
     }

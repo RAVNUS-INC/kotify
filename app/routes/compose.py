@@ -288,7 +288,7 @@ async def compose_send(
     from app.main import get_msghub_client  # noqa: PLC0415
     msghub_client = get_msghub_client()
     if msghub_client is None:
-        return _render_error("ncp_not_configured")
+        return _render_error("msghub_not_configured")
 
     # subject는 LMS/MMS 일 때만 의미 있음 (SMS는 제목 미지원)
     final_subject = subject.strip() if msg_result["message_type"] in ("LMS", "MMS") else None

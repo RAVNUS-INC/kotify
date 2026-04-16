@@ -96,3 +96,17 @@ def phone_fmt(value: str | None) -> str:
 
 
 templates.env.filters["phone_fmt"] = phone_fmt
+
+
+def from_json(value: str | None) -> list | dict:
+    """JSON 문자열을 파싱한다. 실패 시 빈 리스트 반환."""
+    if not value:
+        return []
+    import json
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+templates.env.filters["from_json"] = from_json

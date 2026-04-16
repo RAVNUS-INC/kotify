@@ -54,11 +54,13 @@
       <span style="color:#ccc">→</span>
       <span style="color:#999">2 Keycloak</span>
       <span style="color:#ccc">→</span>
-      <span style="color:#999">3 NCP</span>
+      <span style="color:#999">3 msghub</span>
       <span style="color:#ccc">→</span>
-      <span style="color:#999">4 관리자</span>
+      <span style="color:#999">4 RCS</span>
       <span style="color:#ccc">→</span>
-      <span style="color:#999">5 완료</span>
+      <span style="color:#999">5 관리자</span>
+      <span style="color:#ccc">→</span>
+      <span style="color:#999">6 완료</span>
     </div>
 
     <!-- Step 1: 토큰 확인 -->
@@ -122,40 +124,62 @@
       <div id="kc-test-result" style="margin-top:0.5rem"></div>
     </div>
 
-    <!-- Step 3: NCP SENS 설정 -->
+    <!-- Step 3: msghub 설정 -->
     <div class="section">
-      <div class="section-title">3단계: NCP SENS 설정</div>
+      <div class="section-title">3단계: msghub 설정</div>
       <div class="form-group">
-        <label for="field-ncp-access-key">Access Key</label>
-        <input type="text" id="field-ncp-access-key" name="ncp_access_key"
-               placeholder="NCP IAM Access Key" required>
+        <label for="field-msghub-api-key">API Key</label>
+        <input type="text" id="field-msghub-api-key" name="msghub_api_key"
+               placeholder="msghub API Key" required>
       </div>
       <div class="form-group">
-        <label for="field-ncp-secret-key">Secret Key</label>
-        <input type="password" id="field-ncp-secret-key" name="ncp_secret_key"
-               placeholder="NCP IAM Secret Key" required>
+        <label for="field-msghub-api-pwd">API Password</label>
+        <input type="password" id="field-msghub-api-pwd" name="msghub_api_pwd"
+               placeholder="msghub API Password" required>
       </div>
       <div class="form-group">
-        <label for="field-ncp-service-id">Service ID</label>
-        <input type="text" id="field-ncp-service-id" name="ncp_service_id"
-               placeholder="ncp:sms:kr:..." required>
+        <label for="field-msghub-env">환경</label>
+        <div style="display:flex;gap:16px;margin-top:4px">
+          <label style="font-weight:400;font-size:13px">
+            <input type="radio" name="msghub_env" value="production" checked> 상용
+          </label>
+          <label style="font-weight:400;font-size:13px">
+            <input type="radio" name="msghub_env" value="qa"> QA
+          </label>
+        </div>
       </div>
       <div class="btn-row">
         <button type="button" class="btn btn-secondary"
-                hx-post="/setup/test-ncp"
-                hx-target="#ncp-test-result"
+                hx-post="/setup/test-msghub"
+                hx-target="#msghub-test-result"
                 hx-swap="innerHTML"
-                hx-include="#field-ncp-access-key, #field-ncp-secret-key, #field-ncp-service-id"
-                hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>NCP 인증 테스트
+                hx-include="#field-msghub-api-key, #field-msghub-api-pwd"
+                hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>인증 테스트
           <span class="htmx-indicator">...</span>
         </button>
       </div>
-      <div id="ncp-test-result" style="margin-top:0.5rem"></div>
+      <div id="msghub-test-result" style="margin-top:0.5rem"></div>
     </div>
 
-    <!-- Step 4: 첫 관리자 + 공개 URL -->
+    <!-- Step 4: RCS 설정 -->
     <div class="section">
-      <div class="section-title">4단계: 첫 관리자 + 공개 URL</div>
+      <div class="section-title">4단계: RCS 설정</div>
+      <div class="form-group">
+        <label for="field-msghub-brand-id">브랜드 ID</label>
+        <input type="text" id="field-msghub-brand-id" name="msghub_brand_id"
+               placeholder="RCS 브랜드 ID" required>
+      </div>
+      <div class="form-group">
+        <label for="field-msghub-chatbot-id">챗봇 ID</label>
+        <input type="text" id="field-msghub-chatbot-id" name="msghub_chatbot_id"
+               placeholder="양방향 발신번호와 동일합니다" required>
+        <div class="form-hint">양방향 발신번호와 동일합니다.</div>
+      </div>
+    </div>
+
+    <!-- Step 5: 첫 관리자 + 공개 URL -->
+    <div class="section">
+      <div class="section-title">5단계: 첫 관리자 + 공개 URL</div>
       <div class="form-group">
         <label for="field-first-admin-email">첫 관리자 이메일</label>
         <input type="email" id="field-first-admin-email" name="first_admin_email" required>
@@ -168,7 +192,7 @@
       </div>
     </div>
 
-    <!-- Step 5: 최종 저장 -->
+    <!-- Step 6: 최종 저장 -->
     <div class="section">
       <button type="submit" class="btn btn-primary" style="width:100%">설정 완료 및 로그인</button>
     </div>

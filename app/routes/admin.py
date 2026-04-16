@@ -125,8 +125,8 @@ async def settings_save(
     return RedirectResponse("/admin/settings?saved=1", status_code=303)
 
 
-@router.post("/settings/test-ncp", response_class=HTMLResponse)
-async def test_ncp(
+@router.post("/settings/test-msghub", response_class=HTMLResponse)
+async def test_msghub(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
@@ -198,6 +198,7 @@ async def caller_create(
     _csrf: None = Depends(verify_csrf),
     number: str = Form(...),
     label: str = Form(...),
+    rcs_enabled: str = Form(""),
 ) -> RedirectResponse:
     """발신번호 추가."""
     # 숫자만 추출
@@ -217,6 +218,7 @@ async def caller_create(
         label=label,
         active=1,
         is_default=0,
+        rcs_enabled=1 if rcs_enabled == "on" else 0,
         created_at=_now_iso(),
     )
     db.add(caller)
