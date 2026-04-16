@@ -12,13 +12,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Attachment, Caller, Campaign, Message, NcpRequest
+from app.models import Attachment, Caller, Campaign, Message, MsghubRequest
 from app.services import audit
 from app.util.phone import parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
 
 if TYPE_CHECKING:
-    from app.ncp.client import NCPClient
+    from app.msghub.client import MsghubClient
 
 
 def _now_iso() -> str:
