@@ -44,9 +44,8 @@ async def settings_page(
 
     # 시크릿 설정은 마스킹
     secret_keys = [
-        "ncp.access_key",
-        "ncp.secret_key",
-        "ncp.service_id",
+        "msghub.api_key",
+        "msghub.api_pwd",
         "keycloak.client_secret",
         "session.secret",
     ]
@@ -81,9 +80,11 @@ async def settings_save(
     keycloak_issuer: str = Form(""),
     keycloak_client_id: str = Form(""),
     keycloak_client_secret: str = Form(""),
-    ncp_access_key: str = Form(""),
-    ncp_secret_key: str = Form(""),
-    ncp_service_id: str = Form(""),
+    msghub_api_key: str = Form(""),
+    msghub_api_pwd: str = Form(""),
+    msghub_env: str = Form(""),
+    msghub_brand_id: str = Form(""),
+    msghub_chatbot_id: str = Form(""),
     app_public_url: str = Form(""),
     session_secret: str = Form(""),
 ) -> RedirectResponse:
@@ -97,25 +98,29 @@ async def settings_save(
         store.set("keycloak.client_id", keycloak_client_id, is_secret=False, updated_by=user.sub)
     if app_public_url:
         store.set("app.public_url", app_public_url, is_secret=False, updated_by=user.sub)
+    if msghub_env:
+        store.set("msghub.env", msghub_env, is_secret=False, updated_by=user.sub)
+    if msghub_brand_id:
+        store.set("msghub.brand_id", msghub_brand_id, is_secret=False, updated_by=user.sub)
+    if msghub_chatbot_id:
+        store.set("msghub.chatbot_id", msghub_chatbot_id, is_secret=False, updated_by=user.sub)
 
     # 시크릿 — 빈 값이면 변경하지 않음
     if keycloak_client_secret:
         store.set("keycloak.client_secret", keycloak_client_secret, is_secret=True, updated_by=user.sub)
-    if ncp_access_key:
-        store.set("ncp.access_key", ncp_access_key, is_secret=True, updated_by=user.sub)
-    if ncp_secret_key:
-        store.set("ncp.secret_key", ncp_secret_key, is_secret=True, updated_by=user.sub)
-    if ncp_service_id:
-        store.set("ncp.service_id", ncp_service_id, is_secret=True, updated_by=user.sub)
+    if msghub_api_key:
+        store.set("msghub.api_key", msghub_api_key, is_secret=True, updated_by=user.sub)
+    if msghub_api_pwd:
+        store.set("msghub.api_pwd", msghub_api_pwd, is_secret=True, updated_by=user.sub)
     if session_secret:
         store.set("session.secret", session_secret, is_secret=True, updated_by=user.sub)
 
     audit.log(db, actor_sub=user.sub, action=audit.SETTINGS_UPDATE)
     db.commit()
 
-    # NCP 설정 변경 가능성이 있으므로 클라이언트 재초기화 (#28)
-    from app.main import reset_ncp_client
-    reset_ncp_client()
+    # msghub 설정 변경 시 클라이언트 재초기화
+    from app.main import reset_msghub_client
+    reset_msghub_client()
 
     return RedirectResponse("/admin/settings?saved=1", status_code=303)
 
@@ -127,32 +132,26 @@ async def test_ncp(
     user: User = Depends(_admin_dep),
     _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
-    """HTMX — 현재 저장된 NCP 키로 인증 테스트."""
-    from app.ncp.client import NCPAuthError, NCPClient
+    """HTMX — 현재 저장된 msghub 키로 인증 테스트."""
+    from app.msghub.auth import AuthError
+    from app.msghub.client import MsghubClient
 
     store = SettingsStore(db)
-    access_key = store.get("ncp.access_key")
-    secret_key = store.get("ncp.secret_key")
-    service_id = store.get("ncp.service_id")
+    api_key = store.get("msghub.api_key")
+    api_pwd = store.get("msghub.api_pwd")
+    env = store.get("msghub.env") or "production"
 
-    if not (access_key and secret_key and service_id):
-        return HTMLResponse('<span class="err">✗ NCP 설정이 저장되지 않았습니다.</span>')
+    if not (api_key and api_pwd):
+        return HTMLResponse('<span class="err">✗ msghub 설정이 저장되지 않았습니다.</span>')
 
-    client = NCPClient(access_key=access_key, secret_key=secret_key, service_id=service_id)
+    client = MsghubClient(env=env, api_key=api_key, api_pwd=api_pwd)
     try:
-        await client.list_by_request_id("TEST-PROBE-0000")
-        return HTMLResponse('<span class="ok">✓ NCP 인증 성공</span>')
-    except NotImplementedError:
-        return HTMLResponse('<span class="warn">⚠ signature.py 미구현 (stub)</span>')
-    except NCPAuthError as exc:
-        # #7: 인증 실패는 명확히 에러로 표시
+        await client.test_auth()
+        return HTMLResponse('<span class="ok">✓ msghub 인증 성공</span>')
+    except AuthError as exc:
         return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
     except Exception as exc:
-        from app.ncp.client import NCPForbidden
-        if isinstance(exc, (NCPAuthError, NCPForbidden)):
-            return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
-        # 404 등 → 인증 통과 (requestId 없음)
-        return HTMLResponse('<span class="ok">✓ NCP 인증 성공 (requestId 없음 응답)</span>')
+        return HTMLResponse(f'<span class="err">✗ 연결 실패: {exc}</span>')
     finally:
         await client.aclose()
 

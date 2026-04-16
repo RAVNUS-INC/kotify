@@ -96,31 +96,20 @@ async def test_ncp(
     _: None = Depends(require_setup_mode),
     _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
-    """HTMX — NCP 인증 테스트 (#7: 예외 분기 명확화).
+    """HTMX — msghub 인증 테스트."""
+    from app.msghub.auth import AuthError
+    from app.msghub.client import MsghubClient
 
-    HTML form 필드명 ncp_*를 그대로 받음 (/setup/complete와 일관).
-    """
-    from app.ncp.client import NCPAuthError, NCPClient, NCPError, NCPForbidden
-
-    client = NCPClient(
-        access_key=ncp_access_key,
-        secret_key=ncp_secret_key,
-        service_id=ncp_service_id,
+    client = MsghubClient(
+        env="production",
+        api_key=ncp_access_key,  # form 필드명은 추후 UI 교체 시 변경
+        api_pwd=ncp_secret_key,
     )
     try:
-        # list_by_request_id 대신 가벼운 검증: dummy requestId로 404 받으면 인증 성공
-        await client.list_by_request_id("TEST-PROBE-0000")
-        return HTMLResponse('<span class="ok">✓ NCP 연결 성공</span>')
-    except NotImplementedError:
-        return HTMLResponse(
-            '<span class="warn">⚠ signature.py 미구현 (stub). 인증 테스트 불가.</span>'
-        )
-    except (NCPAuthError, NCPForbidden) as exc:
-        # #7: 인증/권한 실패는 명확히 에러로 표시
+        await client.test_auth()
+        return HTMLResponse('<span class="ok">✓ msghub 연결 성공</span>')
+    except AuthError as exc:
         return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
-    except NCPError:
-        # 404 등 → 인증은 통과 (requestId 없음)
-        return HTMLResponse('<span class="ok">✓ NCP 인증 성공 (requestId 없음 응답)</span>')
     except Exception as exc:
         return HTMLResponse(f'<span class="err">✗ 연결 실패: {exc}</span>')
     finally:
@@ -163,9 +152,9 @@ async def complete_setup(
         "keycloak.issuer": (keycloak_issuer, False),
         "keycloak.client_id": (keycloak_client_id, False),
         "keycloak.client_secret": (keycloak_client_secret, True),
-        "ncp.access_key": (ncp_access_key, True),
-        "ncp.secret_key": (ncp_secret_key, True),
-        "ncp.service_id": (ncp_service_id, True),
+        "msghub.api_key": (ncp_access_key, True),
+        "msghub.api_pwd": (ncp_secret_key, True),
+        "msghub.env": ("production", False),
         "app.public_url": (app_public_url or "", False),
         "session.secret": (session_secret, True),
         # #9: 첫 admin 이메일 저장
