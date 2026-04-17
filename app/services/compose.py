@@ -430,8 +430,9 @@ async def dispatch_campaign(
         raise ValueError(f"발신번호 '{caller_number}'가 활성 목록에 없습니다.")
 
     # 2. messagebaseId 결정
-    is_chat = msg_type == "short"
-    messagebase_id = "SCL00000" if is_chat else _MESSAGEBASE_MAP[msg_type]
+    # 단문: 양방향 CHAT (8원). 단, 예약 발송은 양방향 미지원이므로 단방향 fallback.
+    is_chat = msg_type == "short" and not is_reserved
+    messagebase_id = "SCL00000" if is_chat else (_MESSAGEBASE_MAP.get(msg_type) or "SS000000")
 
     now = _now_iso()
 

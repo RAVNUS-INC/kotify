@@ -1,9 +1,9 @@
 """U+ msghub 메시징 API 클라이언트.
 
 호스트 구조:
-- API (인증/리포트/SMS/MMS): api.msghub.uplus.co.kr
-- 발송 (RCS):                api-send.msghub.uplus.co.kr
-- 파일/관리:                  mnt-api.msghub.uplus.co.kr
+- API (인증/리포트/예약관리):  api.msghub.uplus.co.kr
+- 메시지 발송 (SMS/MMS/RCS):  api-send.msghub.uplus.co.kr
+- 파일/관리:                   mnt-api.msghub.uplus.co.kr
 
 모든 HTTP 호출은 httpx.AsyncClient + TokenManager JWT 인증.
 """
@@ -194,7 +194,7 @@ class MsghubClient:
             body["resvReqDt"] = resv_req_dt
 
         headers = await self._auth_headers()
-        url = f"{self._api_base}/msg/v1/sms"
+        url = f"{self._send_base}/msg/v1/sms"
         resp = await self._http.post(url, json=body, headers=headers)
         data = _parse_json(resp)
         _raise_for_response(data, resp.status_code)
@@ -243,7 +243,7 @@ class MsghubClient:
             body["resvReqDt"] = resv_req_dt
 
         headers = await self._auth_headers()
-        url = f"{self._api_base}/msg/v1/mms"
+        url = f"{self._send_base}/msg/v1/mms"
         resp = await self._http.post(url, json=body, headers=headers)
         data = _parse_json(resp)
         _raise_for_response(data, resp.status_code)
