@@ -1,7 +1,9 @@
-"""관리자 라우트 — 설정, 발신번호, 감사 로그."""
+"""관리자 라우트 — 설정, 발신번호, 감사 로그, 시스템 업데이트."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -16,6 +18,8 @@ from app.security.csrf import verify_csrf
 from app.security.settings_store import SettingsStore
 from app.services import audit
 from app.web import templates
+
+_update_log = logging.getLogger("kotify.update")
 
 router = APIRouter(prefix="/admin")
 
@@ -422,4 +426,116 @@ async def audit_log_page(
             "date_to": date_to,
             "audit_actions": audit_actions,
         },
+    )
+
+
+# ── 시스템 업데이트 ─────────────────────────────────────────────────────────────
+
+
+_UPDATE_SCRIPT = "/opt/kotify/deploy/kotify-update.sh"
+
+
+async def _run_update_script(action: str) -> tuple[int, str, str]:
+    """업데이트 스크립트를 subprocess로 실행한다.
+
+    asyncio.create_subprocess_exec를 사용하여 셸을 거치지 않으므로
+    command injection 위험이 없다.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "sudo", _UPDATE_SCRIPT, action,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    return proc.returncode or 0, stdout.decode(), stderr.decode()
+
+
+@router.post("/system/check-update", response_class=HTMLResponse)
+async def check_update(
+    request: Request,
+    user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
+) -> HTMLResponse:
+    """HTMX — git fetch 후 업데이트 가능 여부를 표시한다."""
+    try:
+        rc, stdout, stderr = await _run_update_script("check")
+    except asyncio.TimeoutError:
+        return HTMLResponse('<span class="err">시간 초과. 서버 네트워크를 확인하세요.</span>')
+    except FileNotFoundError:
+        return HTMLResponse('<span class="err">업데이트 스크립트를 찾을 수 없습니다.</span>')
+
+    if rc != 0:
+        _update_log.warning("check-update failed: rc=%d stderr=%s", rc, stderr)
+        return HTMLResponse(f'<span class="err">확인 실패: {stderr[:200]}</span>')
+
+    try:
+        data = json.loads(stdout.strip().split("\n")[-1])
+    except (json.JSONDecodeError, IndexError):
+        return HTMLResponse('<span class="err">응답 파싱 실패</span>')
+
+    if not data.get("update_available"):
+        return HTMLResponse(
+            f'<span class="ok">\u2713 최신 버전입니다 ({data.get("current", "?")})</span>'
+        )
+
+    commits = data.get("commits", [])
+    count = data.get("count", len(commits))
+    html_parts = [
+        f'<div style="margin-bottom:8px"><strong class="warn">\u2b06 {count}건의 업데이트가 있습니다</strong>'
+        f' <span class="text-muted">({data.get("current", "?")} \u2192 {data.get("remote", "?")})</span></div>',
+        '<div style="max-height:160px;overflow-y:auto;font-size:11px;font-family:monospace;'
+        'background:var(--bg-elevated);padding:8px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:8px">',
+    ]
+    for c in commits[:15]:
+        html_parts.append(
+            f'<div><span class="text-muted">{c.get("hash", "")}</span> {c.get("message", "")}</div>'
+        )
+    if count > 15:
+        html_parts.append(f'<div class="text-muted">... 외 {count - 15}건</div>')
+    html_parts.append("</div>")
+    html_parts.append(
+        '<button class="btn btn-primary btn-sm" '
+        'hx-post="/admin/system/apply-update" '
+        'hx-target="#update-result" '
+        'hx-swap="innerHTML" '
+        'hx-confirm="업데이트를 설치하시겠습니까? 서비스가 잠시 재시작됩니다.">'
+        '<i data-lucide="download"></i> 업데이트 설치'
+        '<span class="htmx-indicator spinner"></span>'
+        '</button>'
+    )
+    return HTMLResponse("".join(html_parts))
+
+
+@router.post("/system/apply-update", response_class=HTMLResponse)
+async def apply_update(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
+) -> HTMLResponse:
+    """HTMX — 업데이트 적용 (git pull + pip install + restart)."""
+    audit.log(db, actor_sub=user.sub, action="system.update")
+    db.commit()
+
+    try:
+        rc, stdout, stderr = await _run_update_script("apply")
+    except asyncio.TimeoutError:
+        return HTMLResponse('<span class="err">업데이트 시간 초과 (2분). 수동 확인 필요.</span>')
+    except FileNotFoundError:
+        return HTMLResponse('<span class="err">업데이트 스크립트를 찾을 수 없습니다.</span>')
+
+    if rc != 0:
+        _update_log.error("apply-update failed: rc=%d stderr=%s", rc, stderr)
+        return HTMLResponse(f'<span class="err">업데이트 실패: {stderr[:300]}</span>')
+
+    lines = stdout.strip().split("\n")
+    try:
+        result = json.loads(lines[-1])
+        version = result.get("version", "?")
+    except (json.JSONDecodeError, IndexError):
+        version = "?"
+
+    return HTMLResponse(
+        f'<span class="ok">✓ 업데이트 완료 ({version}). 서비스가 재시작됩니다...</span>'
+        '<script>setTimeout(function(){location.reload()}, 5000)</script>'
     )
