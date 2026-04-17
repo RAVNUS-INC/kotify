@@ -488,7 +488,8 @@ function openSendModal() {
   document.getElementById('modal-content').textContent = contentPreview || '(비어있음)';
   document.getElementById('modal-cost').textContent = costText;
   var fbLabel = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : 'LMS');
-  document.getElementById('modal-channel').textContent = 'RCS 우선 → ' + fbLabel + ' 자동 전환';
+  var rcsMode = (bytes <= 90 && !isMms) ? 'RCS 양방향' : 'RCS';
+  document.getElementById('modal-channel').textContent = rcsMode + ' 우선 → 미지원 시 ' + fbLabel + ' 자동 전환';
 
   // 예약 모드일 때 확인 버튼 문구/경고 메시지 교체
   var reserveEnabled = document.getElementById('reserve-enabled');

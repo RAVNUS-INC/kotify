@@ -124,7 +124,12 @@
         placeholder="양방향 발신번호와 동일합니다">
       <div class="form-hint">양방향 발신번호와 동일합니다.</div>
     </div>
-    <button type="submit" class="btn btn-primary btn-sm">
+    <div class="form-hint" style="margin-top:8px;padding:8px;background:var(--bg-elevated);border-radius:var(--radius);border:1px solid var(--border);font-size:11px;line-height:1.6">
+      단문 메시지는 <strong>RCS 양방향 CHAT</strong>(건당 8원)으로 발송됩니다.
+      RCS 미지원 수신자에게는 SMS(9원)로 자동 전환됩니다.<br>
+      장문/이미지는 RCS 단방향 + 자동 fallback으로 발송됩니다.
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm" style="margin-top:8px">
       <i data-lucide="save"></i> RCS 설정 저장
     </button>
   </div>

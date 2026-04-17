@@ -79,7 +79,7 @@
     <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
       전체 RCS 성공 시: {{ "{:,}".format(rcs_unit * valid_count) }}원 ({{ rcs_unit }}원 × {{ valid_count }}명)<br>
       {% if rcs_unit != fb_unit %}
-      전체 {{ "MMS" if message_type == "MMS" else "SMS" }} 전환 시: {{ "{:,}".format(fb_unit * valid_count) }}원 ({{ fb_unit }}원 × {{ valid_count }}명)<br>
+      전체 {{ "MMS" if message_type == "MMS" else ("LMS" if message_type == "LMS" else "SMS") }} 전환 시: {{ "{:,}".format(fb_unit * valid_count) }}원 ({{ fb_unit }}원 × {{ valid_count }}명)<br>
       예상 범위: <strong>{{ "{:,}".format(rcs_unit * valid_count) }} ~ {{ "{:,}".format(fb_unit * valid_count) }}원</strong>
       {% if message_type == "MMS" %}<br><span class="text-muted">※ RCS 도달률에 따라 실제 비용 결정</span>{% endif %}
       {% else %}
