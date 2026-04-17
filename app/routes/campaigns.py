@@ -227,7 +227,7 @@ async def campaign_recipients(
             | ((Message.status == "DONE") & (Message.result_code != "10000"))
         )
     elif status == "pending":
-        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "REG", "ING"]))
+        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "REG", "ING", "FB_PENDING"]))
 
     total_count = db.execute(
         select(func.count()).select_from(base_stmt.subquery())
@@ -286,7 +286,7 @@ async def campaign_export(
             | ((Message.status == "DONE") & (Message.result_code != "10000"))
         )
     elif status == "pending":
-        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "REG", "ING"]))
+        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "REG", "ING", "FB_PENDING"]))
 
     messages = list(db.execute(base_stmt.order_by(Message.id)).scalars().all())
 

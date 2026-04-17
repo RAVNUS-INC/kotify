@@ -75,6 +75,8 @@
         <span class="badge badge-success">성공</span>
         {% elif msg.status == "FAILED" %}
         <span class="badge badge-fail">전송 오류</span>
+        {% elif msg.status == "FB_PENDING" %}
+        <span class="badge badge-pending" title="RCS 실패 → SMS 전환 대기">SMS 전환 중</span>
         {% elif msg.status in ("PENDING", "REG", "ING") %}
         <span class="badge badge-pending">대기</span>
         {% elif msg.result_code and msg.result_code != "10000" %}
