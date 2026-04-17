@@ -64,7 +64,7 @@
   <div style="margin-bottom:8px">
     <strong style="font-size:12px">발송 채널</strong>
     <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
-      RCS 우선 → 미지원 시 {% if message_type == "MMS" %}MMS{% elif message_type == "LMS" %}LMS{% else %}SMS{% endif %} 자동 전환
+      {% if message_type == "SMS" %}RCS 양방향 → 미지원 시 SMS 자동 전환{% elif message_type == "MMS" %}RCS 이미지 → 미지원 시 MMS 자동 전환{% else %}RCS LMS → 미지원 시 LMS 자동 전환{% endif %}
     </div>
   </div>
   <div style="margin-bottom:8px">

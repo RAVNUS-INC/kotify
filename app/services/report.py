@@ -19,7 +19,7 @@ from app.msghub.schemas import ReportItem
 log = logging.getLogger(__name__)
 
 
-def process_report(db: Session, items: list[ReportItem]) -> int:
+def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Message]]:
     """리포트 항목들을 처리하여 Message/Campaign을 업데이트한다.
 
     Args:
@@ -27,10 +27,12 @@ def process_report(db: Session, items: list[ReportItem]) -> int:
         items: ReportItem 목록 (웹훅 또는 폴링에서 수신).
 
     Returns:
-        처리된 메시지 건수.
+        (처리된 메시지 건수, SMS fallback이 필요한 메시지 목록).
+        fallback 목록은 양방향 CHAT(SCL00000) 캠페인의 RCS 실패 메시지.
     """
     processed = 0
     campaign_ids: set[int] = set()
+    failed_msgs: list[Message] = []
 
     for item in items:
         msg = _find_message(db, item.cli_key, item.msg_key)
@@ -41,12 +43,30 @@ def process_report(db: Session, items: list[ReportItem]) -> int:
         if _update_message(msg, item):
             campaign_ids.add(msg.campaign_id)
             processed += 1
+            if item.result_code != SUCCESS_CODE:
+                failed_msgs.append(msg)
+
+    # 양방향 CHAT 캠페인의 실패 메시지 → SMS fallback 필요
+    fallback_needed: list[Message] = []
+    if failed_msgs:
+        chat_cids = set(
+            db.execute(
+                select(Campaign.id).where(
+                    Campaign.id.in_({m.campaign_id for m in failed_msgs}),
+                    Campaign.rcs_messagebase_id == "SCL00000",
+                )
+            ).scalars().all()
+        )
+        for msg in failed_msgs:
+            if msg.campaign_id in chat_cids and not msg.cli_key.endswith("-fb"):
+                msg.status = "FB_PENDING"
+                fallback_needed.append(msg)
 
     for cid in campaign_ids:
         _refresh_campaign_counters(db, cid)
 
     db.flush()
-    return processed
+    return processed, fallback_needed
 
 
 def process_sent_query(db: Session, raw_items: list[dict]) -> int:

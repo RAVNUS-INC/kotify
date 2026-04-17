@@ -427,9 +427,9 @@ function updateByteCounter() {
   var type = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과'));
   var typeLabel = isMms ? '이미지' : (bytes <= 90 ? '단문' : (bytes <= 2000 ? '장문' : '초과'));
   var priceInfo = '';
-  if (type === 'SMS') priceInfo = ' → RCS 8원 (미지원 시 SMS 9원)';
-  else if (type === 'LMS') priceInfo = ' → RCS LMS 27원 (미지원 시 LMS 27원)';
-  else if (type === 'MMS') priceInfo = ' → RCS 이미지 40원 (미지원 시 MMS 85원)';
+  if (type === 'SMS') priceInfo = ' → RCS 양방향 8원/건 (미지원 시 SMS 9원)';
+  else if (type === 'LMS') priceInfo = ' → RCS LMS 27원/건 (미지원 시 LMS 27원)';
+  else if (type === 'MMS') priceInfo = ' → RCS 이미지 40원/건 (미지원 시 MMS 85원)';
   byteCounter.textContent = bytes + ' byte · ' + typeLabel + priceInfo;
   byteCounter.className = 'byte-counter ' + (bytes > 2000 ? 'err' : (bytes > 90 || isMms ? 'warn' : 'ok'));
   // H10 + MMS: subject 입력란 활성 조건

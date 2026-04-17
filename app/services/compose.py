@@ -83,12 +83,16 @@ RESERVE_MIN_LEAD_SECONDS = 10 * 60
 # 메시지 유형 → 채널 중립 유형
 _MSG_TYPE_MAP = {"SMS": "short", "LMS": "long", "MMS": "image"}
 
-# 메시지 유형 → RCS messagebaseId (모두 단방향 — fbInfoLst fallback 보장)
+# 메시지 유형 → RCS messagebaseId
+# short: 양방향 CHAT (8원, fbInfoLst 미지원 → report.py에서 수동 SMS fallback)
+# long/image: 단방향 (fbInfoLst 자동 fallback, 동일 단가)
 _MESSAGEBASE_MAP = {
-    "short": "SS000000",     # RCS SMS형 (단방향, fbInfoLst 지원)
-    "long": "SL000000",      # RCS LMS형
-    "image": "OMHIMV0001",   # RCS 이미지 강조형
+    "long": "SL000000",      # RCS LMS형 (단방향, fbInfoLst 지원)
+    "image": "OMHIMV0001",   # RCS 이미지 강조형 (단방향, fbInfoLst 지원)
 }
+
+# 양방향 CHAT 동시 발송 수 (API 호출 1건 = 수신자 1명)
+_CHAT_CONCURRENCY = 10
 
 
 def _classify_msg_type(content: str, has_attachment: bool) -> str:
@@ -163,101 +167,107 @@ def _build_merge_data(
     return data
 
 
-async def dispatch_campaign(
+async def _dispatch_chat_messages(
     db: Session,
-    msghub_client: MsghubClient,
-    created_by: str,
-    caller_number: str,
+    client: MsghubClient,
+    campaign: Campaign,
+    callback: str,
     content: str,
     recipients: list[str],
-    message_type: str,
-    subject: str | None = None,
-    reserve_time_local: str | None = None,
-    attachment_id: int | None = None,
-) -> Campaign:
-    """캠페인을 생성하고 msghub를 통해 RCS 우선 발송한다.
+) -> int:
+    """양방향 CHAT 발송 (단문 전용, 1건씩 동시 발송).
 
-    모든 메시지 유형은 RCS 단방향 + fbInfoLst로 발송하여
-    msghub가 RCS 미지원 단말에 자동으로 SMS/LMS/MMS fallback.
+    Returns:
+        API 호출 실패 수신자 수 (웹훅 전 즉시 실패).
     """
-    # 0. 수신자 수 제한
-    if len(recipients) > MAX_RECIPIENTS_PER_CAMPAIGN:
-        raise ValueError(f"1회 최대 {MAX_RECIPIENTS_PER_CAMPAIGN}명까지 발송할 수 있습니다.")
-    if not recipients:
-        raise ValueError("수신자 목록이 비어 있습니다.")
+    semaphore = asyncio.Semaphore(_CHAT_CONCURRENCY)
+    sent_at = _now_iso()
 
-    # 0.5 예약 파라미터 검증
-    is_reserved = reserve_time_local is not None
-    msghub_reserve_time: str | None = None
-    reserve_utc_iso: str | None = None
-    if is_reserved:
-        msghub_reserve_time, reserve_utc_iso = parse_reserve_time(reserve_time_local)  # type: ignore[arg-type]
+    async def _send_one(idx: int, phone: str) -> tuple[int, str, str, SendResponse | None, str | None]:
+        cli_key = _make_cli_key(campaign.id, 0, idx)
+        async with semaphore:
+            try:
+                resp = await client.send_rcs_chat(
+                    description=content,
+                    phone=phone,
+                    cli_key=cli_key,
+                )
+                return idx, phone, cli_key, resp, None
+            except Exception as exc:
+                return idx, phone, cli_key, None, str(exc)
 
-    # 0.7 메시지 유형 결정 (채널 중립)
-    has_attachment = attachment_id is not None
-    msg_type = _classify_msg_type(content, has_attachment)
-
-    # 0.8 첨부 파일 검증
-    attachment: Attachment | None = None
-    rcs_file_id: str | None = None
-    mms_file_id: str | None = None
-    if attachment_id is not None:
-        attachment = db.get(Attachment, attachment_id)
-        if attachment is None:
-            raise ValueError(f"첨부 파일 #{attachment_id}을 찾을 수 없습니다.")
-        if attachment.uploaded_by != created_by:
-            raise ValueError("이 첨부 파일에 대한 권한이 없습니다.")
-        if attachment.campaign_id is not None:
-            raise ValueError("이 첨부 파일은 이미 다른 캠페인에 사용되었습니다.")
-        if not attachment.msghub_file_id:
-            raise ValueError("첨부 파일이 msghub에 업로드되지 않았습니다.")
-        rcs_file_id = attachment.msghub_file_id
-        mms_file_id = attachment.msghub_file_id
-
-    # 1. 발신번호 검증
-    caller = db.execute(
-        select(Caller).where(Caller.number == caller_number, Caller.active == 1)
-    ).scalar_one_or_none()
-    if caller is None:
-        raise ValueError(f"발신번호 '{caller_number}'가 활성 목록에 없습니다.")
-
-    # 2. messagebaseId 결정
-    messagebase_id = _MESSAGEBASE_MAP[msg_type]
-
-    now = _now_iso()
-
-    # 3. Campaign 생성
-    initial_state = "RESERVED" if is_reserved else "DISPATCHING"
-    campaign = Campaign(
-        created_by=created_by,
-        caller_number=caller_number,
-        message_type=msg_type,
-        subject=subject,
-        content=content,
-        total_count=len(recipients),
-        ok_count=0,
-        fail_count=0,
-        pending_count=len(recipients),
-        state=initial_state,
-        created_at=now,
-        completed_at=None,
-        reserve_time=msghub_reserve_time if is_reserved else None,
-        rcs_messagebase_id=messagebase_id,
-        web_req_id=None,
-        total_cost=0,
-        rcs_count=0,
-        fallback_count=0,
+    results = await asyncio.gather(
+        *[_send_one(i, p) for i, p in enumerate(recipients)]
     )
-    db.add(campaign)
-    db.flush()
 
-    if attachment is not None:
-        attachment.campaign_id = campaign.id
+    # MsghubRequest + Message 레코드 생성 (가상 청크 단위)
+    failed_count = 0
+    batch: list[tuple] = list(results)
+    chunk_groups = [batch[i : i + CHUNK_SIZE] for i in range(0, len(batch), CHUNK_SIZE)]
+
+    for chunk_idx, group in enumerate(chunk_groups):
+        msghub_req = MsghubRequest(
+            campaign_id=campaign.id,
+            chunk_index=chunk_idx,
+            response_code="10000",
+            response_message="chat",
+            error_body=None,
+            sent_at=sent_at,
+        )
+        db.add(msghub_req)
         db.flush()
 
-    db.commit()
+        for idx, phone, cli_key, resp, err in group:
+            if err:
+                msg = Message(
+                    campaign_id=campaign.id,
+                    msghub_request_id=msghub_req.id,
+                    to_number=phone,
+                    to_number_raw=phone,
+                    cli_key=cli_key,
+                    status="FAILED",
+                    result_desc=err,
+                )
+                failed_count += 1
+            else:
+                msg = Message(
+                    campaign_id=campaign.id,
+                    msghub_request_id=msghub_req.id,
+                    to_number=phone,
+                    to_number_raw=phone,
+                    cli_key=cli_key,
+                    msg_key=getattr(resp, "msg_key", None),
+                    status="REG",
+                )
+            db.add(msg)
 
-    # 4. 청크 단위 발송 — RCS 단방향 + fbInfoLst (자동 fallback)
+        db.flush()
+        db.commit()
+
+    return failed_count
+
+
+async def _dispatch_rcs_chunks(
+    db: Session,
+    client: MsghubClient,
+    campaign: Campaign,
+    callback: str,
+    content: str,
+    subject: str | None,
+    recipients: list[str],
+    msg_type: str,
+    messagebase_id: str,
+    mms_file_id: str | None,
+    rcs_file_id: str | None,
+    is_reserved: bool,
+    reserve_utc_iso: str | None,
+    msghub_reserve_time: str | None,
+) -> tuple[list[int], list[int]]:
+    """단방향 RCS + fbInfoLst 청크 발송 (장문/이미지).
+
+    Returns:
+        (failed_chunk_indices, failed_chunk_sizes)
+    """
     chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
     failed_chunks: list[int] = []
     failed_chunk_sizes: list[int] = []
@@ -277,16 +287,15 @@ async def dispatch_campaign(
                 for i, phone in enumerate(chunk)
             ]
 
-            resp = await msghub_client.send_rcs(
+            resp = await client.send_rcs(
                 messagebase_id=messagebase_id,
-                callback=caller_number,
+                callback=callback,
                 recv_list=recv_list,
                 fb_info_lst=fb_info_lst,
                 resv_yn="Y" if is_reserved else None,
                 resv_req_dt=msghub_reserve_time,
             )
 
-            # 응답 기록
             msghub_req = MsghubRequest(
                 campaign_id=campaign.id,
                 chunk_index=chunk_idx,
@@ -301,7 +310,6 @@ async def dispatch_campaign(
             if isinstance(resp, ReserveResponse) and resp.web_req_id:
                 campaign.web_req_id = resp.web_req_id
 
-            # Message 레코드 생성
             _create_messages_from_response(
                 db, campaign.id, msghub_req.id, resp, chunk, chunk_idx
             )
@@ -309,13 +317,12 @@ async def dispatch_campaign(
             db.commit()
 
         except MsghubRateLimited:
-            # CPS 초과: rollback + 30초 대기 후 1회 재시도
             db.rollback()
             await asyncio.sleep(30)
-            sent_at = _now_iso()  # 재시도 시점으로 갱신
+            sent_at = _now_iso()
             try:
                 resp = await _send_chunk_direct(
-                    msghub_client, campaign, caller_number, content,
+                    client, campaign, callback, content,
                     subject, chunk, chunk_idx, msg_type, mms_file_id,
                 )
                 msghub_req = MsghubRequest(
@@ -359,6 +366,123 @@ async def dispatch_campaign(
             db.commit()
             failed_chunks.append(chunk_idx)
             failed_chunk_sizes.append(len(chunk))
+
+    return failed_chunks, failed_chunk_sizes
+
+
+async def dispatch_campaign(
+    db: Session,
+    msghub_client: MsghubClient,
+    created_by: str,
+    caller_number: str,
+    content: str,
+    recipients: list[str],
+    message_type: str,
+    subject: str | None = None,
+    reserve_time_local: str | None = None,
+    attachment_id: int | None = None,
+) -> Campaign:
+    """캠페인을 생성하고 msghub를 통해 RCS 우선 발송한다.
+
+    단문(short): RCS 양방향 CHAT (8원) — fbInfoLst 미지원이므로
+    RCS 실패 시 report.py/webhook.py에서 SMS 수동 fallback.
+    장문/이미지: RCS 단방향 + fbInfoLst (자동 fallback, 동일 단가).
+    """
+    # 0. 수신자 수 제한
+    if len(recipients) > MAX_RECIPIENTS_PER_CAMPAIGN:
+        raise ValueError(f"1회 최대 {MAX_RECIPIENTS_PER_CAMPAIGN}명까지 발송할 수 있습니다.")
+    if not recipients:
+        raise ValueError("수신자 목록이 비어 있습니다.")
+
+    # 0.5 예약 파라미터 검증
+    is_reserved = reserve_time_local is not None
+    msghub_reserve_time: str | None = None
+    reserve_utc_iso: str | None = None
+    if is_reserved:
+        msghub_reserve_time, reserve_utc_iso = parse_reserve_time(reserve_time_local)  # type: ignore[arg-type]
+
+    # 0.7 메시지 유형 결정 (채널 중립)
+    has_attachment = attachment_id is not None
+    msg_type = _classify_msg_type(content, has_attachment)
+
+    # 0.8 첨부 파일 검증
+    attachment: Attachment | None = None
+    rcs_file_id: str | None = None
+    mms_file_id: str | None = None
+    if attachment_id is not None:
+        attachment = db.get(Attachment, attachment_id)
+        if attachment is None:
+            raise ValueError(f"첨부 파일 #{attachment_id}을 찾을 수 없습니다.")
+        if attachment.uploaded_by != created_by:
+            raise ValueError("이 첨부 파일에 대한 권한이 없습니다.")
+        if attachment.campaign_id is not None:
+            raise ValueError("이 첨부 파일은 이미 다른 캠페인에 사용되었습니다.")
+        if not attachment.msghub_file_id:
+            raise ValueError("첨부 파일이 msghub에 업로드되지 않았습니다.")
+        rcs_file_id = attachment.msghub_file_id
+        mms_file_id = attachment.msghub_file_id
+
+    # 1. 발신번호 검증
+    caller = db.execute(
+        select(Caller).where(Caller.number == caller_number, Caller.active == 1)
+    ).scalar_one_or_none()
+    if caller is None:
+        raise ValueError(f"발신번호 '{caller_number}'가 활성 목록에 없습니다.")
+
+    # 2. messagebaseId 결정
+    is_chat = msg_type == "short"
+    messagebase_id = "SCL00000" if is_chat else _MESSAGEBASE_MAP[msg_type]
+
+    now = _now_iso()
+
+    # 3. Campaign 생성
+    initial_state = "RESERVED" if is_reserved else "DISPATCHING"
+    campaign = Campaign(
+        created_by=created_by,
+        caller_number=caller_number,
+        message_type=msg_type,
+        subject=subject,
+        content=content,
+        total_count=len(recipients),
+        ok_count=0,
+        fail_count=0,
+        pending_count=len(recipients),
+        state=initial_state,
+        created_at=now,
+        completed_at=None,
+        reserve_time=msghub_reserve_time if is_reserved else None,
+        rcs_messagebase_id=messagebase_id,
+        web_req_id=None,
+        total_cost=0,
+        rcs_count=0,
+        fallback_count=0,
+    )
+    db.add(campaign)
+    db.flush()
+
+    if attachment is not None:
+        attachment.campaign_id = campaign.id
+        db.flush()
+
+    db.commit()
+
+    # 4. 발송
+    if is_chat:
+        # 양방향 CHAT (단문 8원) — 1건씩 동시 발송, fallback은 webhook에서 처리
+        failed_recipients = await _dispatch_chat_messages(
+            db, msghub_client, campaign, caller_number, content, recipients,
+        )
+        failed_chunks: list[int] = []
+        failed_chunk_sizes: list[int] = [failed_recipients] if failed_recipients else []
+        chunks = [recipients]  # 가상 청크 1개 (audit 로그용)
+    else:
+        # 단방향 RCS + fbInfoLst (장문/이미지)
+        failed_chunks, failed_chunk_sizes = await _dispatch_rcs_chunks(
+            db, msghub_client, campaign, caller_number, content, subject,
+            recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
+            is_reserved, reserve_utc_iso, msghub_reserve_time,
+        )
+        chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
 
     # 5. Campaign state + counters 업데이트
     total_chunks = len(chunks)
