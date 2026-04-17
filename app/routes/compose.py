@@ -111,7 +111,8 @@ async def compose_page(
                 db.execute(
                     sa_select(Message).where(
                         Message.campaign_id == resend_campaign,
-                        Message.result_status == "fail",
+                        Message.status.in_(["DONE", "FAILED"]),
+                        Message.result_code != "10000",
                     )
                 ).scalars().all()
             )

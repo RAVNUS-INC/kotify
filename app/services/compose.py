@@ -214,14 +214,12 @@ async def dispatch_campaign(
         rcs_file_id = attachment.msghub_file_id
         mms_file_id = attachment.msghub_file_id
 
-    # 1. 발신번호 검증 (RCS 등록 필수)
+    # 1. 발신번호 검증
     caller = db.execute(
         select(Caller).where(Caller.number == caller_number, Caller.active == 1)
     ).scalar_one_or_none()
     if caller is None:
         raise ValueError(f"발신번호 '{caller_number}'가 활성 목록에 없습니다.")
-    if not caller.rcs_enabled:
-        raise ValueError(f"발신번호 '{caller_number}'가 RCS 등록되지 않았습니다.")
 
     # 2. messagebaseId 결정
     messagebase_id = _MESSAGEBASE_MAP[msg_type]

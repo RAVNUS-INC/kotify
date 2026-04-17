@@ -94,7 +94,7 @@
       <td class="text-muted" style="font-size:11px">
         {% if msg.fb_reason %}
         {% set fb = msg.fb_reason | from_json if msg.fb_reason else [] %}
-        {% for f in fb %}{{ f.get("fbResultDesc", f.get("fbResultCode", "")) }}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% for f in fb %}{{ f.get("desc", f.get("code", "")) }}{% if not loop.last %}, {% endif %}{% endfor %}
         {% else %}—{% endif %}
       </td>
       <td class="mono text-right">{{ msg.cost|string + "원" if msg.cost else "—" }}</td>

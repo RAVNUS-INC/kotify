@@ -216,19 +216,18 @@ async def campaign_recipients(
     offset = (page - 1) * per_page
 
     # C2: status 필터 적용
-    # fail 필터는 NCP가 명시적으로 fail을 돌려준 경우 + 70분 cutoff로 포기한 경우 모두 포함
-    # (사용자 관점에서 둘 다 "성공하지 않은 결과")
     base_stmt = select(Message).where(Message.campaign_id == campaign_id)
     if status == "success":
-        base_stmt = base_stmt.where(Message.result_status == "success")
+        base_stmt = base_stmt.where(
+            Message.status == "DONE", Message.result_code == "10000"
+        )
     elif status == "fail":
         base_stmt = base_stmt.where(
-            (Message.result_status == "fail")
-            | (Message.status == "UNKNOWN")
-            | (Message.status == "DELIVERY_UNCONFIRMED")
+            (Message.status == "FAILED")
+            | ((Message.status == "DONE") & (Message.result_code != "10000"))
         )
     elif status == "pending":
-        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "READY", "PROCESSING"]))
+        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "REG", "ING"]))
 
     total_count = db.execute(
         select(func.count()).select_from(base_stmt.subquery())
@@ -278,15 +277,16 @@ async def campaign_export(
 
     base_stmt = select(Message).where(Message.campaign_id == campaign_id)
     if status == "success":
-        base_stmt = base_stmt.where(Message.result_status == "success")
+        base_stmt = base_stmt.where(
+            Message.status == "DONE", Message.result_code == "10000"
+        )
     elif status == "fail":
         base_stmt = base_stmt.where(
-            (Message.result_status == "fail")
-            | (Message.status == "UNKNOWN")
-            | (Message.status == "DELIVERY_UNCONFIRMED")
+            (Message.status == "FAILED")
+            | ((Message.status == "DONE") & (Message.result_code != "10000"))
         )
     elif status == "pending":
-        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "READY", "PROCESSING"]))
+        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "REG", "ING"]))
 
     messages = list(db.execute(base_stmt.order_by(Message.id)).scalars().all())
 
@@ -299,13 +299,13 @@ async def campaign_export(
             import json as _json
             try:
                 fb_list = _json.loads(msg.fb_reason)
-                fb_desc = "; ".join(f.get("fbResultDesc", f.get("fbResultCode", "")) for f in fb_list)
+                fb_desc = "; ".join(f.get("desc", f.get("code", "")) for f in fb_list)
             except (ValueError, TypeError):
                 fb_desc = ""
         writer.writerow([
             msg.to_number,
             msg.channel or "",
-            msg.result_status or msg.status,
+            "성공" if msg.result_code == "10000" else ("실패" if msg.status in ("DONE", "FAILED") else "대기"),
             msg.result_code or "",
             msg.result_desc or "",
             fb_desc,
