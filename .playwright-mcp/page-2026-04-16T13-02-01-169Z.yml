@@ -1,0 +1,187 @@
+- generic [ref=e2]:
+  - region "본문으로 건너뛰기":
+    - link "본문으로 건너뛰기" [ref=e3] [cursor=pointer]:
+      - /url: "#__docusaurus_skipToContent_fallback"
+  - navigation "메인" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "My Site Logo Msghub" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "My Site Logo" [ref=e9]
+          - generic [ref=e10]: Msghub
+        - link "API" [ref=e11] [cursor=pointer]:
+          - /url: /api/intro
+      - generic [ref=e12]:
+        - button "한국어" [ref=e14] [cursor=pointer]:
+          - img [ref=e15]
+          - text: 한국어
+        - button "어두운 모드와 밝은 모드 전환하기 (현재 밝은 모드)" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+  - generic [ref=e23]:
+    - complementary [ref=e24]:
+      - navigation "문서 사이드바" [ref=e27]:
+        - list [ref=e28]:
+          - listitem [ref=e29]:
+            - link "1. 개요" [ref=e30] [cursor=pointer]:
+              - /url: /api/intro
+          - listitem [ref=e31]:
+            - generic [ref=e32]:
+              - link "2. 메시지발송" [ref=e33] [cursor=pointer]:
+                - /url: /api/category/2-메시지발송
+              - button "사이드바 분류 '2. 메시지발송' 접기" [expanded] [ref=e34] [cursor=pointer]
+            - list [ref=e35]:
+              - listitem [ref=e36]:
+                - link "2.1 인증" [ref=e37] [cursor=pointer]:
+                  - /url: /api/message-sending/02.01.auth
+              - listitem [ref=e38]:
+                - link "2.2 문자 메시지 (SMS/MMS)" [ref=e39] [cursor=pointer]:
+                  - /url: /api/message-sending/02.02.xMS
+              - listitem [ref=e40]:
+                - link "2.3.1 RCS 메시지(android)" [ref=e41] [cursor=pointer]:
+                  - /url: /api/message-sending/02.03.01.rcs_android
+              - listitem [ref=e42]:
+                - link "2.3.2 통합 RCS 메시지" [ref=e43] [cursor=pointer]:
+                  - /url: /api/message-sending/02.03.02.rcs_integrated
+              - listitem [ref=e44]:
+                - link "2.4 카카오톡 메시지" [ref=e45] [cursor=pointer]:
+                  - /url: /api/message-sending/02.04.kko_v1.2
+              - listitem [ref=e46]:
+                - link "2.5 Push 메시지" [ref=e47] [cursor=pointer]:
+                  - /url: /api/message-sending/02.05.push
+              - listitem [ref=e48]:
+                - link "2.6 통합발송" [ref=e49] [cursor=pointer]:
+                  - /url: /api/message-sending/02.06.smartMsg
+              - listitem [ref=e50]:
+                - link "2.7 예약발송 관리" [ref=e51] [cursor=pointer]:
+                  - /url: /api/message-sending/02.07.resvMsg
+              - listitem [ref=e52]:
+                - link "2.8 메시지 리포트" [ref=e53] [cursor=pointer]:
+                  - /url: /api/message-sending/02.08.report_v1.2
+              - listitem [ref=e54]:
+                - link "2.9.결과코드" [ref=e55] [cursor=pointer]:
+                  - /url: /api/message-sending/02.09.resultcode
+          - listitem [ref=e56]:
+            - generic [ref=e57]:
+              - link "3. 채널관리" [ref=e58] [cursor=pointer]:
+                - /url: /api/category/3-채널관리
+              - button "사이드바 분류 '3. 채널관리' 펼치기" [ref=e59] [cursor=pointer]
+          - listitem [ref=e60]:
+            - generic [ref=e61]:
+              - link "4. 통계" [ref=e62] [cursor=pointer]:
+                - /url: /api/category/4-통계
+              - button "사이드바 분류 '4. 통계' 펼치기" [ref=e63] [cursor=pointer]
+          - listitem [ref=e64]:
+            - generic [ref=e65]:
+              - link "5. 부가서비스" [ref=e66] [cursor=pointer]:
+                - /url: /api/category/5-부가서비스
+              - button "사이드바 분류 '5. 부가서비스' 펼치기" [ref=e67] [cursor=pointer]
+    - main [ref=e68]:
+      - generic [ref=e70]:
+        - navigation "탐색 경로" [ref=e71]:
+          - list [ref=e72]:
+            - listitem [ref=e73]:
+              - link "홈" [ref=e74] [cursor=pointer]:
+                - /url: /
+                - img [ref=e75]
+            - listitem [ref=e77]:
+              - generic [ref=e78]: 2. 메시지발송
+        - generic [ref=e79]:
+          - heading "2. 메시지발송" [level=1] [ref=e80]
+          - paragraph [ref=e81]: 메시지 발송관련 API
+        - article [ref=e82]:
+          - generic [ref=e83]:
+            - article [ref=e84]:
+              - link "📄️ 2.1 인증 목차" [ref=e85] [cursor=pointer]:
+                - /url: /api/message-sending/02.01.auth
+                - heading "📄️ 2.1 인증" [level=2] [ref=e86]
+                - paragraph [ref=e87]: 목차
+            - article [ref=e88]:
+              - link "📄️ 2.2 문자 메시지 (SMS/MMS) 목차" [ref=e89] [cursor=pointer]:
+                - /url: /api/message-sending/02.02.xMS
+                - heading "📄️ 2.2 문자 메시지 (SMS/MMS)" [level=2] [ref=e90]
+                - paragraph [ref=e91]: 목차
+            - article [ref=e92]:
+              - link "📄️ 2.3.1 RCS 메시지(android) 목차" [ref=e93] [cursor=pointer]:
+                - /url: /api/message-sending/02.03.01.rcs_android
+                - heading "📄️ 2.3.1 RCS 메시지(android)" [level=2] [ref=e94]
+                - paragraph [ref=e95]: 목차
+            - article [ref=e96]:
+              - link "📄️ 2.3.2 통합 RCS 메시지 목차" [ref=e97] [cursor=pointer]:
+                - /url: /api/message-sending/02.03.02.rcs_integrated
+                - heading "📄️ 2.3.2 통합 RCS 메시지" [level=2] [ref=e98]
+                - paragraph [ref=e99]: 목차
+            - article [ref=e100]:
+              - link "📄️ 2.4 카카오톡 메시지 목차" [ref=e101] [cursor=pointer]:
+                - /url: /api/message-sending/02.04.kko_v1.2
+                - heading "📄️ 2.4 카카오톡 메시지" [level=2] [ref=e102]
+                - paragraph [ref=e103]: 목차
+            - article [ref=e104]:
+              - link "📄️ 2.5 Push 메시지 목차" [ref=e105] [cursor=pointer]:
+                - /url: /api/message-sending/02.05.push
+                - heading "📄️ 2.5 Push 메시지" [level=2] [ref=e106]
+                - paragraph [ref=e107]: 목차
+            - article [ref=e108]:
+              - link "📄️ 2.6 통합발송 목차" [ref=e109] [cursor=pointer]:
+                - /url: /api/message-sending/02.06.smartMsg
+                - heading "📄️ 2.6 통합발송" [level=2] [ref=e110]
+                - paragraph [ref=e111]: 목차
+            - article [ref=e112]:
+              - link "📄️ 2.7 예약발송 관리 목차" [ref=e113] [cursor=pointer]:
+                - /url: /api/message-sending/02.07.resvMsg
+                - heading "📄️ 2.7 예약발송 관리" [level=2] [ref=e114]
+                - paragraph [ref=e115]: 목차
+            - article [ref=e116]:
+              - link "📄️ 2.8 메시지 리포트 목차" [ref=e117] [cursor=pointer]:
+                - /url: /api/message-sending/02.08.report_v1.2
+                - heading "📄️ 2.8 메시지 리포트" [level=2] [ref=e118]
+                - paragraph [ref=e119]: 목차
+            - article [ref=e120]:
+              - link "📄️ 2.9.결과코드 결과 코드" [ref=e121] [cursor=pointer]:
+                - /url: /api/message-sending/02.09.resultcode
+                - heading "📄️ 2.9.결과코드" [level=2] [ref=e122]
+                - paragraph [ref=e123]: 결과 코드
+        - navigation "문서 페이지" [ref=e125]:
+          - link "이전 « 1. 개요" [ref=e126] [cursor=pointer]:
+            - /url: /api/intro
+            - generic [ref=e127]: 이전
+            - generic [ref=e128]: « 1. 개요
+          - link "다음 2.1 인증 »" [ref=e129] [cursor=pointer]:
+            - /url: /api/message-sending/02.01.auth
+            - generic [ref=e130]: 다음
+            - generic [ref=e131]: 2.1 인증 »
+  - contentinfo [ref=e132]:
+    - generic [ref=e133]:
+      - generic [ref=e134]:
+        - generic [ref=e135]:
+          - generic [ref=e136]: Support
+          - list [ref=e137]:
+            - listitem [ref=e138]:
+              - link "msghub-snap-agent" [ref=e139] [cursor=pointer]:
+                - /url: https://msghub-agent.notion.site/
+                - text: msghub-snap-agent
+                - img [ref=e140]
+            - listitem [ref=e142]:
+              - link "msghub-restapi-sample-code" [ref=e143] [cursor=pointer]:
+                - /url: https://total-msg-hub.github.io/restapi_sample/
+                - text: msghub-restapi-sample-code
+                - img [ref=e144]
+        - generic [ref=e146]:
+          - generic [ref=e147]: Community
+          - list [ref=e148]:
+            - listitem [ref=e149]:
+              - link "U+" [ref=e150] [cursor=pointer]:
+                - /url: https://www.lguplus.com/
+                - text: U+
+                - img [ref=e151]
+        - generic [ref=e153]:
+          - generic [ref=e154]: Privacy Policy
+          - list [ref=e155]:
+            - listitem [ref=e156]:
+              - link "Policy guide" [ref=e157] [cursor=pointer]:
+                - /url: https://privacy.lguplus.com/2545ce4416cc4e3b9d9488b94690ba27/privacy/info/v1/1
+                - text: Policy guide
+                - img [ref=e158]
+      - generic [ref=e162]:
+        - text: ㈜엘지유플러스 서울특별시 용산구 한강대로 32
+        - text: 대표이사 홍범식 | 사업자번호 220-81-39938 | 통신판매신고 제 2010-서울중구-0968호 | 1544-5992 | smshelp@lguplus.co.kr
+        - text: Copyright ⓒ LG Uplus Corp. All Rights Reserved.

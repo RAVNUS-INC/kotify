@@ -94,6 +94,15 @@ async def dashboard(
         select(func.count(Contact.id))
     ).scalar_one() or 0
 
+    # RCS 도달률 (이번 달)
+    month_rcs_count = db.execute(
+        select(func.sum(Campaign.rcs_count)).where(
+            Campaign.created_at >= month_start_utc,
+            Campaign.created_at < next_month_utc,
+        )
+    ).scalar_one() or 0
+    rcs_rate = round(month_rcs_count / month_recipients * 100) if month_recipients > 0 else 0
+
     # H1: 최근 24시간 실패율
     one_day_ago_utc = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
     recent_ok = db.execute(
@@ -129,5 +138,6 @@ async def dashboard(
             "has_contacts": has_contacts,
             "fail_rate_24h": fail_rate_24h,
             "recent_fail": recent_fail,
+            "rcs_rate": rcs_rate,
         },
     )

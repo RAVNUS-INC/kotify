@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
-from app.models import Attachment, Campaign, Message, NcpRequest, User
+from app.models import Attachment, Campaign, Message, MsghubRequest, User
 from app.security.csrf import verify_csrf
 from app.web import templates
 
@@ -216,19 +216,18 @@ async def campaign_recipients(
     offset = (page - 1) * per_page
 
     # C2: status 필터 적용
-    # fail 필터는 NCP가 명시적으로 fail을 돌려준 경우 + 70분 cutoff로 포기한 경우 모두 포함
-    # (사용자 관점에서 둘 다 "성공하지 않은 결과")
     base_stmt = select(Message).where(Message.campaign_id == campaign_id)
     if status == "success":
-        base_stmt = base_stmt.where(Message.result_status == "success")
+        base_stmt = base_stmt.where(
+            Message.status == "DONE", Message.result_code == "10000"
+        )
     elif status == "fail":
         base_stmt = base_stmt.where(
-            (Message.result_status == "fail")
-            | (Message.status == "UNKNOWN")
-            | (Message.status == "DELIVERY_UNCONFIRMED")
+            (Message.status == "FAILED")
+            | ((Message.status == "DONE") & (Message.result_code != "10000"))
         )
     elif status == "pending":
-        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "READY", "PROCESSING"]))
+        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "REG", "ING", "FB_PENDING"]))
 
     total_count = db.execute(
         select(func.count()).select_from(base_stmt.subquery())
@@ -278,28 +277,38 @@ async def campaign_export(
 
     base_stmt = select(Message).where(Message.campaign_id == campaign_id)
     if status == "success":
-        base_stmt = base_stmt.where(Message.result_status == "success")
+        base_stmt = base_stmt.where(
+            Message.status == "DONE", Message.result_code == "10000"
+        )
     elif status == "fail":
         base_stmt = base_stmt.where(
-            (Message.result_status == "fail")
-            | (Message.status == "UNKNOWN")
-            | (Message.status == "DELIVERY_UNCONFIRMED")
+            (Message.status == "FAILED")
+            | ((Message.status == "DONE") & (Message.result_code != "10000"))
         )
     elif status == "pending":
-        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "READY", "PROCESSING"]))
+        base_stmt = base_stmt.where(Message.status.in_(["PENDING", "REG", "ING", "FB_PENDING"]))
 
     messages = list(db.execute(base_stmt.order_by(Message.id)).scalars().all())
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["번호(정규화)", "원본입력", "상태", "결과코드", "결과메시지", "완료시각"])
+    writer.writerow(["번호", "채널", "상태", "결과코드", "결과설명", "Fallback사유", "비용(원)", "완료시각"])
     for msg in messages:
+        fb_desc = ""
+        if msg.fb_reason:
+            try:
+                fb_list = json.loads(msg.fb_reason)
+                fb_desc = "; ".join(f.get("desc", f.get("code", "")) for f in fb_list)
+            except (ValueError, TypeError):
+                fb_desc = ""
         writer.writerow([
             msg.to_number,
-            msg.to_number_raw,
-            msg.result_status or msg.status,
+            msg.channel or "",
+            "성공" if msg.result_code == "10000" else ("실패" if msg.status in ("DONE", "FAILED") else "대기"),
             msg.result_code or "",
-            msg.result_message or "",
+            msg.result_desc or "",
+            fb_desc,
+            msg.cost if msg.cost else 0,
             msg.complete_time or "",
         ])
 
@@ -327,10 +336,10 @@ async def campaign_cancel_reservation(
     권한/상태 체크:
     - 권한: sender/admin (본인 캠페인이거나 admin)
     - 상태: ``campaign.state == "RESERVED"`` 인 경우만 허용
-    - 캠페인에는 청크 수만큼 NcpRequest가 있고, 각각이 별도의 NCP 예약이다.
-      모든 NcpRequest.request_id 에 대해 개별적으로 취소를 시도한다.
+    - 캠페인에는 청크 수만큼 MsghubRequest가 있고, 각각이 별도의 msghub 예약이다.
+      모든 MsghubRequest.request_id 에 대해 개별적으로 취소를 시도한다.
     """
-    from app.ncp.client import NCPBadRequest, NCPError
+    from app.msghub.schemas import MsghubBadRequest, MsghubError
     from app.services import audit
 
     campaign = db.get(Campaign, campaign_id)
@@ -353,75 +362,29 @@ async def campaign_cancel_reservation(
             detail=f"예약 상태({campaign.state})가 아니므로 취소할 수 없습니다.",
         )
 
-    from app.main import get_ncp_client  # noqa: PLC0415
-    ncp_client = get_ncp_client()
-    if ncp_client is None:
-        raise HTTPException(status_code=503, detail="NCP 설정이 완료되지 않았습니다.")
+    from app.main import get_msghub_client  # noqa: PLC0415
+    msghub_client = get_msghub_client()
+    if msghub_client is None:
+        raise HTTPException(status_code=503, detail="msghub 설정이 완료되지 않았습니다.")
 
-    # 해당 캠페인의 모든 예약 ncp_requests 조회
-    ncp_reqs = list(
-        db.execute(
-            select(NcpRequest).where(NcpRequest.campaign_id == campaign_id)
-        ).scalars().all()
-    )
+    # msghub는 캠페인당 web_req_id 하나로 예약 취소
+    if not campaign.web_req_id:
+        raise HTTPException(status_code=400, detail="예약 ID가 없습니다.")
 
-    # 각 예약에 대해 NCP cancel 호출 + 결과 수집
-    successes: list[str] = []
-    already_gone: list[str] = []      # NCP가 READY가 아니라고 응답 (이미 실행/취소됨)
-    other_errors: list[tuple[str, str]] = []  # (request_id, error message)
-
-    for req in ncp_reqs:
-        if not req.request_id:
-            continue
-        try:
-            await ncp_client.cancel_reservation(req.request_id)
-            successes.append(req.request_id)
-        except NCPBadRequest as exc:
-            # READY 상태가 아닌 예약 — 이미 실행되었거나 이미 취소됨
-            already_gone.append(req.request_id)
-        except NCPError as exc:
-            other_errors.append((req.request_id, str(exc)))
-
-    # ── 상태 전환 정책 (B: 정밀) ──────────────────────────────────────────────
-    # already_gone 의 각 예약에 대해 get_reserve_status 로 재조회하여
-    # "이미 실행됨(DONE/PROCESSING)" vs "이미 취소됨(CANCELED/FAIL/STALE/SKIP)"
-    # 을 구분한다.
-    #
-    # - DONE/PROCESSING 이 하나라도 있으면: 이 캠페인은 실제로 이미 발송이
-    #   시작/완료된 것 → state = DISPATCHING 으로 넘겨 정상 폴링 루프에 맡긴다.
-    # - 그 외(전부 CANCELED/FAIL/STALE/SKIP)이면: RESERVE_CANCELED.
-    # - other_errors 가 있으면 HTTPException 으로 재시도 요청 (DB 변경 없음).
-    resolved_done = 0
-    for rid in already_gone:
-        try:
-            st = await ncp_client.get_reserve_status(rid)
-            if st.reserve_status in ("DONE", "PROCESSING"):
-                resolved_done += 1
-        except Exception:
-            # 조회 실패는 무시 — 재시도 여지를 남기려고 errors에 누적하지 않음.
-            pass
-
-    if other_errors:
+    try:
+        await msghub_client.cancel_reservation(campaign.web_req_id, reason="사용자 취소")
+        campaign.state = "RESERVE_CANCELED"
+        final_msg = "예약이 취소되었습니다."
+    except MsghubBadRequest as exc:
+        # 이미 실행되었거나 취소된 예약
+        campaign.state = "RESERVE_CANCELED"
+        final_msg = f"예약이 이미 처리되었습니다: {exc}"
+    except MsghubError as exc:
         db.rollback()
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"{len(other_errors)}개 예약 취소가 일시 오류로 실패했습니다. "
-                "잠시 후 다시 시도해주세요."
-            ),
+            detail=f"예약 취소 실패: {exc}. 잠시 후 다시 시도해주세요.",
         )
-
-    if resolved_done > 0:
-        # 일부/전체가 이미 실행됨 — 폴러가 정상 루프에서 집음.
-        campaign.state = "DISPATCHING"
-        final_msg = (
-            f"일부 예약이 이미 실행되었습니다 "
-            f"(취소 {len(successes)}건, 실행 {resolved_done}건). "
-            "결과는 곧 갱신됩니다."
-        )
-    else:
-        campaign.state = "RESERVE_CANCELED"
-        final_msg = f"예약이 취소되었습니다 ({len(successes)}건)."
 
     audit.log(
         db,

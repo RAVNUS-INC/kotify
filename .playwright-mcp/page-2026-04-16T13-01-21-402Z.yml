@@ -1,0 +1,340 @@
+- generic [ref=e2]:
+  - region "본문으로 건너뛰기":
+    - link "본문으로 건너뛰기" [ref=e3] [cursor=pointer]:
+      - /url: "#__docusaurus_skipToContent_fallback"
+  - navigation "메인" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "My Site Logo Msghub" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "My Site Logo" [ref=e9]
+          - generic [ref=e10]: Msghub
+        - link "API" [ref=e11] [cursor=pointer]:
+          - /url: /api/intro
+      - generic [ref=e12]:
+        - button "한국어" [ref=e14] [cursor=pointer]:
+          - img [ref=e15]
+          - text: 한국어
+        - button "어두운 모드와 밝은 모드 전환하기 (현재 밝은 모드)" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+  - generic [ref=e23]:
+    - complementary [ref=e24]:
+      - navigation "문서 사이드바" [ref=e27]:
+        - list [ref=e28]:
+          - listitem [ref=e29]:
+            - link "1. 개요" [ref=e30] [cursor=pointer]:
+              - /url: /api/intro
+          - listitem [ref=e31]:
+            - generic [ref=e32]:
+              - link "2. 메시지발송" [ref=e33] [cursor=pointer]:
+                - /url: /api/category/2-메시지발송
+              - button "사이드바 분류 '2. 메시지발송' 펼치기" [ref=e34] [cursor=pointer]
+          - listitem [ref=e35]:
+            - generic [ref=e36]:
+              - link "3. 채널관리" [ref=e37] [cursor=pointer]:
+                - /url: /api/category/3-채널관리
+              - button "사이드바 분류 '3. 채널관리' 펼치기" [ref=e38] [cursor=pointer]
+          - listitem [ref=e39]:
+            - generic [ref=e40]:
+              - link "4. 통계" [ref=e41] [cursor=pointer]:
+                - /url: /api/category/4-통계
+              - button "사이드바 분류 '4. 통계' 펼치기" [ref=e42] [cursor=pointer]
+          - listitem [ref=e43]:
+            - generic [ref=e44]:
+              - link "5. 부가서비스" [ref=e45] [cursor=pointer]:
+                - /url: /api/category/5-부가서비스
+              - button "사이드바 분류 '5. 부가서비스' 펼치기" [ref=e46] [cursor=pointer]
+    - main [ref=e47]:
+      - generic [ref=e49]:
+        - generic [ref=e51]:
+          - article [ref=e52]:
+            - navigation "탐색 경로" [ref=e53]:
+              - list [ref=e54]:
+                - listitem [ref=e55]:
+                  - link "홈" [ref=e56] [cursor=pointer]:
+                    - /url: /
+                    - img [ref=e57]
+                - listitem [ref=e59]:
+                  - generic [ref=e60]: 1. 개요
+            - generic [ref=e61]:
+              - heading "1. 개요" [level=1] [ref=e63]
+              - paragraph [ref=e64]:
+                - strong [ref=e65]: SMS, 카카오톡, RCS, 앱푸시
+                - text: 등 다양한 메시지 채널을 통합하여, 단일 플랫폼에서 메시지 발송부터 수신 결과 분석까지 전 과정을 일원화해 제공합니다. RESTful API를 통해 기업 고객은 소비자 단말기에 A2P 메시지를 다양한 채널로 손쉽게 연동 및 전송할 수 있습니다.
+              - paragraph [ref=e66]:
+                - img "image.png" [ref=e67]
+              - heading "주요 기능주요 기능에 대한 직접 링크" [level=2] [ref=e68]:
+                - text: 주요 기능
+                - link "주요 기능에 대한 직접 링크" [ref=e69] [cursor=pointer]:
+                  - /url: "#주요-기능"
+                  - text: "#"
+              - list [ref=e70]:
+                - listitem [ref=e71]:
+                  - paragraph [ref=e72]:
+                    - strong [ref=e73]: 멀티채널 메시지 발송
+                    - text: SMS/LMS/MMS, RCS, 카카오 알림톡·친구톡, 앱 푸시 등 다양한 채널을 통합하여 메시지를 발송할 수 있습니다.
+                - listitem [ref=e74]:
+                  - paragraph [ref=e75]:
+                    - strong [ref=e76]: MO(Message Originating) 수신 기능
+                    - text: 대표번호를 통해 수신된 SMS/LMS/MMS 메시지를 수집하고 처리할 수 있습니다.
+                - listitem [ref=e77]:
+                  - paragraph [ref=e78]:
+                    - strong [ref=e79]: 메시지 관리 기능
+                    - text: 메시지 템플릿 관리, 채널별 발송 통계, 수신 결과 분석 등 다양한 메시지 운영 기능을 제공합니다.
+                - listitem [ref=e80]:
+                  - paragraph [ref=e81]:
+                    - strong [ref=e82]: 부가 기능 제공
+                    - text: 080 수신거부 등록, 반응형 URL 생성 등 고객 편의 기능을 함께 제공합니다.
+              - heading "연동 환경연동 환경에 대한 직접 링크" [level=2] [ref=e83]:
+                - text: 연동 환경
+                - link "연동 환경에 대한 직접 링크" [ref=e84] [cursor=pointer]:
+                  - /url: "#연동-환경"
+                  - text: "#"
+              - heading "인터넷 연동인터넷 연동에 대한 직접 링크" [level=2] [ref=e85]:
+                - text: 인터넷 연동
+                - link "인터넷 연동에 대한 직접 링크" [ref=e86] [cursor=pointer]:
+                  - /url: "#인터넷-연동"
+                  - text: "#"
+              - list [ref=e87]:
+                - listitem [ref=e88]: 인터넷 연동 시 고정 IP가 필요한 경우, 고객센터로 별도 요청이 필요합니다.
+              - heading "인증, 리포트 요청 API인증, 리포트 요청 API에 대한 직접 링크" [level=5] [ref=e89]:
+                - text: 인증, 리포트 요청 API
+                - link "인증, 리포트 요청 API에 대한 직접 링크" [ref=e90] [cursor=pointer]:
+                  - /url: "#인증-리포트-요청-api"
+                  - text: "#"
+              - table [ref=e91]:
+                - rowgroup [ref=e92]:
+                  - row "구분 접속 URL" [ref=e93]:
+                    - columnheader "구분" [ref=e94]
+                    - columnheader "접속 URL" [ref=e95]
+                - rowgroup [ref=e96]:
+                  - row "상용 https://api.msghub.uplus.co.kr" [ref=e97]:
+                    - cell "상용" [ref=e98]
+                    - cell "https://api.msghub.uplus.co.kr" [ref=e99]:
+                      - code [ref=e100]: https://api.msghub.uplus.co.kr
+                  - row "검수 https://api.msghub-qa.uplus.co.kr" [ref=e101]:
+                    - cell "검수" [ref=e102]
+                    - cell "https://api.msghub-qa.uplus.co.kr" [ref=e103]:
+                      - code [ref=e104]: https://api.msghub-qa.uplus.co.kr
+              - heading "채널별 메시지 발송 API채널별 메시지 발송 API에 대한 직접 링크" [level=5] [ref=e105]:
+                - text: 채널별 메시지 발송 API
+                - link "채널별 메시지 발송 API에 대한 직접 링크" [ref=e106] [cursor=pointer]:
+                  - /url: "#채널별-메시지-발송-api"
+                  - text: "#"
+              - table [ref=e107]:
+                - rowgroup [ref=e108]:
+                  - row "구분 접속 URL" [ref=e109]:
+                    - columnheader "구분" [ref=e110]
+                    - columnheader "접속 URL" [ref=e111]
+                - rowgroup [ref=e112]:
+                  - row "상용 https://api-send.msghub.uplus.co.kr" [ref=e113]:
+                    - cell "상용" [ref=e114]
+                    - cell "https://api-send.msghub.uplus.co.kr" [ref=e115]:
+                      - code [ref=e116]: https://api-send.msghub.uplus.co.kr
+                  - row "검수 https://api-send.msghub-qa.uplus.co.kr" [ref=e117]:
+                    - cell "검수" [ref=e118]
+                    - cell "https://api-send.msghub-qa.uplus.co.kr" [ref=e119]:
+                      - code [ref=e120]: https://api-send.msghub-qa.uplus.co.kr
+              - heading "채널별 관리용 API채널별 관리용 API에 대한 직접 링크" [level=5] [ref=e121]:
+                - text: 채널별 관리용 API
+                - link "채널별 관리용 API에 대한 직접 링크" [ref=e122] [cursor=pointer]:
+                  - /url: "#채널별-관리용-api"
+                  - text: "#"
+              - table [ref=e123]:
+                - rowgroup [ref=e124]:
+                  - row "구분 접속 URL" [ref=e125]:
+                    - columnheader "구분" [ref=e126]
+                    - columnheader "접속 URL" [ref=e127]
+                - rowgroup [ref=e128]:
+                  - row "상용 https://mnt-api.msghub.uplus.co.kr" [ref=e129]:
+                    - cell "상용" [ref=e130]
+                    - cell "https://mnt-api.msghub.uplus.co.kr" [ref=e131]:
+                      - code [ref=e132]: https://mnt-api.msghub.uplus.co.kr
+                  - row "검수 https://mnt-api.msghub-qa.uplus.co.kr" [ref=e133]:
+                    - cell "검수" [ref=e134]
+                    - cell "https://mnt-api.msghub-qa.uplus.co.kr" [ref=e135]:
+                      - code [ref=e136]: https://mnt-api.msghub-qa.uplus.co.kr
+              - separator [ref=e137]
+              - heading "전용회선 연동전용회선 연동에 대한 직접 링크" [level=2] [ref=e138]:
+                - text: 전용회선 연동
+                - link "전용회선 연동에 대한 직접 링크" [ref=e139] [cursor=pointer]:
+                  - /url: "#전용회선-연동"
+                  - text: "#"
+              - list [ref=e140]:
+                - listitem [ref=e141]: 전용회선 연동 시 방화벽 작업이 필요함으로 고객센터로 별도 요청바랍니다.
+              - heading "인증, 리포트 요청 API인증, 리포트 요청 API에 대한 직접 링크" [level=5] [ref=e142]:
+                - text: 인증, 리포트 요청 API
+                - link "인증, 리포트 요청 API에 대한 직접 링크" [ref=e143] [cursor=pointer]:
+                  - /url: "#인증-리포트-요청-api-1"
+                  - text: "#"
+              - table [ref=e144]:
+                - rowgroup [ref=e145]:
+                  - row "구분 접속 URL IP 주소 포트" [ref=e146]:
+                    - columnheader "구분" [ref=e147]
+                    - columnheader "접속 URL" [ref=e148]
+                    - columnheader "IP 주소" [ref=e149]
+                    - columnheader "포트" [ref=e150]
+                - rowgroup [ref=e151]:
+                  - row "상용 https://api-direct.msghub.uplus.co.kr 1.209.4.60 또는 1.209.4.75 443" [ref=e152]:
+                    - cell "상용" [ref=e153]
+                    - cell "https://api-direct.msghub.uplus.co.kr" [ref=e154]:
+                      - code [ref=e155]: https://api-direct.msghub.uplus.co.kr
+                    - cell "1.209.4.60 또는 1.209.4.75" [ref=e156]
+                    - cell "443" [ref=e157]
+                  - row "검수 https://api-direct.msghub-qa.uplus.co.kr 1.209.4.92 또는 1.209.4.105 443" [ref=e158]:
+                    - cell "검수" [ref=e159]
+                    - cell "https://api-direct.msghub-qa.uplus.co.kr" [ref=e160]:
+                      - code [ref=e161]: https://api-direct.msghub-qa.uplus.co.kr
+                    - cell "1.209.4.92 또는 1.209.4.105" [ref=e162]
+                    - cell "443" [ref=e163]
+              - heading "채널별 메시지 발송 API채널별 메시지 발송 API에 대한 직접 링크" [level=5] [ref=e164]:
+                - text: 채널별 메시지 발송 API
+                - link "채널별 메시지 발송 API에 대한 직접 링크" [ref=e165] [cursor=pointer]:
+                  - /url: "#채널별-메시지-발송-api-1"
+                  - text: "#"
+              - table [ref=e166]:
+                - rowgroup [ref=e167]:
+                  - row "구분 접속 URL IP 주소 포트" [ref=e168]:
+                    - columnheader "구분" [ref=e169]
+                    - columnheader "접속 URL" [ref=e170]
+                    - columnheader "IP 주소" [ref=e171]
+                    - columnheader "포트" [ref=e172]
+                - rowgroup [ref=e173]:
+                  - row "상용 https://api-send-direct.msghub.uplus.co.kr ... ..." [ref=e174]:
+                    - cell "상용" [ref=e175]
+                    - cell "https://api-send-direct.msghub.uplus.co.kr" [ref=e176]:
+                      - code [ref=e177]: https://api-send-direct.msghub.uplus.co.kr
+                    - cell "..." [ref=e178]
+                    - cell "..." [ref=e179]
+                  - row "검수 https://api-send-direct.msghub-qa.uplus.co.kr ... ..." [ref=e180]:
+                    - cell "검수" [ref=e181]
+                    - cell "https://api-send-direct.msghub-qa.uplus.co.kr" [ref=e182]:
+                      - code [ref=e183]: https://api-send-direct.msghub-qa.uplus.co.kr
+                    - cell "..." [ref=e184]
+                    - cell "..." [ref=e185]
+              - heading "채널별 관리용 API채널별 관리용 API에 대한 직접 링크" [level=5] [ref=e186]:
+                - text: 채널별 관리용 API
+                - link "채널별 관리용 API에 대한 직접 링크" [ref=e187] [cursor=pointer]:
+                  - /url: "#채널별-관리용-api-1"
+                  - text: "#"
+              - table [ref=e188]:
+                - rowgroup [ref=e189]:
+                  - row "구분 접속 URL IP 주소 포트" [ref=e190]:
+                    - columnheader "구분" [ref=e191]
+                    - columnheader "접속 URL" [ref=e192]
+                    - columnheader "IP 주소" [ref=e193]
+                    - columnheader "포트" [ref=e194]
+                - rowgroup [ref=e195]:
+                  - row "상용 https://mnt-api-direct.msghub.uplus.co.kr ... ..." [ref=e196]:
+                    - cell "상용" [ref=e197]
+                    - cell "https://mnt-api-direct.msghub.uplus.co.kr" [ref=e198]:
+                      - code [ref=e199]: https://mnt-api-direct.msghub.uplus.co.kr
+                    - cell "..." [ref=e200]
+                    - cell "..." [ref=e201]
+                  - row "검수 https://mnt-api-direct.msghub-qa.uplus.co.kr ... ..." [ref=e202]:
+                    - cell "검수" [ref=e203]
+                    - cell "https://mnt-api-direct.msghub-qa.uplus.co.kr" [ref=e204]:
+                      - code [ref=e205]: https://mnt-api-direct.msghub-qa.uplus.co.kr
+                    - cell "..." [ref=e206]
+                    - cell "..." [ref=e207]
+              - separator [ref=e208]
+              - heading "HTTP Method 및 Content-TypeHTTP Method 및 Content-Type에 대한 직접 링크" [level=2] [ref=e209]:
+                - text: HTTP Method 및 Content-Type
+                - link "HTTP Method 및 Content-Type에 대한 직접 링크" [ref=e210] [cursor=pointer]:
+                  - /url: "#http-method-및-content-type"
+                  - text: "#"
+              - list [ref=e211]:
+                - listitem [ref=e212]: "API 호출 시 HTTP Method는 아래의 일반적인 규칙을 따릅니다:"
+              - table [ref=e213]:
+                - rowgroup [ref=e214]:
+                  - row "작업 유형 HTTP Method" [ref=e215]:
+                    - columnheader "작업 유형" [ref=e216]
+                    - columnheader "HTTP Method" [ref=e217]
+                - rowgroup [ref=e218]:
+                  - row "생성 (Create) POST" [ref=e219]:
+                    - cell "생성 (Create)" [ref=e220]
+                    - cell "POST" [ref=e221]:
+                      - code [ref=e222]: POST
+                  - row "조회 (Read) GET" [ref=e223]:
+                    - cell "조회 (Read)" [ref=e224]
+                    - cell "GET" [ref=e225]:
+                      - code [ref=e226]: GET
+                  - row "수정 (Update) PUT" [ref=e227]:
+                    - cell "수정 (Update)" [ref=e228]
+                    - cell "PUT" [ref=e229]:
+                      - code [ref=e230]: PUT
+                  - row "삭제 (Delete) DELETE" [ref=e231]:
+                    - cell "삭제 (Delete)" [ref=e232]
+                    - cell "DELETE" [ref=e233]:
+                      - code [ref=e234]: DELETE
+              - list [ref=e235]:
+                - listitem [ref=e236]:
+                  - paragraph [ref=e237]: "Content-Type:"
+                  - list [ref=e238]:
+                    - listitem [ref=e239]:
+                      - text: "기본 요청 및 응답:"
+                      - code [ref=e240]: application/json
+                    - listitem [ref=e241]:
+                      - text: "파일 업로드 시:"
+                      - code [ref=e242]: multipart/form-data
+                - listitem [ref=e243]:
+                  - paragraph [ref=e244]:
+                    - text: "Character Encoding:"
+                    - code [ref=e245]: UTF-8
+          - navigation "문서 페이지" [ref=e246]:
+            - link "다음 2. 메시지발송 »" [ref=e247] [cursor=pointer]:
+              - /url: /api/category/2-메시지발송
+              - generic [ref=e248]: 다음
+              - generic [ref=e249]: 2. 메시지발송 »
+        - list [ref=e252]:
+          - listitem [ref=e253]:
+            - link "주요 기능" [ref=e254] [cursor=pointer]:
+              - /url: "#주요-기능"
+          - listitem [ref=e255]:
+            - link "연동 환경" [ref=e256] [cursor=pointer]:
+              - /url: "#연동-환경"
+          - listitem [ref=e257]:
+            - link "인터넷 연동" [ref=e258] [cursor=pointer]:
+              - /url: "#인터넷-연동"
+          - listitem [ref=e259]:
+            - link "전용회선 연동" [ref=e260] [cursor=pointer]:
+              - /url: "#전용회선-연동"
+          - listitem [ref=e261]:
+            - link "HTTP Method 및 Content-Type" [ref=e262] [cursor=pointer]:
+              - /url: "#http-method-및-content-type"
+  - contentinfo [ref=e263]:
+    - generic [ref=e264]:
+      - generic [ref=e265]:
+        - generic [ref=e266]:
+          - generic [ref=e267]: Support
+          - list [ref=e268]:
+            - listitem [ref=e269]:
+              - link "msghub-snap-agent" [ref=e270] [cursor=pointer]:
+                - /url: https://msghub-agent.notion.site/
+                - text: msghub-snap-agent
+                - img [ref=e271]
+            - listitem [ref=e273]:
+              - link "msghub-restapi-sample-code" [ref=e274] [cursor=pointer]:
+                - /url: https://total-msg-hub.github.io/restapi_sample/
+                - text: msghub-restapi-sample-code
+                - img [ref=e275]
+        - generic [ref=e277]:
+          - generic [ref=e278]: Community
+          - list [ref=e279]:
+            - listitem [ref=e280]:
+              - link "U+" [ref=e281] [cursor=pointer]:
+                - /url: https://www.lguplus.com/
+                - text: U+
+                - img [ref=e282]
+        - generic [ref=e284]:
+          - generic [ref=e285]: Privacy Policy
+          - list [ref=e286]:
+            - listitem [ref=e287]:
+              - link "Policy guide" [ref=e288] [cursor=pointer]:
+                - /url: https://privacy.lguplus.com/2545ce4416cc4e3b9d9488b94690ba27/privacy/info/v1/1
+                - text: Policy guide
+                - img [ref=e289]
+      - generic [ref=e293]:
+        - text: ㈜엘지유플러스 서울특별시 용산구 한강대로 32
+        - text: 대표이사 홍범식 | 사업자번호 220-81-39938 | 통신판매신고 제 2010-서울중구-0968호 | 1544-5992 | smshelp@lguplus.co.kr
+        - text: Copyright ⓒ LG Uplus Corp. All Rights Reserved.

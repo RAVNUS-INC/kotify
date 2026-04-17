@@ -1,0 +1,803 @@
+- generic [ref=e2]:
+  - region "본문으로 건너뛰기":
+    - link "본문으로 건너뛰기" [ref=e3] [cursor=pointer]:
+      - /url: "#__docusaurus_skipToContent_fallback"
+  - navigation "메인" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "My Site Logo Msghub" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "My Site Logo" [ref=e9]
+          - generic [ref=e10]: Msghub
+        - link "API" [ref=e11] [cursor=pointer]:
+          - /url: /api/intro
+      - generic [ref=e12]:
+        - button "한국어" [ref=e14] [cursor=pointer]:
+          - img [ref=e15]
+          - text: 한국어
+        - button "어두운 모드와 밝은 모드 전환하기 (현재 밝은 모드)" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+  - generic [ref=e23]:
+    - complementary [ref=e24]:
+      - navigation "문서 사이드바" [ref=e27]:
+        - list [ref=e28]:
+          - listitem [ref=e29]:
+            - link "1. 개요" [ref=e30] [cursor=pointer]:
+              - /url: /api/intro
+          - listitem [ref=e31]:
+            - generic [ref=e32]:
+              - link "2. 메시지발송" [ref=e33] [cursor=pointer]:
+                - /url: /api/category/2-메시지발송
+              - button "사이드바 분류 '2. 메시지발송' 펼치기" [ref=e34] [cursor=pointer]
+          - listitem [ref=e35]:
+            - generic [ref=e36]:
+              - link "3. 채널관리" [ref=e37] [cursor=pointer]:
+                - /url: /api/category/3-채널관리
+              - button "사이드바 분류 '3. 채널관리' 접기" [expanded] [ref=e38] [cursor=pointer]
+            - list [ref=e39]:
+              - listitem [ref=e40]:
+                - link "3.1 인증" [ref=e41] [cursor=pointer]:
+                  - /url: /api/channel-management/03.01.mnt-auth
+              - listitem [ref=e42]:
+                - link "3.2 컨텐츠(이미지) 관리" [ref=e43] [cursor=pointer]:
+                  - /url: /api/channel-management/03.02.mnt-contents
+              - listitem [ref=e44]:
+                - link "3.3 카카오 V2" [ref=e45] [cursor=pointer]:
+                  - /url: /api/channel-management/03.03.mnt-kko_v2
+              - listitem [ref=e46]:
+                - link "3.4 카카오 V2 브랜드톡" [ref=e47] [cursor=pointer]:
+                  - /url: /api/channel-management/03.04.mnt-kko_v2-brandtalk
+              - listitem [ref=e48]:
+                - link "3.5 RCS" [ref=e49] [cursor=pointer]:
+                  - /url: /api/channel-management/03.05.mnt-rcs
+              - listitem [ref=e50]:
+                - link "3.6 문자 메시지 / 통합발송" [ref=e51] [cursor=pointer]:
+                  - /url: /api/channel-management/03.06.api-xms-smart
+          - listitem [ref=e52]:
+            - generic [ref=e53]:
+              - link "4. 통계" [ref=e54] [cursor=pointer]:
+                - /url: /api/category/4-통계
+              - button "사이드바 분류 '4. 통계' 펼치기" [ref=e55] [cursor=pointer]
+          - listitem [ref=e56]:
+            - generic [ref=e57]:
+              - link "5. 부가서비스" [ref=e58] [cursor=pointer]:
+                - /url: /api/category/5-부가서비스
+              - button "사이드바 분류 '5. 부가서비스' 펼치기" [ref=e59] [cursor=pointer]
+    - main [ref=e60]:
+      - generic [ref=e62]:
+        - generic [ref=e64]:
+          - article [ref=e65]:
+            - navigation "탐색 경로" [ref=e66]:
+              - list [ref=e67]:
+                - listitem [ref=e68]:
+                  - link "홈" [ref=e69] [cursor=pointer]:
+                    - /url: /
+                    - img [ref=e70]
+                - listitem [ref=e72]:
+                  - link "3. 채널관리" [ref=e73] [cursor=pointer]:
+                    - /url: /api/category/3-채널관리
+                - listitem [ref=e74]:
+                  - generic [ref=e75]: 3.2 컨텐츠(이미지) 관리
+            - generic [ref=e76]:
+              - heading "3.2 컨텐츠(이미지) 관리" [level=1] [ref=e78]
+              - heading "목차목차에 대한 직접 링크" [level=2] [ref=e79]:
+                - text: 목차
+                - link "목차에 대한 직접 링크" [ref=e80] [cursor=pointer]:
+                  - /url: "#목차"
+                  - text: "#"
+              - list [ref=e81]:
+                - listitem [ref=e82]:
+                  - link "1. 파일 업로드" [ref=e83] [cursor=pointer]:
+                    - /url: "#1-%ED%8C%8C%EC%9D%BC-%EC%97%85%EB%A1%9C%EB%93%9C"
+                - listitem [ref=e84]:
+                  - link "2. 컨텐츠 조회" [ref=e85] [cursor=pointer]:
+                    - /url: "#2-%EC%BB%A8%ED%85%90%EC%B8%A0-%EC%A1%B0%ED%9A%8C"
+                - listitem [ref=e86]:
+                  - link "Appendix" [ref=e87] [cursor=pointer]:
+                    - /url: "#appendix"
+              - heading "베이스 URL베이스 URL에 대한 직접 링크" [level=2] [ref=e88]:
+                - text: 베이스 URL
+                - link "베이스 URL에 대한 직접 링크" [ref=e89] [cursor=pointer]:
+                  - /url: "#베이스-url"
+                  - text: "#"
+              - table [ref=e90]:
+                - rowgroup [ref=e91]:
+                  - row "구분 접속 URL" [ref=e92]:
+                    - columnheader "구분" [ref=e93]
+                    - columnheader "접속 URL" [ref=e94]
+                - rowgroup [ref=e95]:
+                  - row "상용 https://mnt-api.msghub.uplus.co.kr" [ref=e96]:
+                    - cell "상용" [ref=e97]
+                    - cell "https://mnt-api.msghub.uplus.co.kr" [ref=e98]:
+                      - code [ref=e99]: https://mnt-api.msghub.uplus.co.kr
+                  - row "검수 https://mnt-api.msghub-qa.uplus.co.kr" [ref=e100]:
+                    - cell "검수" [ref=e101]
+                    - cell "https://mnt-api.msghub-qa.uplus.co.kr" [ref=e102]:
+                      - code [ref=e103]: https://mnt-api.msghub-qa.uplus.co.kr
+              - heading "1. 파일 업로드1. 파일 업로드에 대한 직접 링크" [level=2] [ref=e104]:
+                - text: 1. 파일 업로드
+                - link "1. 파일 업로드에 대한 직접 링크" [ref=e105] [cursor=pointer]:
+                  - /url: "#1-파일-업로드"
+                  - text: "#"
+              - paragraph [ref=e106]: 메시지 발송에 필요한 이미지나 파일을 등록합니다. 각 채널별 특성에 맞는 파일 형식과 크기를 준수해야 합니다.
+              - heading "📌 주의사항📌 주의사항에 대한 직접 링크" [level=3] [ref=e107]:
+                - text: 📌 주의사항
+                - link "📌 주의사항에 대한 직접 링크" [ref=e108] [cursor=pointer]:
+                  - /url: "#-주의사항"
+                  - text: "#"
+              - list [ref=e109]:
+                - listitem [ref=e110]: 파일 ID는 고유해야 하며, 이미 등록된 ID는 사용할 수 없습니다.
+                - listitem [ref=e111]: 파일 크기는 채널별 제한을 초과할 수 없습니다.
+                - listitem [ref=e112]: 파일 형식은 채널별 지원 형식을 준수해야 합니다.
+                - listitem [ref=e113]: 등록된 파일은 유효기간이 있으며, 만료 시 재등록이 필요합니다.
+                - listitem [ref=e114]: 브랜드톡의 경우 이미지형, 비디오형 썸네일, 커머스형 imgType은 IMAGE 입니다.
+              - separator [ref=e115]
+              - heading "1) 요청 (Request)1) 요청 (Request)에 대한 직접 링크" [level=3] [ref=e116]:
+                - text: 1) 요청 (Request)
+                - link "1) 요청 (Request)에 대한 직접 링크" [ref=e117] [cursor=pointer]:
+                  - /url: "#1-요청-request"
+                  - text: "#"
+              - heading "URLURL에 대한 직접 링크" [level=4] [ref=e118]:
+                - text: URL
+                - link "URL에 대한 직접 링크" [ref=e119] [cursor=pointer]:
+                  - /url: "#url"
+                  - text: "#"
+              - generic [ref=e121]:
+                - code [ref=e123]:
+                  - generic [ref=e124]: "POST /file/v1/{ch} HTTP/1.1"
+                - button "클립보드에 코드 복사" [ref=e126] [cursor=pointer]:
+                  - generic [ref=e127]:
+                    - img [ref=e128]
+                    - img [ref=e130]
+              - heading "HeadersHeaders에 대한 직접 링크" [level=4] [ref=e132]:
+                - text: Headers
+                - link "Headers에 대한 직접 링크" [ref=e133] [cursor=pointer]:
+                  - /url: "#headers"
+                  - text: "#"
+              - table [ref=e134]:
+                - rowgroup [ref=e135]:
+                  - row "Name Type 필수 설명" [ref=e136]:
+                    - columnheader "Name" [ref=e137]
+                    - columnheader "Type" [ref=e138]
+                    - columnheader "필수" [ref=e139]
+                    - columnheader "설명" [ref=e140]
+                - rowgroup [ref=e141]:
+                  - row "Authorization String ● 사용자 인증 토큰" [ref=e142]:
+                    - cell "Authorization" [ref=e143]
+                    - cell "String" [ref=e144]
+                    - cell "●" [ref=e145]
+                    - cell "사용자 인증 토큰" [ref=e146]
+                  - row "Content-Type String ● multipart/form-data" [ref=e147]:
+                    - cell "Content-Type" [ref=e148]
+                    - cell "String" [ref=e149]
+                    - cell "●" [ref=e150]
+                    - cell "multipart/form-data" [ref=e151]:
+                      - code [ref=e152]: multipart/form-data
+              - heading "Path ParametersPath Parameters에 대한 직접 링크" [level=4] [ref=e153]:
+                - text: Path Parameters
+                - link "Path Parameters에 대한 직접 링크" [ref=e154] [cursor=pointer]:
+                  - /url: "#path-parameters"
+                  - text: "#"
+              - table [ref=e155]:
+                - rowgroup [ref=e156]:
+                  - row "Name Type 필수 설명" [ref=e157]:
+                    - columnheader "Name" [ref=e158]
+                    - columnheader "Type" [ref=e159]
+                    - columnheader "필수" [ref=e160]
+                    - columnheader "설명" [ref=e161]
+                - rowgroup [ref=e162]:
+                  - row "ch String ● 채널(mms/rcs/friendtalk/brandtalk/push/rbc/rbc_bia)" [ref=e163]:
+                    - cell "ch" [ref=e164]
+                    - cell "String" [ref=e165]
+                    - cell "●" [ref=e166]
+                    - cell "채널(mms/rcs/friendtalk/brandtalk/push/rbc/rbc_bia)" [ref=e167]
+              - heading "Request BodyRequest Body에 대한 직접 링크" [level=4] [ref=e168]:
+                - text: Request Body
+                - link "Request Body에 대한 직접 링크" [ref=e169] [cursor=pointer]:
+                  - /url: "#request-body"
+                  - text: "#"
+              - table [ref=e170]:
+                - rowgroup [ref=e171]:
+                  - row "Name Type 필수 설명" [ref=e172]:
+                    - columnheader "Name" [ref=e173]
+                    - columnheader "Type" [ref=e174]
+                    - columnheader "필수" [ref=e175]
+                    - columnheader "설명" [ref=e176]
+                - rowgroup [ref=e177]:
+                  - row "reqFile Object ● 파일 요청 정보" [ref=e178]:
+                    - cell "reqFile" [ref=e179]
+                    - cell "Object" [ref=e180]
+                    - cell "●" [ref=e181]
+                    - cell "파일 요청 정보" [ref=e182]
+                  - row "filePart Array ● 파일 목록" [ref=e183]:
+                    - cell "filePart" [ref=e184]
+                    - cell "Array" [ref=e185]
+                    - cell "●" [ref=e186]
+                    - cell "파일 목록" [ref=e187]
+              - heading "reqFile 객체reqFile 객체에 대한 직접 링크" [level=5] [ref=e188]:
+                - text: reqFile 객체
+                - link "reqFile 객체에 대한 직접 링크" [ref=e189] [cursor=pointer]:
+                  - /url: "#reqfile-객체"
+                  - text: "#"
+              - table [ref=e190]:
+                - rowgroup [ref=e191]:
+                  - row "Name Type 필수 설명" [ref=e192]:
+                    - columnheader "Name" [ref=e193]
+                    - columnheader "Type" [ref=e194]
+                    - columnheader "필수" [ref=e195]
+                    - columnheader "설명" [ref=e196]
+                - rowgroup [ref=e197]:
+                  - row "fileId String ● 파일 ID (고유값)" [ref=e198]:
+                    - cell "fileId" [ref=e199]
+                    - cell "String" [ref=e200]
+                    - cell "●" [ref=e201]
+                    - cell "파일 ID (고유값)" [ref=e202]
+                  - row "imgType String ● 브랜드톡의 경우 필수, 템플릿 유형 (IMAGE, WIDE, WIDE_ITEM_LIST, CAROUSEL_FEED, CAROUSEL_COMMERCE)" [ref=e203]:
+                    - cell "imgType" [ref=e204]
+                    - cell "String" [ref=e205]
+                    - cell "●" [ref=e206]
+                    - cell "브랜드톡의 경우 필수, 템플릿 유형 (IMAGE, WIDE, WIDE_ITEM_LIST, CAROUSEL_FEED, CAROUSEL_COMMERCE)" [ref=e207]
+                  - row "kkoItemListFirstYn String - 브랜드톡의 경우 필수, 브랜드톡 와이드아이템리스트의 첫번째 이미지 여부 (Y/N)" [ref=e208]:
+                    - cell "kkoItemListFirstYn" [ref=e209]
+                    - cell "String" [ref=e210]
+                    - cell "-" [ref=e211]
+                    - cell "브랜드톡의 경우 필수, 브랜드톡 와이드아이템리스트의 첫번째 이미지 여부 (Y/N)" [ref=e212]
+                  - row "wideYn String - 카카오 와이드 이미지 여부 (Y/N)" [ref=e213]:
+                    - cell "wideYn" [ref=e214]
+                    - cell "String" [ref=e215]
+                    - cell "-" [ref=e216]
+                    - cell "카카오 와이드 이미지 여부 (Y/N)" [ref=e217]
+                  - row "kkoItemListYn String - 카카오 아이템리스트 여부 (Y/N)" [ref=e218]:
+                    - cell "kkoItemListYn" [ref=e219]
+                    - cell "String" [ref=e220]
+                    - cell "-" [ref=e221]
+                    - cell "카카오 아이템리스트 여부 (Y/N)" [ref=e222]
+                  - row "kkoCarouselFeedYn String - 카카오 캐러셀 피드 여부 (Y/N)" [ref=e223]:
+                    - cell "kkoCarouselFeedYn" [ref=e224]
+                    - cell "String" [ref=e225]
+                    - cell "-" [ref=e226]
+                    - cell "카카오 캐러셀 피드 여부 (Y/N)" [ref=e227]
+                  - row "kkoCarouselCommerceYn String - 카카오 캐러셀 커머스 여부 (Y/N)" [ref=e228]:
+                    - cell "kkoCarouselCommerceYn" [ref=e229]
+                    - cell "String" [ref=e230]
+                    - cell "-" [ref=e231]
+                    - cell "카카오 캐러셀 커머스 여부 (Y/N)" [ref=e232]
+                  - row "brandId String - RCS 브랜드 ID" [ref=e233]:
+                    - cell "brandId" [ref=e234]
+                    - cell "String" [ref=e235]
+                    - cell "-" [ref=e236]
+                    - cell "RCS 브랜드 ID" [ref=e237]
+              - separator [ref=e238]
+              - heading "2) 응답 (Response)2) 응답 (Response)에 대한 직접 링크" [level=3] [ref=e239]:
+                - text: 2) 응답 (Response)
+                - link "2) 응답 (Response)에 대한 직접 링크" [ref=e240] [cursor=pointer]:
+                  - /url: "#2-응답-response"
+                  - text: "#"
+              - heading "Response BodyResponse Body에 대한 직접 링크" [level=4] [ref=e241]:
+                - text: Response Body
+                - link "Response Body에 대한 직접 링크" [ref=e242] [cursor=pointer]:
+                  - /url: "#response-body"
+                  - text: "#"
+              - table [ref=e243]:
+                - rowgroup [ref=e244]:
+                  - row "Name Type 설명" [ref=e245]:
+                    - columnheader "Name" [ref=e246]
+                    - columnheader "Type" [ref=e247]
+                    - columnheader "설명" [ref=e248]
+                - rowgroup [ref=e249]:
+                  - row "code String 결과 코드" [ref=e250]:
+                    - cell "code" [ref=e251]
+                    - cell "String" [ref=e252]
+                    - cell "결과 코드" [ref=e253]
+                  - row "message String 결과 메시지" [ref=e254]:
+                    - cell "message" [ref=e255]
+                    - cell "String" [ref=e256]
+                    - cell "결과 메시지" [ref=e257]
+                  - row "data Object 결과 데이터 정보" [ref=e258]:
+                    - cell "data" [ref=e259]
+                    - cell "Object" [ref=e260]
+                    - cell "결과 데이터 정보" [ref=e261]
+                  - row "data.ch String 채널" [ref=e262]:
+                    - cell "data.ch" [ref=e263]
+                    - cell "String" [ref=e264]
+                    - cell "채널" [ref=e265]
+                  - row "data.imgUrl String 이미지 URL (카카오)" [ref=e266]:
+                    - cell "data.imgUrl" [ref=e267]
+                    - cell "String" [ref=e268]
+                    - cell "이미지 URL (카카오)" [ref=e269]
+                  - row "data.imgUrlLst Array 이미지 URL 목록 (카카오)" [ref=e270]:
+                    - cell "data.imgUrlLst" [ref=e271]
+                    - cell "Array" [ref=e272]
+                    - cell "이미지 URL 목록 (카카오)" [ref=e273]
+                  - row "data.fileId String 파일 ID" [ref=e274]:
+                    - cell "data.fileId" [ref=e275]
+                    - cell "String" [ref=e276]
+                    - cell "파일 ID" [ref=e277]
+                  - row "data.fileExpDt String 파일 만료일시" [ref=e278]:
+                    - cell "data.fileExpDt" [ref=e279]
+                    - cell "String" [ref=e280]
+                    - cell "파일 만료일시" [ref=e281]
+              - separator [ref=e282]
+              - heading "3) 요청 예시 (Sample)3) 요청 예시 (Sample)에 대한 직접 링크" [level=3] [ref=e283]:
+                - text: 3) 요청 예시 (Sample)
+                - link "3) 요청 예시 (Sample)에 대한 직접 링크" [ref=e284] [cursor=pointer]:
+                  - /url: "#3-요청-예시-sample"
+                  - text: "#"
+              - heading "CurlCurl에 대한 직접 링크" [level=4] [ref=e285]:
+                - text: Curl
+                - link "Curl에 대한 직접 링크" [ref=e286] [cursor=pointer]:
+                  - /url: "#curl"
+                  - text: "#"
+              - generic [ref=e288]:
+                - code [ref=e290]:
+                  - generic [ref=e291]: curl -X POST "https://mnt-api.msghub.uplus.co.kr/file/v1/brandtalk" \
+                  - generic [ref=e292]: "-H \"accept: */*\" \\"
+                  - generic [ref=e293]: "-H \"Content-Type: multipart/form-data\" \\"
+                  - generic [ref=e294]: "-H \"Authorization: Bearer {token}\" \\"
+                  - generic [ref=e295]: "-F \"reqFile={"
+                  - generic [ref=e296]: "\"fileId\": \"my_image_01\","
+                  - generic [ref=e297]: "\"imgType\": \"WIDE_ITEM_LIST\","
+                  - generic [ref=e298]: "\"kkoItemListFirstYn\": \"Y\","
+                  - generic [ref=e299]: "\"wideYn\": \"N\","
+                  - generic [ref=e300]: "\"kkoItemListYn\": \"N\","
+                  - generic [ref=e301]: "\"kkoCarouselFeedYn\": \"N\","
+                  - generic [ref=e302]: "\"kkoCarouselCommerceYn\": \"N\""
+                  - generic [ref=e303]: "}\" -F \"filePart=@100.jpg;type=image/jpeg\""
+                - generic [ref=e304]:
+                  - button "줄 바꿈 전환" [ref=e305] [cursor=pointer]:
+                    - img [ref=e306]
+                  - button "클립보드에 코드 복사" [ref=e308] [cursor=pointer]:
+                    - generic [ref=e309]:
+                      - img [ref=e310]
+                      - img [ref=e312]
+              - heading "JSON ResponseJSON Response에 대한 직접 링크" [level=4] [ref=e314]:
+                - text: JSON Response
+                - link "JSON Response에 대한 직접 링크" [ref=e315] [cursor=pointer]:
+                  - /url: "#json-response"
+                  - text: "#"
+              - generic [ref=e317]:
+                - code [ref=e319]:
+                  - generic [ref=e320]: "{"
+                  - generic [ref=e321]: "\"code\": \"10000\","
+                  - generic [ref=e322]: "\"message\": \"성공\","
+                  - generic [ref=e323]: "\"data\": {"
+                  - generic [ref=e324]: "\"ch\": \"brandtalk\","
+                  - generic [ref=e325]: "\"imgUrl\": \"https://mud-kage.kakao.com/dn/b....I/lEC.......Xk/img.jpg\","
+                  - generic [ref=e326]: "\"imgUrlLst\": [\"https://mud-kage.kakao.com/dn/bt...zI/lE......Xk/img.jpg\", ...],"
+                  - generic [ref=e327]: "\"fileId\": \"my_image_01\","
+                  - generic [ref=e328]: "\"fileExpDt\": \"2026-07-09T09:48:35\""
+                  - generic [ref=e329]: "}"
+                  - generic [ref=e330]: "}"
+                - generic [ref=e331]:
+                  - button "줄 바꿈 전환" [ref=e332] [cursor=pointer]:
+                    - img [ref=e333]
+                  - button "클립보드에 코드 복사" [ref=e335] [cursor=pointer]:
+                    - generic [ref=e336]:
+                      - img [ref=e337]
+                      - img [ref=e339]
+              - heading "2. 컨텐츠 조회2. 컨텐츠 조회에 대한 직접 링크" [level=2] [ref=e341]:
+                - text: 2. 컨텐츠 조회
+                - link "2. 컨텐츠 조회에 대한 직접 링크" [ref=e342] [cursor=pointer]:
+                  - /url: "#2-컨텐츠-조회"
+                  - text: "#"
+              - paragraph [ref=e343]: 등록된 컨텐츠(파일)를 조회합니다. 파일의 메타데이터와 실제 데이터를 함께 조회할 수 있습니다.
+              - heading "📌 주의사항📌 주의사항에 대한 직접 링크" [level=3] [ref=e344]:
+                - text: 📌 주의사항
+                - link "📌 주의사항에 대한 직접 링크" [ref=e345] [cursor=pointer]:
+                  - /url: "#-주의사항-1"
+                  - text: "#"
+              - list [ref=e346]:
+                - listitem [ref=e347]: API 키는 필수 입력 항목입니다.
+                - listitem [ref=e348]: 채널과 파일 ID는 필수 입력 항목입니다.
+                - listitem [ref=e349]: 파일 데이터는 base64로 인코딩되어 반환됩니다.
+                - listitem [ref=e350]: 만료된 파일은 조회할 수 없습니다.
+              - separator [ref=e351]
+              - heading "1) 요청 (Request)1) 요청 (Request)에 대한 직접 링크" [level=3] [ref=e352]:
+                - text: 1) 요청 (Request)
+                - link "1) 요청 (Request)에 대한 직접 링크" [ref=e353] [cursor=pointer]:
+                  - /url: "#1-요청-request-1"
+                  - text: "#"
+              - heading "URLURL에 대한 직접 링크" [level=4] [ref=e354]:
+                - text: URL
+                - link "URL에 대한 직접 링크" [ref=e355] [cursor=pointer]:
+                  - /url: "#url-1"
+                  - text: "#"
+              - generic [ref=e357]:
+                - code [ref=e359]:
+                  - generic [ref=e360]: "GET /contents/v1/{apiKey}/{ch}/{fileId} HTTP/1.1"
+                - button "클립보드에 코드 복사" [ref=e362] [cursor=pointer]:
+                  - generic [ref=e363]:
+                    - img [ref=e364]
+                    - img [ref=e366]
+              - heading "HeadersHeaders에 대한 직접 링크" [level=4] [ref=e368]:
+                - text: Headers
+                - link "Headers에 대한 직접 링크" [ref=e369] [cursor=pointer]:
+                  - /url: "#headers-1"
+                  - text: "#"
+              - table [ref=e370]:
+                - rowgroup [ref=e371]:
+                  - row "Name Type 필수 설명" [ref=e372]:
+                    - columnheader "Name" [ref=e373]
+                    - columnheader "Type" [ref=e374]
+                    - columnheader "필수" [ref=e375]
+                    - columnheader "설명" [ref=e376]
+                - rowgroup [ref=e377]:
+                  - row "Authorization String ● 사용자 인증 토큰" [ref=e378]:
+                    - cell "Authorization" [ref=e379]
+                    - cell "String" [ref=e380]
+                    - cell "●" [ref=e381]
+                    - cell "사용자 인증 토큰" [ref=e382]
+              - heading "Path ParametersPath Parameters에 대한 직접 링크" [level=4] [ref=e383]:
+                - text: Path Parameters
+                - link "Path Parameters에 대한 직접 링크" [ref=e384] [cursor=pointer]:
+                  - /url: "#path-parameters-1"
+                  - text: "#"
+              - table [ref=e385]:
+                - rowgroup [ref=e386]:
+                  - row "Name Type 필수 설명" [ref=e387]:
+                    - columnheader "Name" [ref=e388]
+                    - columnheader "Type" [ref=e389]
+                    - columnheader "필수" [ref=e390]
+                    - columnheader "설명" [ref=e391]
+                - rowgroup [ref=e392]:
+                  - row "apiKey String ● API 키" [ref=e393]:
+                    - cell "apiKey" [ref=e394]
+                    - cell "String" [ref=e395]
+                    - cell "●" [ref=e396]
+                    - cell "API 키" [ref=e397]
+                  - row "ch String ● 채널(mms)" [ref=e398]:
+                    - cell "ch" [ref=e399]
+                    - cell "String" [ref=e400]
+                    - cell "●" [ref=e401]
+                    - cell "채널(mms)" [ref=e402]
+                  - row "fileId String ● 파일 ID" [ref=e403]:
+                    - cell "fileId" [ref=e404]
+                    - cell "String" [ref=e405]
+                    - cell "●" [ref=e406]
+                    - cell "파일 ID" [ref=e407]
+              - separator [ref=e408]
+              - heading "2) 응답 (Response)2) 응답 (Response)에 대한 직접 링크" [level=3] [ref=e409]:
+                - text: 2) 응답 (Response)
+                - link "2) 응답 (Response)에 대한 직접 링크" [ref=e410] [cursor=pointer]:
+                  - /url: "#2-응답-response-1"
+                  - text: "#"
+              - heading "Response BodyResponse Body에 대한 직접 링크" [level=4] [ref=e411]:
+                - text: Response Body
+                - link "Response Body에 대한 직접 링크" [ref=e412] [cursor=pointer]:
+                  - /url: "#response-body-1"
+                  - text: "#"
+              - table [ref=e413]:
+                - rowgroup [ref=e414]:
+                  - row "Name Type 설명" [ref=e415]:
+                    - columnheader "Name" [ref=e416]
+                    - columnheader "Type" [ref=e417]
+                    - columnheader "설명" [ref=e418]
+                - rowgroup [ref=e419]:
+                  - row "code String 결과 코드" [ref=e420]:
+                    - cell "code" [ref=e421]
+                    - cell "String" [ref=e422]
+                    - cell "결과 코드" [ref=e423]
+                  - row "message String 결과 메시지" [ref=e424]:
+                    - cell "message" [ref=e425]
+                    - cell "String" [ref=e426]
+                    - cell "결과 메시지" [ref=e427]
+              - separator [ref=e428]
+              - heading "3) 요청 예시 (Sample)3) 요청 예시 (Sample)에 대한 직접 링크" [level=3] [ref=e429]:
+                - text: 3) 요청 예시 (Sample)
+                - link "3) 요청 예시 (Sample)에 대한 직접 링크" [ref=e430] [cursor=pointer]:
+                  - /url: "#3-요청-예시-sample-1"
+                  - text: "#"
+              - heading "CurlCurl에 대한 직접 링크" [level=4] [ref=e431]:
+                - text: Curl
+                - link "Curl에 대한 직접 링크" [ref=e432] [cursor=pointer]:
+                  - /url: "#curl-1"
+                  - text: "#"
+              - generic [ref=e434]:
+                - code [ref=e436]:
+                  - generic [ref=e437]: curl -X GET "https://mnt-api.msghub.uplus.co.kr/contents/v1/1/mms/FLE...o4" \
+                  - generic [ref=e438]: "-H \"accept: */*\" \\"
+                  - generic [ref=e439]: "-H \"Authorization: Bearer {token}\""
+                - generic [ref=e440]:
+                  - button "줄 바꿈 전환" [ref=e441] [cursor=pointer]:
+                    - img [ref=e442]
+                  - button "클립보드에 코드 복사" [ref=e444] [cursor=pointer]:
+                    - generic [ref=e445]:
+                      - img [ref=e446]
+                      - img [ref=e448]
+              - heading "JSON ResponseJSON Response에 대한 직접 링크" [level=4] [ref=e450]:
+                - text: JSON Response
+                - link "JSON Response에 대한 직접 링크" [ref=e451] [cursor=pointer]:
+                  - /url: "#json-response-1"
+                  - text: "#"
+              - heading "성공시 응답성공시 응답에 대한 직접 링크" [level=5] [ref=e452]:
+                - text: 성공시 응답
+                - link "성공시 응답에 대한 직접 링크" [ref=e453] [cursor=pointer]:
+                  - /url: "#성공시-응답"
+                  - text: "#"
+              - heading "HeadersHeaders에 대한 직접 링크" [level=6] [ref=e454]:
+                - text: Headers
+                - link "Headers에 대한 직접 링크" [ref=e455] [cursor=pointer]:
+                  - /url: "#headers-2"
+                  - text: "#"
+              - table [ref=e456]:
+                - rowgroup [ref=e457]:
+                  - row "헤더명 설명 예시 값" [ref=e458]:
+                    - columnheader "헤더명" [ref=e459]
+                    - columnheader "설명" [ref=e460]
+                    - columnheader "예시 값" [ref=e461]
+                - rowgroup [ref=e462]:
+                  - row "Content-Type 파일 유형에 따른 MIME 타입 image/jpeg" [ref=e463]:
+                    - cell "Content-Type" [ref=e464]
+                    - cell "파일 유형에 따른 MIME 타입" [ref=e465]
+                    - cell "image/jpeg" [ref=e466]
+                  - row "Content-Disposition 파일 처리 관련 정보 inline; filename=\"FL...ERJ.jpg\"" [ref=e467]:
+                    - cell "Content-Disposition" [ref=e468]
+                    - cell "파일 처리 관련 정보" [ref=e469]
+                    - cell "inline; filename=\"FL...ERJ.jpg\"" [ref=e470]
+                  - row "Content-Length 파일 크기 (바이트) 7922" [ref=e471]:
+                    - cell "Content-Length" [ref=e472]
+                    - cell "파일 크기 (바이트)" [ref=e473]
+                    - cell "7922" [ref=e474]
+              - heading "BodyBody에 대한 직접 링크" [level=6] [ref=e475]:
+                - text: Body
+                - link "Body에 대한 직접 링크" [ref=e476] [cursor=pointer]:
+                  - /url: "#body"
+                  - text: "#"
+              - list [ref=e477]:
+                - listitem [ref=e478]: 파일의 바이너리 데이터 포함
+              - heading "실패시 응답실패시 응답에 대한 직접 링크" [level=5] [ref=e479]:
+                - text: 실패시 응답
+                - link "실패시 응답에 대한 직접 링크" [ref=e480] [cursor=pointer]:
+                  - /url: "#실패시-응답"
+                  - text: "#"
+              - generic [ref=e482]:
+                - code [ref=e484]:
+                  - generic [ref=e485]: "{"
+                  - generic [ref=e486]: "\"code\": \"29009\","
+                  - generic [ref=e487]: "\"message\": \"요청한 데이터 없음\""
+                  - generic [ref=e488]: "}"
+                - button "클립보드에 코드 복사" [ref=e490] [cursor=pointer]:
+                  - generic [ref=e491]:
+                    - img [ref=e492]
+                    - img [ref=e494]
+              - heading "AppendixAppendix에 대한 직접 링크" [level=2] [ref=e496]:
+                - text: Appendix
+                - link "Appendix에 대한 직접 링크" [ref=e497] [cursor=pointer]:
+                  - /url: "#appendix"
+                  - text: "#"
+              - heading "상품별 이미지 첨부 가능 규격상품별 이미지 첨부 가능 규격에 대한 직접 링크" [level=3] [ref=e498]:
+                - text: 상품별 이미지 첨부 가능 규격
+                - link "상품별 이미지 첨부 가능 규격에 대한 직접 링크" [ref=e499] [cursor=pointer]:
+                  - /url: "#상품별-이미지-첨부-가능-규격"
+                  - text: "#"
+              - heading "MMSMMS에 대한 직접 링크" [level=4] [ref=e500]:
+                - text: MMS
+                - link "MMS에 대한 직접 링크" [ref=e501] [cursor=pointer]:
+                  - /url: "#mms"
+                  - text: "#"
+              - list [ref=e502]:
+                - listitem [ref=e503]: "지원 형식: JPG, JPEG, GIF(GIF는 첫 프레임만 사용)"
+                - listitem [ref=e504]: "파일 크기: 최대 300KB"
+                - listitem [ref=e505]: "사이즈: 최대 1500×1440px"
+              - heading "RCSRCS에 대한 직접 링크" [level=4] [ref=e506]:
+                - text: RCS
+                - link "RCS에 대한 직접 링크" [ref=e507] [cursor=pointer]:
+                  - /url: "#rcs"
+                  - text: "#"
+              - list [ref=e508]:
+                - listitem [ref=e509]:
+                  - text: RCS 공통
+                  - list [ref=e510]:
+                    - listitem [ref=e511]: "지원 형식: JPG, JPEG, PNG, BMP, GIF"
+                    - listitem [ref=e512]: "파일 크기: 최대 1MB"
+                - listitem [ref=e513]:
+                  - text: 이미지형(세로형)
+                  - list [ref=e514]:
+                    - listitem [ref=e515]: "사이즈: 568x336px (권장)"
+                - listitem [ref=e516]:
+                  - text: 이미지형(이미지 강조)
+                  - list [ref=e517]:
+                    - listitem [ref=e518]: "사이즈: 900x900px 또는 900x1200px (필수)"
+                - listitem [ref=e519]:
+                  - text: 썸네일형
+                  - list [ref=e520]:
+                    - listitem [ref=e521]: "이미지 사이즈: 900x560px (필수)"
+                    - listitem [ref=e522]: "썸네일 이미지 사이즈: 300x300px (필수)"
+                - listitem [ref=e523]:
+                  - text: SNS형
+                  - list [ref=e524]:
+                    - listitem [ref=e525]: "사이즈: 900x900px (필수)"
+                - listitem [ref=e526]:
+                  - text: SNS형(중간버튼)
+                  - list [ref=e527]:
+                    - listitem [ref=e528]: "사이즈: 900x560px (필수)"
+                - listitem [ref=e529]:
+                  - text: 슬라이드형(Small)
+                  - list [ref=e530]:
+                    - listitem [ref=e531]: "사이즈: 360x336px (권장) / 360x1620px (최대)"
+                - listitem [ref=e532]:
+                  - text: 슬라이드형(Medium)
+                  - list [ref=e533]:
+                    - listitem [ref=e534]: "사이즈: 696x504px (권장) / 696x1620px (최대)"
+              - heading "카카오 친구톡카카오 친구톡에 대한 직접 링크" [level=4] [ref=e535]:
+                - text: 카카오 친구톡
+                - link "카카오 친구톡에 대한 직접 링크" [ref=e536] [cursor=pointer]:
+                  - /url: "#카카오-친구톡"
+                  - text: "#"
+              - list [ref=e537]:
+                - listitem [ref=e538]:
+                  - text: 친구톡 공통
+                  - list [ref=e539]:
+                    - listitem [ref=e540]: "지원 형식: JPG, JPEG, PNG"
+                    - listitem [ref=e541]: "파일 크기: 최대 5MB"
+                - listitem [ref=e542]:
+                  - text: 일반 이미지
+                  - list [ref=e543]:
+                    - listitem [ref=e544]: "사이즈: 가로 500px 이상, 가로:세로 비율 2:1 이상 / 3:4 이하"
+                - listitem [ref=e545]:
+                  - text: 와이드 이미지(wideYn=Y)
+                  - list [ref=e546]:
+                    - listitem [ref=e547]: "사이즈: 800×600px (필수)"
+                - listitem [ref=e548]:
+                  - text: 와이드 아이템 리스트 이미지(kkoItemListYn=Y)
+                  - list [ref=e549]:
+                    - listitem [ref=e550]: "첫번째 이미지 사이즈: 가로 500px 이상, 가로:세로 비율 2:1"
+                    - listitem [ref=e551]: "이미지 사이즈: 가로 500px 이상, 가로:세로 비율 1:1"
+                - listitem [ref=e552]:
+                  - text: 케러셀 피드(kkoCarouselFeedYn=Y)
+                  - list [ref=e553]:
+                    - listitem [ref=e554]: "사이즈: 가로 500px 이상, 가로:세로 비율 2:1 이상 3:4 이하"
+                - listitem [ref=e555]:
+                  - text: 케러셀 커머스(kkoCarouselCommerceYn=Y)
+                  - list [ref=e556]:
+                    - listitem [ref=e557]: "사이즈: 가로 500px 이상, 가로:세로 비율 2:1 이상 3:4 이하"
+              - heading "카카오 브랜드톡카카오 브랜드톡에 대한 직접 링크" [level=4] [ref=e558]:
+                - text: 카카오 브랜드톡
+                - link "카카오 브랜드톡에 대한 직접 링크" [ref=e559] [cursor=pointer]:
+                  - /url: "#카카오-브랜드톡"
+                  - text: "#"
+              - list [ref=e560]:
+                - listitem [ref=e561]:
+                  - text: 브랜드톡 공통
+                  - list [ref=e562]:
+                    - listitem [ref=e563]: "지원 형식: JPG, JPEG, PNG"
+                    - listitem [ref=e564]: "파일 크기: 최대 5MB"
+                    - listitem [ref=e565]: 가로 500px 이상
+                - listitem [ref=e566]:
+                  - text: 이미지형, 커머스형, 캐러셀 피드형, 프리미엄 동영상 썸네일 이미지
+                  - list [ref=e567]:
+                    - listitem [ref=e568]:
+                      - text: 가로:세로 비율이 2:1 이상 3:4 이하 , 권장 사이즈 800
+                      - emphasis [ref=e569]: 400, 800
+                      - text: "600"
+                - listitem [ref=e570]:
+                  - text: 와이드형
+                  - list [ref=e571]:
+                    - listitem [ref=e572]: 가로:세로 비율이 2:1 이상 1:1 이하, 권장 800*600
+                - listitem [ref=e573]:
+                  - text: 와이드 리스트형 첫번째 이미지
+                  - list [ref=e574]:
+                    - listitem [ref=e575]: 가로:세로 비율이 2:1
+                - listitem [ref=e576]:
+                  - text: 와이드 리스트형 2~4번째 이미지
+                  - list [ref=e577]:
+                    - listitem [ref=e578]: 가로:세로 비율 1:1
+                - listitem [ref=e579]:
+                  - text: 캐러셀 커머스형
+                  - list [ref=e580]:
+                    - listitem [ref=e581]: 전체 이미지 비율이 동일해야 한다.
+                    - listitem [ref=e582]:
+                      - text: 가로:세로 비율 2:1 이상 3:4 이하, 권장 사이즈 800
+                      - emphasis [ref=e583]: 400, 800
+                      - text: "600"
+              - heading "푸시푸시에 대한 직접 링크" [level=4] [ref=e584]:
+                - text: 푸시
+                - link "푸시에 대한 직접 링크" [ref=e585] [cursor=pointer]:
+                  - /url: "#푸시"
+                  - text: "#"
+              - list [ref=e586]:
+                - listitem [ref=e587]: "지원 형식: JPG, PNG"
+                - listitem [ref=e588]: "파일 크기: 최대 1MB"
+              - heading "결과 코드결과 코드에 대한 직접 링크" [level=3] [ref=e589]:
+                - text: 결과 코드
+                - link "결과 코드에 대한 직접 링크" [ref=e590] [cursor=pointer]:
+                  - /url: "#결과-코드"
+                  - text: "#"
+              - list [ref=e591]:
+                - listitem [ref=e592]:
+                  - link "결과 코드" [ref=e593] [cursor=pointer]:
+                    - /url: https://docs2.msghub.uplus.co.kr/api/message-sending/02.09.resultcode
+          - navigation "문서 페이지" [ref=e594]:
+            - link "이전 « 3.1 인증" [ref=e595] [cursor=pointer]:
+              - /url: /api/channel-management/03.01.mnt-auth
+              - generic [ref=e596]: 이전
+              - generic [ref=e597]: « 3.1 인증
+            - link "다음 3.3 카카오 V2 »" [ref=e598] [cursor=pointer]:
+              - /url: /api/channel-management/03.03.mnt-kko_v2
+              - generic [ref=e599]: 다음
+              - generic [ref=e600]: 3.3 카카오 V2 »
+        - list [ref=e603]:
+          - listitem [ref=e604]:
+            - link "목차" [ref=e605] [cursor=pointer]:
+              - /url: "#목차"
+          - listitem [ref=e606]:
+            - link "베이스 URL" [ref=e607] [cursor=pointer]:
+              - /url: "#베이스-url"
+          - listitem [ref=e608]:
+            - link "1. 파일 업로드" [ref=e609] [cursor=pointer]:
+              - /url: "#1-파일-업로드"
+            - list [ref=e610]:
+              - listitem [ref=e611]:
+                - link "📌 주의사항" [ref=e612] [cursor=pointer]:
+                  - /url: "#-주의사항"
+              - listitem [ref=e613]:
+                - link "1) 요청 (Request)" [ref=e614] [cursor=pointer]:
+                  - /url: "#1-요청-request"
+              - listitem [ref=e615]:
+                - link "2) 응답 (Response)" [ref=e616] [cursor=pointer]:
+                  - /url: "#2-응답-response"
+              - listitem [ref=e617]:
+                - link "3) 요청 예시 (Sample)" [ref=e618] [cursor=pointer]:
+                  - /url: "#3-요청-예시-sample"
+          - listitem [ref=e619]:
+            - link "2. 컨텐츠 조회" [ref=e620] [cursor=pointer]:
+              - /url: "#2-컨텐츠-조회"
+            - list [ref=e621]:
+              - listitem [ref=e622]:
+                - link "📌 주의사항" [ref=e623] [cursor=pointer]:
+                  - /url: "#-주의사항-1"
+              - listitem [ref=e624]:
+                - link "1) 요청 (Request)" [ref=e625] [cursor=pointer]:
+                  - /url: "#1-요청-request-1"
+              - listitem [ref=e626]:
+                - link "2) 응답 (Response)" [ref=e627] [cursor=pointer]:
+                  - /url: "#2-응답-response-1"
+              - listitem [ref=e628]:
+                - link "3) 요청 예시 (Sample)" [ref=e629] [cursor=pointer]:
+                  - /url: "#3-요청-예시-sample-1"
+          - listitem [ref=e630]:
+            - link "Appendix" [ref=e631] [cursor=pointer]:
+              - /url: "#appendix"
+            - list [ref=e632]:
+              - listitem [ref=e633]:
+                - link "상품별 이미지 첨부 가능 규격" [ref=e634] [cursor=pointer]:
+                  - /url: "#상품별-이미지-첨부-가능-규격"
+              - listitem [ref=e635]:
+                - link "결과 코드" [ref=e636] [cursor=pointer]:
+                  - /url: "#결과-코드"
+  - contentinfo [ref=e637]:
+    - generic [ref=e638]:
+      - generic [ref=e639]:
+        - generic [ref=e640]:
+          - generic [ref=e641]: Support
+          - list [ref=e642]:
+            - listitem [ref=e643]:
+              - link "msghub-snap-agent" [ref=e644] [cursor=pointer]:
+                - /url: https://msghub-agent.notion.site/
+                - text: msghub-snap-agent
+                - img [ref=e645]
+            - listitem [ref=e647]:
+              - link "msghub-restapi-sample-code" [ref=e648] [cursor=pointer]:
+                - /url: https://total-msg-hub.github.io/restapi_sample/
+                - text: msghub-restapi-sample-code
+                - img [ref=e649]
+        - generic [ref=e651]:
+          - generic [ref=e652]: Community
+          - list [ref=e653]:
+            - listitem [ref=e654]:
+              - link "U+" [ref=e655] [cursor=pointer]:
+                - /url: https://www.lguplus.com/
+                - text: U+
+                - img [ref=e656]
+        - generic [ref=e658]:
+          - generic [ref=e659]: Privacy Policy
+          - list [ref=e660]:
+            - listitem [ref=e661]:
+              - link "Policy guide" [ref=e662] [cursor=pointer]:
+                - /url: https://privacy.lguplus.com/2545ce4416cc4e3b9d9488b94690ba27/privacy/info/v1/1
+                - text: Policy guide
+                - img [ref=e663]
+      - generic [ref=e667]:
+        - text: ㈜엘지유플러스 서울특별시 용산구 한강대로 32
+        - text: 대표이사 홍범식 | 사업자번호 220-81-39938 | 통신판매신고 제 2010-서울중구-0968호 | 1544-5992 | smshelp@lguplus.co.kr
+        - text: Copyright ⓒ LG Uplus Corp. All Rights Reserved.

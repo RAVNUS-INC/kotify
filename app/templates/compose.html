@@ -245,8 +245,16 @@
             <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-type">—</td>
           </tr>
           <tr>
+            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">발송 방식</th>
+            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-channel">RCS 우선 → SMS 자동 전환</td>
+          </tr>
+          <tr>
             <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary);vertical-align:top">본문</th>
             <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-content">—</td>
+          </tr>
+          <tr>
+            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">예상 비용</th>
+            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-cost">—</td>
           </tr>
         </tbody>
       </table>
@@ -417,7 +425,12 @@ function updateByteCounter() {
   var hasAttachment = (document.getElementById('attachment-id') || {}).value;
   var isMms = hasAttachment && hasAttachment !== '0';
   var type = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과'));
-  byteCounter.textContent = bytes + ' byte (' + type + ')';
+  var typeLabel = isMms ? '이미지' : (bytes <= 90 ? '단문' : (bytes <= 2000 ? '장문' : '초과'));
+  var priceInfo = '';
+  if (type === 'SMS') priceInfo = ' → RCS 양방향 8원/건 (미지원 시 SMS 9원)';
+  else if (type === 'LMS') priceInfo = ' → RCS LMS 27원/건 (미지원 시 LMS 27원)';
+  else if (type === 'MMS') priceInfo = ' → RCS 이미지 40원/건 (미지원 시 MMS 85원)';
+  byteCounter.textContent = bytes + ' byte · ' + typeLabel + priceInfo;
   byteCounter.className = 'byte-counter ' + (bytes > 2000 ? 'err' : (bytes > 90 || isMms ? 'warn' : 'ok'));
   // H10 + MMS: subject 입력란 활성 조건
   var subjectGroup = document.getElementById('subject-group');
@@ -454,7 +467,16 @@ function openSendModal() {
   var bytes = contentTa ? measureEucKrBytes(contentTa.value) : 0;
   var hasAttachment = (document.getElementById('attachment-id') || {}).value;
   var isMms = hasAttachment && hasAttachment !== '0';
-  var msgType = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과'));
+  var msgType = isMms ? '이미지' : (bytes <= 90 ? '단문' : (bytes <= 2000 ? '장문' : '초과'));
+
+  // 비용 계산
+  var rcsCost = isMms ? 40 : (bytes <= 90 ? 8 : 27);
+  var fbCost = isMms ? 85 : (bytes <= 90 ? 9 : 27);
+  var costMin = validCount * rcsCost;
+  var costMax = validCount * fbCost;
+  var costText = validCount > 0
+    ? (costMin === costMax ? costMin.toLocaleString() + '원' : costMin.toLocaleString() + ' ~ ' + costMax.toLocaleString() + '원')
+    : '—';
 
   // 본문 미리보기 (80자 이상이면 말줄임)
   var content = contentTa ? contentTa.value : '';
@@ -464,6 +486,10 @@ function openSendModal() {
   document.getElementById('modal-count').textContent = validCount > 0 ? validCount + '명' : '미리보기 없음 (발송 전 확인 권장)';
   document.getElementById('modal-type').textContent = msgType;
   document.getElementById('modal-content').textContent = contentPreview || '(비어있음)';
+  document.getElementById('modal-cost').textContent = costText;
+  var fbLabel = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : 'LMS');
+  var rcsMode = (bytes <= 90 && !isMms) ? 'RCS 양방향' : 'RCS';
+  document.getElementById('modal-channel').textContent = rcsMode + ' 우선 → 미지원 시 ' + fbLabel + ' 자동 전환';
 
   // 예약 모드일 때 확인 버튼 문구/경고 메시지 교체
   var reserveEnabled = document.getElementById('reserve-enabled');

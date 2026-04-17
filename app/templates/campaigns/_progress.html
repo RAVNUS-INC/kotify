@@ -35,16 +35,29 @@
     </span>
   </div>
 
-  {# M9: 3색 stacked progress bar (성공/실패/대기) #}
-  {% set ok_pct  = (campaign.ok_count   / total * 100) if total > 0 else 0 %}
+  {# 채널 분포 바 (RCS/Fallback/실패/대기) #}
+  {% set rcs_pct = (campaign.rcs_count / total * 100) if total > 0 else 0 %}
+  {% set fb_pct = (campaign.fallback_count / total * 100) if total > 0 else 0 %}
   {% set fail_pct = (campaign.fail_count / total * 100) if total > 0 else 0 %}
   {% set pend_pct = (campaign.pending_count / total * 100) if total > 0 else 0 %}
   <div class="progress-bar-stacked" style="margin-bottom:6px">
-    <div class="progress-fill-success" style="width:{{ ok_pct | round(1) }}%"></div>
-    <div class="progress-fill-fail"    style="width:{{ fail_pct | round(1) }}%"></div>
+    <div style="width:{{ rcs_pct | round(1) }}%;background:#3b82f6;height:100%;transition:width .3s" title="RCS {{ campaign.rcs_count }}"></div>
+    <div style="width:{{ fb_pct | round(1) }}%;background:#16a34a;height:100%;transition:width .3s" title="SMS/LMS/MMS {{ campaign.fallback_count }}"></div>
+    <div class="progress-fill-fail" style="width:{{ fail_pct | round(1) }}%"></div>
     <div class="progress-fill-pending" style="width:{{ pend_pct | round(1) }}%"></div>
   </div>
-  <div class="text-muted">{{ pct }}%</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;margin-bottom:4px">
+    {% if campaign.rcs_count > 0 %}
+    <span><span style="display:inline-block;width:8px;height:8px;background:#3b82f6;border-radius:2px;margin-right:3px"></span>RCS {{ campaign.rcs_count }}명</span>
+    {% endif %}
+    {% if campaign.fallback_count > 0 %}
+    <span><span style="display:inline-block;width:8px;height:8px;background:#16a34a;border-radius:2px;margin-right:3px"></span>SMS/LMS/MMS {{ campaign.fallback_count }}명</span>
+    {% endif %}
+    {% if campaign.fail_count > 0 %}
+    <span><span style="display:inline-block;width:8px;height:8px;background:#dc2626;border-radius:2px;margin-right:3px"></span>실패 {{ campaign.fail_count }}명</span>
+    {% endif %}
+  </div>
+  <div class="text-muted">{{ pct }}%{% if campaign.total_cost > 0 %} · {{ "{:,}".format(campaign.total_cost) }}원{% endif %}</div>
 
   <div style="margin-top:10px">
     <button class="btn btn-secondary btn-sm"

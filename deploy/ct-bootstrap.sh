@@ -247,6 +247,17 @@ systemctl enable kotify
 systemctl restart kotify
 ok "kotify 서비스 활성화 및 시작"
 
+# sudoers — 웹 UI 원클릭 업데이트용
+SUDOERS_SRC="${INSTALL_DIR}/deploy/kotify-sudoers"
+SUDOERS_DST="/etc/sudoers.d/kotify-update"
+if [[ -f "${SUDOERS_SRC}" ]]; then
+    install -m 440 -o root -g root "${SUDOERS_SRC}" "${SUDOERS_DST}"
+    chmod +x "${INSTALL_DIR}/deploy/kotify-update.sh"
+    ok "sudoers 설치: ${SUDOERS_DST} (웹 UI 업데이트 허용)"
+else
+    warn "deploy/kotify-sudoers 없음. 웹 UI 업데이트가 동작하지 않습니다."
+fi
+
 # ── Step 10: 서비스 기동 확인 ────────────────────────────────────────────────
 step "10. 서비스 상태 확인"
 sleep 3

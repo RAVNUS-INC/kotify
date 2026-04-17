@@ -30,7 +30,7 @@ class SettingsStore:
         """키에 해당하는 값을 반환한다. 시크릿이면 자동 복호화한다.
 
         Args:
-            key: 설정 키 (예: ``"ncp.access_key"``).
+            key: 설정 키 (예: ``"msghub.api_key"``).
             default: 키가 없을 때 반환할 기본값.
 
         Returns:

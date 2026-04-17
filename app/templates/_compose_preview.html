@@ -46,10 +46,12 @@
       <span class="ok mono">{{ byte_len }} byte</span>
       &nbsp;→&nbsp;
       {% if message_type == "SMS" %}
-      <span class="badge badge-success">SMS</span>
+      <span class="badge badge-success">단문</span>
       <span class="text-muted">(≤ 90 byte)</span>
+      {% elif message_type == "MMS" %}
+      <span class="badge badge-partial">이미지</span>
       {% else %}
-      <span class="badge badge-dispatched">LMS</span>
+      <span class="badge badge-dispatched">장문</span>
       <span class="text-muted">(≤ 2000 byte)</span>
       {% endif %}
       {% else %}
@@ -57,6 +59,35 @@
       {% endif %}
     </div>
   </div>
+
+  {% if valid_count > 0 and msg_ok %}
+  <div style="margin-bottom:8px">
+    <strong style="font-size:12px">발송 채널</strong>
+    <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
+      {% if message_type == "SMS" %}RCS 양방향 → 미지원 시 SMS 자동 전환{% elif message_type == "MMS" %}RCS 이미지 → 미지원 시 MMS 자동 전환{% else %}RCS LMS → 미지원 시 LMS 자동 전환{% endif %}
+    </div>
+  </div>
+  <div style="margin-bottom:8px">
+    <strong style="font-size:12px">예상 비용</strong>
+    {% if message_type == "SMS" %}
+    {% set rcs_unit = 8 %}{% set fb_unit = 9 %}
+    {% elif message_type == "MMS" %}
+    {% set rcs_unit = 40 %}{% set fb_unit = 85 %}
+    {% else %}
+    {% set rcs_unit = 27 %}{% set fb_unit = 27 %}
+    {% endif %}
+    <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
+      전체 RCS 성공 시: {{ "{:,}".format(rcs_unit * valid_count) }}원 ({{ rcs_unit }}원 × {{ valid_count }}명)<br>
+      {% if rcs_unit != fb_unit %}
+      전체 {{ "MMS" if message_type == "MMS" else ("LMS" if message_type == "LMS" else "SMS") }} 전환 시: {{ "{:,}".format(fb_unit * valid_count) }}원 ({{ fb_unit }}원 × {{ valid_count }}명)<br>
+      예상 범위: <strong>{{ "{:,}".format(rcs_unit * valid_count) }} ~ {{ "{:,}".format(fb_unit * valid_count) }}원</strong>
+      {% if message_type == "MMS" %}<br><span class="text-muted">※ RCS 도달률에 따라 실제 비용 결정</span>{% endif %}
+      {% else %}
+      <strong>{{ "{:,}".format(rcs_unit * valid_count) }}원</strong> (RCS/LMS 동일 단가)
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   {% if too_many %}
   <div class="alert alert-error" role="alert" style="margin-bottom:0">
@@ -76,7 +107,7 @@
   {% elif can_send %}
   <div class="alert alert-success" role="alert" style="margin-bottom:0;padding:6px 10px">
     <i data-lucide="check-circle" style="width:12px;height:12px;vertical-align:middle"></i>
-    발송 가능 — {{ valid_count }}명에게 {{ message_type }} 발송합니다.
+    발송 가능 — {{ valid_count }}명에게 {% if message_type == "SMS" %}단문{% elif message_type == "MMS" %}이미지{% else %}장문{% endif %} 발송합니다.
   </div>
   {% endif %}
 </div>

@@ -1,7 +1,9 @@
-"""관리자 라우트 — 설정, 발신번호, 감사 로그."""
+"""관리자 라우트 — 설정, 발신번호, 감사 로그, 시스템 업데이트."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -16,6 +18,8 @@ from app.security.csrf import verify_csrf
 from app.security.settings_store import SettingsStore
 from app.services import audit
 from app.web import templates
+
+_update_log = logging.getLogger("kotify.update")
 
 router = APIRouter(prefix="/admin")
 
@@ -44,9 +48,8 @@ async def settings_page(
 
     # 시크릿 설정은 마스킹
     secret_keys = [
-        "ncp.access_key",
-        "ncp.secret_key",
-        "ncp.service_id",
+        "msghub.api_key",
+        "msghub.api_pwd",
         "keycloak.client_secret",
         "session.secret",
     ]
@@ -81,9 +84,11 @@ async def settings_save(
     keycloak_issuer: str = Form(""),
     keycloak_client_id: str = Form(""),
     keycloak_client_secret: str = Form(""),
-    ncp_access_key: str = Form(""),
-    ncp_secret_key: str = Form(""),
-    ncp_service_id: str = Form(""),
+    msghub_api_key: str = Form(""),
+    msghub_api_pwd: str = Form(""),
+    msghub_env: str = Form(""),
+    msghub_brand_id: str = Form(""),
+    msghub_chatbot_id: str = Form(""),
     app_public_url: str = Form(""),
     session_secret: str = Form(""),
 ) -> RedirectResponse:
@@ -97,62 +102,60 @@ async def settings_save(
         store.set("keycloak.client_id", keycloak_client_id, is_secret=False, updated_by=user.sub)
     if app_public_url:
         store.set("app.public_url", app_public_url, is_secret=False, updated_by=user.sub)
+    if msghub_env:
+        store.set("msghub.env", msghub_env, is_secret=False, updated_by=user.sub)
+    if msghub_brand_id:
+        store.set("msghub.brand_id", msghub_brand_id, is_secret=False, updated_by=user.sub)
+    if msghub_chatbot_id:
+        store.set("msghub.chatbot_id", msghub_chatbot_id, is_secret=False, updated_by=user.sub)
 
     # 시크릿 — 빈 값이면 변경하지 않음
     if keycloak_client_secret:
         store.set("keycloak.client_secret", keycloak_client_secret, is_secret=True, updated_by=user.sub)
-    if ncp_access_key:
-        store.set("ncp.access_key", ncp_access_key, is_secret=True, updated_by=user.sub)
-    if ncp_secret_key:
-        store.set("ncp.secret_key", ncp_secret_key, is_secret=True, updated_by=user.sub)
-    if ncp_service_id:
-        store.set("ncp.service_id", ncp_service_id, is_secret=True, updated_by=user.sub)
+    if msghub_api_key:
+        store.set("msghub.api_key", msghub_api_key, is_secret=True, updated_by=user.sub)
+    if msghub_api_pwd:
+        store.set("msghub.api_pwd", msghub_api_pwd, is_secret=True, updated_by=user.sub)
     if session_secret:
         store.set("session.secret", session_secret, is_secret=True, updated_by=user.sub)
 
     audit.log(db, actor_sub=user.sub, action=audit.SETTINGS_UPDATE)
     db.commit()
 
-    # NCP 설정 변경 가능성이 있으므로 클라이언트 재초기화 (#28)
-    from app.main import reset_ncp_client
-    reset_ncp_client()
+    # msghub 설정 변경 시 클라이언트 재초기화
+    from app.main import reset_msghub_client
+    reset_msghub_client()
 
     return RedirectResponse("/admin/settings?saved=1", status_code=303)
 
 
-@router.post("/settings/test-ncp", response_class=HTMLResponse)
-async def test_ncp(
+@router.post("/settings/test-msghub", response_class=HTMLResponse)
+async def test_msghub(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
     _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
-    """HTMX — 현재 저장된 NCP 키로 인증 테스트."""
-    from app.ncp.client import NCPAuthError, NCPClient
+    """HTMX — 현재 저장된 msghub 키로 인증 테스트."""
+    from app.msghub.auth import AuthError
+    from app.msghub.client import MsghubClient
 
     store = SettingsStore(db)
-    access_key = store.get("ncp.access_key")
-    secret_key = store.get("ncp.secret_key")
-    service_id = store.get("ncp.service_id")
+    api_key = store.get("msghub.api_key")
+    api_pwd = store.get("msghub.api_pwd")
+    env = store.get("msghub.env") or "production"
 
-    if not (access_key and secret_key and service_id):
-        return HTMLResponse('<span class="err">✗ NCP 설정이 저장되지 않았습니다.</span>')
+    if not (api_key and api_pwd):
+        return HTMLResponse('<span class="err">✗ msghub 설정이 저장되지 않았습니다.</span>')
 
-    client = NCPClient(access_key=access_key, secret_key=secret_key, service_id=service_id)
+    client = MsghubClient(env=env, api_key=api_key, api_pwd=api_pwd)
     try:
-        await client.list_by_request_id("TEST-PROBE-0000")
-        return HTMLResponse('<span class="ok">✓ NCP 인증 성공</span>')
-    except NotImplementedError:
-        return HTMLResponse('<span class="warn">⚠ signature.py 미구현 (stub)</span>')
-    except NCPAuthError as exc:
-        # #7: 인증 실패는 명확히 에러로 표시
+        await client.test_auth()
+        return HTMLResponse('<span class="ok">✓ msghub 인증 성공</span>')
+    except AuthError as exc:
         return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
     except Exception as exc:
-        from app.ncp.client import NCPForbidden
-        if isinstance(exc, (NCPAuthError, NCPForbidden)):
-            return HTMLResponse(f'<span class="err">✗ 인증 실패: {exc}</span>')
-        # 404 등 → 인증 통과 (requestId 없음)
-        return HTMLResponse('<span class="ok">✓ NCP 인증 성공 (requestId 없음 응답)</span>')
+        return HTMLResponse(f'<span class="err">✗ 연결 실패: {exc}</span>')
     finally:
         await client.aclose()
 
@@ -199,6 +202,7 @@ async def caller_create(
     _csrf: None = Depends(verify_csrf),
     number: str = Form(...),
     label: str = Form(...),
+    rcs_enabled: str = Form(""),
 ) -> RedirectResponse:
     """발신번호 추가."""
     # 숫자만 추출
@@ -218,6 +222,7 @@ async def caller_create(
         label=label,
         active=1,
         is_default=0,
+        rcs_enabled=1 if rcs_enabled == "on" else 0,
         created_at=_now_iso(),
     )
     db.add(caller)
@@ -421,4 +426,116 @@ async def audit_log_page(
             "date_to": date_to,
             "audit_actions": audit_actions,
         },
+    )
+
+
+# ── 시스템 업데이트 ─────────────────────────────────────────────────────────────
+
+
+_UPDATE_SCRIPT = "/opt/kotify/deploy/kotify-update.sh"
+
+
+async def _run_update_script(action: str) -> tuple[int, str, str]:
+    """업데이트 스크립트를 subprocess로 실행한다.
+
+    asyncio.create_subprocess_exec를 사용하여 셸을 거치지 않으므로
+    command injection 위험이 없다.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "sudo", _UPDATE_SCRIPT, action,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    return proc.returncode or 0, stdout.decode(), stderr.decode()
+
+
+@router.post("/system/check-update", response_class=HTMLResponse)
+async def check_update(
+    request: Request,
+    user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
+) -> HTMLResponse:
+    """HTMX — git fetch 후 업데이트 가능 여부를 표시한다."""
+    try:
+        rc, stdout, stderr = await _run_update_script("check")
+    except asyncio.TimeoutError:
+        return HTMLResponse('<span class="err">시간 초과. 서버 네트워크를 확인하세요.</span>')
+    except FileNotFoundError:
+        return HTMLResponse('<span class="err">업데이트 스크립트를 찾을 수 없습니다.</span>')
+
+    if rc != 0:
+        _update_log.warning("check-update failed: rc=%d stderr=%s", rc, stderr)
+        return HTMLResponse(f'<span class="err">확인 실패: {stderr[:200]}</span>')
+
+    try:
+        data = json.loads(stdout.strip().split("\n")[-1])
+    except (json.JSONDecodeError, IndexError):
+        return HTMLResponse('<span class="err">응답 파싱 실패</span>')
+
+    if not data.get("update_available"):
+        return HTMLResponse(
+            f'<span class="ok">\u2713 최신 버전입니다 ({data.get("current", "?")})</span>'
+        )
+
+    commits = data.get("commits", [])
+    count = data.get("count", len(commits))
+    html_parts = [
+        f'<div style="margin-bottom:8px"><strong class="warn">\u2b06 {count}건의 업데이트가 있습니다</strong>'
+        f' <span class="text-muted">({data.get("current", "?")} \u2192 {data.get("remote", "?")})</span></div>',
+        '<div style="max-height:160px;overflow-y:auto;font-size:11px;font-family:monospace;'
+        'background:var(--bg-elevated);padding:8px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:8px">',
+    ]
+    for c in commits[:15]:
+        html_parts.append(
+            f'<div><span class="text-muted">{c.get("hash", "")}</span> {c.get("message", "")}</div>'
+        )
+    if count > 15:
+        html_parts.append(f'<div class="text-muted">... 외 {count - 15}건</div>')
+    html_parts.append("</div>")
+    html_parts.append(
+        '<button class="btn btn-primary btn-sm" '
+        'hx-post="/admin/system/apply-update" '
+        'hx-target="#update-result" '
+        'hx-swap="innerHTML" '
+        'hx-confirm="업데이트를 설치하시겠습니까? 서비스가 잠시 재시작됩니다.">'
+        '<i data-lucide="download"></i> 업데이트 설치'
+        '<span class="htmx-indicator spinner"></span>'
+        '</button>'
+    )
+    return HTMLResponse("".join(html_parts))
+
+
+@router.post("/system/apply-update", response_class=HTMLResponse)
+async def apply_update(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(_admin_dep),
+    _csrf: None = Depends(verify_csrf),
+) -> HTMLResponse:
+    """HTMX — 업데이트 적용 (git pull + pip install + restart)."""
+    audit.log(db, actor_sub=user.sub, action="system.update")
+    db.commit()
+
+    try:
+        rc, stdout, stderr = await _run_update_script("apply")
+    except asyncio.TimeoutError:
+        return HTMLResponse('<span class="err">업데이트 시간 초과 (2분). 수동 확인 필요.</span>')
+    except FileNotFoundError:
+        return HTMLResponse('<span class="err">업데이트 스크립트를 찾을 수 없습니다.</span>')
+
+    if rc != 0:
+        _update_log.error("apply-update failed: rc=%d stderr=%s", rc, stderr)
+        return HTMLResponse(f'<span class="err">업데이트 실패: {stderr[:300]}</span>')
+
+    lines = stdout.strip().split("\n")
+    try:
+        result = json.loads(lines[-1])
+        version = result.get("version", "?")
+    except (json.JSONDecodeError, IndexError):
+        version = "?"
+
+    return HTMLResponse(
+        f'<span class="ok">✓ 업데이트 완료 ({version}). 서비스가 재시작됩니다...</span>'
+        '<script>setTimeout(function(){location.reload()}, 5000)</script>'
     )

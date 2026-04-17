@@ -21,7 +21,7 @@ from app.services.compose import (
     validate_message,
 )
 from app.services.image import (
-    NCP_MMS_MAX_BYTES,
+    MMS_MAX_BYTES,
     ImageProcessingError,
     preprocess_mms_image,
 )
@@ -111,7 +111,8 @@ async def compose_page(
                 db.execute(
                     sa_select(Message).where(
                         Message.campaign_id == resend_campaign,
-                        Message.result_status == "fail",
+                        Message.status.in_(["DONE", "FAILED"]),
+                        Message.result_code != "10000",
                     )
                 ).scalars().all()
             )
@@ -285,25 +286,22 @@ async def compose_send(
     if attachment_id:
         msg_result["message_type"] = "MMS"
 
-    # 싱글턴 NCP 클라이언트 사용 — circular import 방지를 위해 함수 안에서 import
-    from app.main import get_ncp_client  # noqa: PLC0415
-    ncp_client = get_ncp_client()
-    if ncp_client is None:
-        return _render_error("ncp_not_configured")
+    from app.main import get_msghub_client  # noqa: PLC0415
+    msghub_client = get_msghub_client()
+    if msghub_client is None:
+        return _render_error("msghub_not_configured")
 
     # subject는 LMS/MMS 일 때만 의미 있음 (SMS는 제목 미지원)
     final_subject = subject.strip() if msg_result["message_type"] in ("LMS", "MMS") else None
 
     # 예약 발송 파라미터 처리.
-    # 체크박스가 켜져 있고 reserve_time이 비어 있지 않을 때만 예약으로 간주.
     is_reserved = reserve_enabled == "on" and bool(reserve_time.strip())
     reserve_time_arg: str | None = reserve_time.strip() if is_reserved else None
-    reserve_tz_arg: str | None = reserve_timezone if is_reserved else None
 
     try:
         campaign = await dispatch_campaign(
             db=db,
-            ncp_client=ncp_client,
+            msghub_client=msghub_client,
             created_by=user.sub,
             caller_number=caller.number,
             content=content,
@@ -311,7 +309,6 @@ async def compose_send(
             message_type=msg_result["message_type"],
             subject=final_subject,
             reserve_time_local=reserve_time_arg,
-            reserve_timezone=reserve_tz_arg,
             attachment_id=attachment_id or None,
         )
 
@@ -327,7 +324,7 @@ async def compose_send(
 
 
 # 업로드 가능한 최대 원본 파일 크기 (전처리 전).
-# 너무 크면 메모리/CPU 낭비라서 컷. 전처리 후 NCP 제약(300KB)에 자동으로 맞춰진다.
+# 너무 크면 메모리/CPU 낭비라서 컷. 전처리 후 MMS 제약(300KB)에 자동으로 맞춰진다.
 MAX_RAW_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB
 
 
@@ -344,8 +341,8 @@ async def compose_upload_attachment(
 
     파이프라인:
     1. 원본 파일 읽기 (최대 10MB)
-    2. preprocess_mms_image() — Pillow 로 NCP 제약에 맞게 변환
-    3. NCPClient.upload_attachment() — base64 업로드, fileId 수신
+    2. preprocess_mms_image() — Pillow로 MMS 제약에 맞게 변환
+    3. msghub upload_file() — 파일 사전등록, fileId 수신
     4. attachments 테이블에 BLOB + 메타 저장
     5. JSON 응답 — UI 가 attachment_id 를 form hidden 으로 보존
     """
@@ -365,29 +362,36 @@ async def compose_upload_attachment(
     except ImageProcessingError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
-    # 3. NCP 업로드
-    from app.main import get_ncp_client  # noqa: PLC0415
-    from app.ncp.client import NCPError  # noqa: PLC0415
+    # 3. msghub 업로드 (RCS + MMS 양쪽)
+    from app.main import get_msghub_client  # noqa: PLC0415
+    from app.msghub.schemas import MsghubError  # noqa: PLC0415
 
-    ncp_client = get_ncp_client()
-    if ncp_client is None:
+    msghub_client = get_msghub_client()
+    if msghub_client is None:
         return JSONResponse(
-            {"error": "NCP 설정이 완료되지 않았습니다."}, status_code=503
+            {"error": "msghub 설정이 완료되지 않았습니다."}, status_code=503
         )
 
-    stored_filename = f"{uuid.uuid4().hex}.jpg"
+    file_id = uuid.uuid4().hex
+    stored_filename = f"{file_id}.jpg"
     try:
-        upload_resp = await ncp_client.upload_attachment(stored_filename, processed)
-    except NCPError as exc:
+        # MMS fallback용 업로드 (300KB JPEG)
+        upload_resp = await msghub_client.upload_file(
+            channel="mms",
+            file_id=f"mms-{file_id}",
+            file_bytes=processed,
+            content_type="image/jpeg",
+        )
+    except MsghubError as exc:
         return JSONResponse(
-            {"error": f"NCP 업로드 실패: {exc}"}, status_code=502
+            {"error": f"msghub 업로드 실패: {exc}"}, status_code=502
         )
 
     # 4. DB 저장
     now = datetime.now(UTC).isoformat()
     attachment = Attachment(
         campaign_id=None,  # compose_send 시점에 연결됨
-        ncp_file_id=upload_resp.file_id,
+        msghub_file_id=upload_resp.file_id,
         original_filename=file.filename or stored_filename,
         stored_filename=stored_filename,
         content_blob=processed,
@@ -396,7 +400,8 @@ async def compose_upload_attachment(
         height=height,
         uploaded_by=user.sub,
         uploaded_at=now,
-        ncp_expires_at=upload_resp.expire_time or None,
+        file_expires_at=upload_resp.file_exp_dt or None,
+        channel="mms",
     )
     db.add(attachment)
     db.commit()

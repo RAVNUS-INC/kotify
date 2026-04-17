@@ -58,7 +58,7 @@ def has_unsupported_chars(text: str) -> bool:
         text: 검사할 문자열.
 
     Returns:
-        True이면 NCP 발송 시 실패할 수 있으므로 발송 차단 권장.
+        True이면 발송 시 실패할 수 있으므로 발송 차단 권장.
     """
     try:
         text.encode("euc-kr")
