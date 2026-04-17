@@ -13,7 +13,7 @@ description = "Korean broadcast notification system powered by Naver Cloud Platf
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "RAVNUS Inc." }]
-keywords = ["sms", "broadcast", "notification", "ncp", "naver-cloud", "korea", "fastapi"]
+keywords = ["sms", "rcs", "broadcast", "notification", "msghub", "uplus", "korea", "fastapi"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: FastAPI",

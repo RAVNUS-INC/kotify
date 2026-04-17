@@ -18,11 +18,11 @@ class TestSettingsStore:
     def test_set_and_get_secret(self, db_session):
         """시크릿 값 저장/조회 — 자동 암복호화."""
         store = SettingsStore(db_session)
-        store.set("ncp.access_key", "my-super-secret-key",
+        store.set("msghub.api_key", "my-super-secret-key",
                   is_secret=True, updated_by=None)
         db_session.commit()
 
-        val = store.get("ncp.access_key")
+        val = store.get("msghub.api_key")
         assert val == "my-super-secret-key"
 
     def test_get_missing_returns_default(self, db_session):
@@ -75,12 +75,12 @@ class TestSettingsStore:
         """is_secret=False인 설정만 반환."""
         store = SettingsStore(db_session)
         store.set("keycloak.issuer", "https://example.com", is_secret=False, updated_by=None)
-        store.set("ncp.access_key", "secret", is_secret=True, updated_by=None)
+        store.set("msghub.api_key", "secret", is_secret=True, updated_by=None)
         db_session.commit()
 
         public = store.get_all_public()
         assert "keycloak.issuer" in public
-        assert "ncp.access_key" not in public
+        assert "msghub.api_key" not in public
 
     def test_secret_value_is_encrypted_in_db(self, db_session):
         """DB에 저장된 시크릿 값은 암호화되어 있어야 함."""
@@ -89,15 +89,15 @@ class TestSettingsStore:
         from app.models import Setting
 
         store = SettingsStore(db_session)
-        store.set("ncp.secret_key", "plaintext-secret",
+        store.set("msghub.api_pwd", "plaintext-secret",
                   is_secret=True, updated_by=None)
         db_session.commit()
 
         row = db_session.execute(
-            select(Setting).where(Setting.key == "ncp.secret_key")
+            select(Setting).where(Setting.key == "msghub.api_pwd")
         ).scalar_one()
 
         # DB에 저장된 값은 평문이 아니어야 함
         assert row.value != "plaintext-secret"
         # 하지만 get()하면 평문으로 반환
-        assert store.get("ncp.secret_key") == "plaintext-secret"
+        assert store.get("msghub.api_pwd") == "plaintext-secret"

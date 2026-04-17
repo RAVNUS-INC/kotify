@@ -1,12 +1,12 @@
 # kotify
 
-> Korean broadcast notification system powered by Naver Cloud Platform (NCP).
+> Korean broadcast notification system powered by U+ msghub (RCS/SMS/LMS/MMS).
 
 [![Tests](https://github.com/RAVNUS-INC/kotify/actions/workflows/test.yml/badge.svg)](https://github.com/RAVNUS-INC/kotify/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-A self-hostable web application for sending mass SMS announcements via NCP SENS,
+A self-hostable web application for sending mass RCS/SMS announcements via U+ msghub,
 built specifically for Korean phone numbers and Korean operators.
 
 **Languages**: [English](#english) | [한국어](#한국어)
@@ -17,22 +17,23 @@ built specifically for Korean phone numbers and Korean operators.
 
 ### Features
 
-- Mass SMS dispatch via NCP SENS API (up to 1,000 recipients per campaign)
+- RCS-first messaging via U+ msghub API with SMS/LMS/MMS auto-fallback (up to 1,000 recipients)
 - Keycloak OIDC authentication with role-based access (viewer / sender / admin)
-- Real-time delivery status polling and history
+- Real-time delivery status via webhook and history
 - Korean phone number normalization (010-1234-5678, +82-10-1234-5678, etc.)
 - Encrypted secrets storage (Fernet) — no `.env` file required
 - Web-based setup wizard for first-time configuration
 - Single-file deployment via Proxmox LXC bootstrap script
 - Audit logging for all sensitive actions
-- 1,000 recipient limit (NCP API constraint enforced)
+- 1,000 recipient limit per campaign
+- One-click system update from admin settings
 
 ### Architecture
 
 - **Backend**: FastAPI + SQLAlchemy 2.0 + SQLite
 - **Frontend**: Jinja2 + HTMX (no SPA, no build step)
 - **Auth**: Authlib + Keycloak OIDC
-- **Background**: asyncio polling worker (NCP delivery sync)
+- **Messaging**: U+ msghub API (RCS bidirectional CHAT + SMS/LMS/MMS fallback)
 - **Encryption**: Fernet (AES-128-CBC + HMAC-SHA256) for secrets
 
 ### Quick Start (Development)
@@ -63,7 +64,8 @@ See [deploy/README.md](deploy/README.md) for detailed instructions.
 ### Configuration
 
 All configuration is done via the web-based setup wizard:
-- NCP SENS credentials (Access Key, Secret Key, Service ID)
+- msghub API credentials (API Key, API Password)
+- RCS settings (Brand ID, Chatbot ID)
 - Keycloak OIDC (issuer, client ID/secret)
 - First admin email (must match Keycloak login email)
 - Public URL
@@ -87,7 +89,7 @@ mv /opt/sms /opt/kotify
 
 - [Architecture & Specification](claudedocs/SPEC.md)
 - [E2E Deployment Checklist](claudedocs/E2E-CHECKLIST.md)
-- [NCP SENS Research Notes](claudedocs/ncp-research.md)
+- [msghub API Guide](claudedocs/msghub-api-guide.md)
 - [Deployment Guide](deploy/README.md)
 
 ### Contributing
@@ -104,15 +106,15 @@ MIT — see [LICENSE](LICENSE).
 
 ### 주요 기능
 
-- NCP SENS를 활용한 단체 SMS 발송 (캠페인당 최대 1,000명)
+- U+ msghub를 활용한 RCS/SMS 단체 발송 (캠페인당 최대 1,000명)
 - Keycloak OIDC 인증 + 역할 기반 권한 (viewer / sender / admin)
-- 실시간 발송 결과 폴링 및 이력 관리
+- 웹훅 기반 실시간 발송 결과 수신 및 이력 관리
 - 한국 휴대폰 번호 자동 정규화 (다양한 형식 지원)
 - 시크릿 암호화 저장 (Fernet) — `.env` 파일 불필요
 - 웹 기반 첫 설정 마법사
 - Proxmox LXC 부트스트랩 스크립트로 단일 파일 배포
 - 모든 민감 작업 감사 로깅
-- 1,000명 제한 (NCP API 제약 강제)
+- 캠페인당 1,000명 제한
 
 ### 빠른 시작 (개발)
 

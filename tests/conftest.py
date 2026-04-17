@@ -80,56 +80,6 @@ def setup_master_key(tmp_path, monkeypatch):
     crypto.get_fernet.cache_clear()
 
 
-# ── NCP Client Mock ───────────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def mock_ncp_client():
-    """NCPClient 모킹 — send_sms와 list_by_request_id를 대체."""
-    from app.ncp.client import ListResponse, MessageItem, SendResponse
-
-    client = MagicMock()
-
-    async def fake_send_sms(
-        from_number,
-        content,
-        to_numbers,
-        message_type="SMS",
-        subject=None,
-        reserve_time=None,
-        reserve_time_zone=None,
-        file_ids=None,
-    ):
-        # send_sms는 단일 청크(≤100건)만 처리 — SendResponse 단일 객체 반환
-        return SendResponse(
-            request_id="REQ-0000",
-            request_time="2026-04-08T12:00:00",
-            status_code="202",
-            status_name="success",
-        )
-
-    async def fake_list_by_request_id(request_id):
-        return ListResponse(
-            request_id=request_id,
-            status_code="200",
-            status_name="success",
-            messages=[
-                MessageItem(
-                    message_id=f"MSG-{request_id}-{i}",
-                    to=f"0100000{i:04d}",
-                    status="COMPLETED",
-                    status_name="success",
-                    status_code="0",
-                )
-                for i in range(3)
-            ],
-        )
-
-    client.send_sms = fake_send_sms
-    client.list_by_request_id = fake_list_by_request_id
-    return client
-
-
 # ── 사용자/발신번호 Fixture ───────────────────────────────────────────────────
 
 
