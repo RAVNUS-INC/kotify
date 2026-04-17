@@ -3,18 +3,20 @@
 msghub가 발송 결과를 POST로 전달한다.
 - 200: 성공 처리
 - 400: 실패 → msghub가 10초 후 재시도
-- 보안: 웹훅 시크릿 토큰 또는 비활성 시 IP 기반 신뢰
+- 보안: 웹훅 시크릿 토큰 헤더 검증 (미설정 시 경고 로그 + 통과)
 """
 from __future__ import annotations
 
 import hmac
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
-from app.db import SessionLocal
+from app.db import get_db
 from app.msghub.schemas import WebhookReport
+from app.security.settings_store import SettingsStore
 from app.services.report import process_report
 
 log = logging.getLogger(__name__)
@@ -22,22 +24,17 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 
-def _verify_webhook(request: Request) -> bool:
+def _verify_webhook(request: Request, db: Session) -> bool:
     """웹훅 요청의 유효성을 검증한다.
 
     msghub 콘솔에서 등록한 웹훅 시크릿이 있으면 헤더로 검증.
-    없으면 통과 (콘솔에서 URL 등록 자체가 신뢰 기반).
+    없으면 경고 로그 후 통과 (콘솔에서 URL 등록 자체가 신뢰 기반).
     """
-    from app.security.settings_store import SettingsStore
-
-    db = SessionLocal()
-    try:
-        store = SettingsStore(db)
-        secret = store.get("msghub.webhook_secret")
-    finally:
-        db.close()
+    store = SettingsStore(db)
+    secret = store.get("msghub.webhook_secret")
 
     if not secret:
+        log.warning("msghub.webhook_secret 미설정 — 웹훅 인증 없이 통과")
         return True
 
     sig = request.headers.get("X-Msghub-Signature", "")
@@ -45,9 +42,12 @@ def _verify_webhook(request: Request) -> bool:
 
 
 @router.post("/msghub/report")
-async def receive_report(request: Request) -> JSONResponse:
+async def receive_report(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
     """msghub 발송 결과 웹훅 수신."""
-    if not _verify_webhook(request):
+    if not _verify_webhook(request, db):
         log.warning("웹훅 인증 실패: %s", request.client.host if request.client else "unknown")
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
@@ -66,7 +66,6 @@ async def receive_report(request: Request) -> JSONResponse:
     if not report.items:
         return JSONResponse({"status": "no items"}, status_code=200)
 
-    db = SessionLocal()
     try:
         processed = process_report(db, report.items)
         db.commit()
@@ -76,5 +75,3 @@ async def receive_report(request: Request) -> JSONResponse:
         db.rollback()
         log.exception("웹훅 리포트 처리 실패")
         return JSONResponse({"error": "processing failed"}, status_code=400)
-    finally:
-        db.close()

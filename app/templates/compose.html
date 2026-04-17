@@ -246,7 +246,7 @@
           </tr>
           <tr>
             <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">발송 방식</th>
-            <td style="padding:5px 8px;border:1px solid var(--border)">RCS 우선 → SMS 자동 전환</td>
+            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-channel">RCS 우선 → SMS 자동 전환</td>
           </tr>
           <tr>
             <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary);vertical-align:top">본문</th>
@@ -487,6 +487,8 @@ function openSendModal() {
   document.getElementById('modal-type').textContent = msgType;
   document.getElementById('modal-content').textContent = contentPreview || '(비어있음)';
   document.getElementById('modal-cost').textContent = costText;
+  var fbLabel = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : 'LMS');
+  document.getElementById('modal-channel').textContent = 'RCS 우선 → ' + fbLabel + ' 자동 전환';
 
   // 예약 모드일 때 확인 버튼 문구/경고 메시지 교체
   var reserveEnabled = document.getElementById('reserve-enabled');

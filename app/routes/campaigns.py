@@ -296,9 +296,8 @@ async def campaign_export(
     for msg in messages:
         fb_desc = ""
         if msg.fb_reason:
-            import json as _json
             try:
-                fb_list = _json.loads(msg.fb_reason)
+                fb_list = json.loads(msg.fb_reason)
                 fb_desc = "; ".join(f.get("desc", f.get("code", "")) for f in fb_list)
             except (ValueError, TypeError):
                 fb_desc = ""
