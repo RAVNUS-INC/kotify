@@ -10,12 +10,24 @@
 {% block content %}
 <div style="max-width:640px;margin:0 auto">
 
-  <div class="card" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+  <div class="card" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
     <div>
       <div style="font-weight:600">{{ phone | phone_fmt }}</div>
       <div style="font-size:12px;color:var(--text-muted)">발신번호 {{ caller | phone_fmt }}</div>
     </div>
-    <div style="font-size:12px;color:var(--text-muted)">{{ messages | length }}개 메시지</div>
+    <div style="font-size:12px;color:var(--text-muted);text-align:right">
+      {{ messages | length }}개 메시지
+      {% if session and session.recent_out_count > 0 %}
+      <div style="margin-top:2px">
+        24h 세션 과금:
+        <strong style="color:var(--text)">{{ session.session_billed }}원</strong>
+        <span title="24시간 내 발신 {{ session.recent_out_count }}건. RCS 양방향은 세션당 최대 {{ session.max_units }}건({{ session.cap_krw }}원) 상한 적용."
+              style="cursor:help;text-decoration:underline dotted">
+          ({{ session.recent_out_count }}/{{ session.max_units }}건{% if session.capped %} · 상한 도달{% endif %})
+        </span>
+      </div>
+      {% endif %}
+    </div>
   </div>
 
   <div id="messages" style="padding:16px 0;display:flex;flex-direction:column;gap:6px">

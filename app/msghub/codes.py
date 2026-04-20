@@ -36,7 +36,7 @@ SUCCESS_CODE = "10000"
 # 건당 요금 (원, VAT 별도, 후불)
 PRICE_TABLE: dict[tuple[str, str], int] = {
     # (channel, productCode) → 단가
-    ("RCS", "CHAT"): 8,       # RCS 양방향
+    ("RCS", "CHAT"): 8,       # RCS 양방향 — 24h 세션 상한 적용 (아래 상수 참조)
     ("RCS", "SMS"): 17,       # RCS SMS (미사용, 양방향 우선)
     ("RCS", "LMS"): 27,       # RCS LMS
     ("RCS", "MMS"): 85,       # RCS MMS
@@ -45,6 +45,24 @@ PRICE_TABLE: dict[tuple[str, str], int] = {
     ("LMS", "LMS"): 27,
     ("MMS", "MMS"): 85,
 }
+
+# RCS 양방향(CHAT) 세션 과금 정책
+# 동일 (챗봇, 고객) 쌍의 24시간 세션당 최대 10건까지만 건당 과금되고
+# 이후는 상한(80원)으로 고정. 즉 한 세션 내 건수 N ≥ 10이면 청구는 80원.
+CHAT_SESSION_WINDOW_HOURS: int = 24
+CHAT_SESSION_MAX_UNITS: int = 10
+CHAT_SESSION_CAP_KRW: int = 80
+
+
+def chat_session_cost(unit_count_in_window: int) -> int:
+    """24h 세션 내 RCS 양방향 발송 건수 → 실 청구액(원).
+
+    0건=0원, 1~9건=건수×8원, 10건 이상=80원 상한.
+    """
+    if unit_count_in_window <= 0:
+        return 0
+    capped = min(unit_count_in_window, CHAT_SESSION_MAX_UNITS)
+    return capped * PRICE_TABLE[("RCS", "CHAT")]
 
 # 메시지 유형 → (RCS 키, Fallback 키) 매핑
 _ESTIMATE_MAP: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {

@@ -67,6 +67,7 @@ async def thread_detail(
     messages = chat_service.get_thread(db, caller, phone)
     if not messages:
         raise HTTPException(status_code=404, detail="대화 내역이 없습니다")
+    session = chat_service.chat_session_summary(messages)
     return templates.TemplateResponse(
         request,
         "chat/thread.html",
@@ -76,6 +77,7 @@ async def thread_detail(
             "caller": caller,
             "phone": phone,
             "messages": messages,
+            "session": session,
         },
     )
 
@@ -96,6 +98,7 @@ async def reply(
 
     def _render_error(error: str) -> HTMLResponse:
         messages = chat_service.get_thread(db, caller, phone)
+        session = chat_service.chat_session_summary(messages)
         return templates.TemplateResponse(
             request,
             "chat/thread.html",
@@ -105,6 +108,7 @@ async def reply(
                 "caller": caller,
                 "phone": phone,
                 "messages": messages,
+                "session": session,
                 "error": error,
                 "draft": content,
             },

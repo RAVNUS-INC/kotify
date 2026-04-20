@@ -6,12 +6,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Campaign, Message, MoMessage, User
+from app.msghub.codes import (
+    CHAT_SESSION_CAP_KRW,
+    CHAT_SESSION_MAX_UNITS,
+    CHAT_SESSION_WINDOW_HOURS,
+    chat_session_cost,
+)
 from app.services.compose import dispatch_campaign, validate_message
 
 if TYPE_CHECKING:
@@ -229,6 +236,52 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
 
     out.sort(key=lambda m: m.timestamp)
     return out
+
+
+def chat_session_summary(messages: list[ChatMessage]) -> dict:
+    """대화방의 최근 24h 세션 과금 요약.
+
+    RCS 양방향(CHAT)은 (챗봇, 고객) 쌍의 24시간 세션당 최대 80원(10건) 상한.
+    Message.cost는 건당 8원으로 저장되지만 실 청구는 세션 단위로 capped된다.
+
+    Returns:
+        {
+          "recent_out_count": 최근 24h 내 OUT 건수,
+          "session_billed": 세션 상한 적용한 실 청구액(원),
+          "session_raw": 상한 미적용 시 원래 합계(원),
+          "capped": True면 상한에 도달해 축소됨,
+          "cap_krw": 80,
+          "max_units": 10,
+        }
+    """
+    now = datetime.now(UTC)
+    window_start = now - timedelta(hours=CHAT_SESSION_WINDOW_HOURS)
+
+    out_count = 0
+    raw_total = 0
+    for m in messages:
+        if m.direction != "OUT":
+            continue
+        try:
+            ts = datetime.fromisoformat(m.timestamp)
+        except (ValueError, TypeError):
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        if ts >= window_start:
+            out_count += 1
+            raw_total += m.cost or 0
+
+    billed = chat_session_cost(out_count)
+    return {
+        "recent_out_count": out_count,
+        "session_billed": billed,
+        "session_raw": raw_total,
+        "capped": out_count >= CHAT_SESSION_MAX_UNITS,
+        "cap_krw": CHAT_SESSION_CAP_KRW,
+        "max_units": CHAT_SESSION_MAX_UNITS,
+        "window_hours": CHAT_SESSION_WINDOW_HOURS,
+    }
 
 
 def validate_reply_content(content: str) -> dict:

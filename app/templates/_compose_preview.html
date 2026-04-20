@@ -85,6 +85,9 @@
       {% else %}
       <strong>{{ "{:,}".format(rcs_unit * valid_count) }}원</strong> (RCS/LMS 동일 단가)
       {% endif %}
+      {% if message_type == "SMS" %}
+      <br><span class="text-muted">※ RCS 양방향은 24h 세션당 최대 80원(10건) 상한. 동일 고객에게 반복 발송 시 상한 적용.</span>
+      {% endif %}
     </div>
   </div>
   {% endif %}
