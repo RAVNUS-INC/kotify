@@ -402,15 +402,6 @@ class MsghubClient:
 
     # ── 예약 발송 관리 ───────────────────────────────────────────────────────
 
-    async def get_reserve_list(self) -> list[dict]:
-        """예약 발송 목록 조회."""
-        headers = await self._auth_headers()
-        url = f"{self._api_base}/msg/v1.1/resv/sendList"
-        resp = await self._http.get(url, headers=headers)
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
-        return data.get("data", {}).get("resvSendList", [])
-
     async def cancel_reservation(self, web_req_id: str, reason: str = "") -> None:
         """예약 발송 취소."""
         headers = await self._auth_headers()
@@ -443,3 +434,31 @@ class MsghubClient:
         data = _parse_json(resp)
         _raise_for_response(data, resp.status_code)
         return data.get("data", {}).get("cliKeyLst", [])
+
+    # ── 통계 조회 ────────────────────────────────────────────────────────────
+
+    async def get_daily_stats(self, ymd: str, project_id: str) -> list[dict]:
+        """일자별 발송 통계 조회 (msghub 서버 기준).
+
+        우리 DB의 campaign/message 집계(_refresh_campaign_counters)와 대조해
+        누락된 webhook/과금 차이를 감사할 때 사용.
+
+        Args:
+            ymd: 조회 일자 "YYYYMMDD" 형식
+            project_id: msghub 프로젝트 ID
+
+        Returns:
+            채널별 통계 dict 리스트. 각 항목:
+              - ymd, projectId, apiKey, ch
+              - totCnt (전체 발송), succCnt (성공), failCnt (실패)
+        """
+        headers = await self._auth_headers()
+        url = f"{self._mnt_base}/msg/v1/stat"
+        body = {"ymd": ymd, "projectId": project_id}
+        resp = await self._http.post(url, json=body, headers=headers)
+        data = _parse_json(resp)
+        _raise_for_response(data, resp.status_code)
+        payload = data.get("data")
+        if isinstance(payload, list):
+            return payload
+        return []

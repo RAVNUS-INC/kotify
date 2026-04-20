@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -576,17 +576,11 @@ async def apply_update(
             status_code=500,
         )
 
-    if rc != 0:
-        _update_log.error("apply-update failed: rc=%d stderr=%s", rc, stderr)
-        return JSONResponse(
-            {"status": "error", "error": "script_failed",
-             "message": f"업데이트 실패: {stderr[:300]}"},
-            status_code=500,
-        )
-
-    lines = stdout.strip().split("\n")
-    version = "?"
-    for line in reversed(lines):
+    # stdout에서 "done" phase 먼저 탐색. systemctl restart가 비동기로 스케줄되어
+    # 스크립트 exit 직후 uvicorn이 죽을 수도 있어 rc가 비정상으로 돌아올 수
+    # 있는데, "done" 찍혔다면 업데이트는 성공한 상태. rc에 앞서 stdout을 신뢰.
+    version: str | None = None
+    for line in reversed(stdout.strip().split("\n")):
         try:
             result = json.loads(line)
             if result.get("phase") == "done" and result.get("version"):
@@ -595,4 +589,83 @@ async def apply_update(
         except (json.JSONDecodeError, AttributeError):
             continue
 
-    return JSONResponse({"status": "ok", "version": version})
+    if version:
+        return JSONResponse({"status": "ok", "version": version})
+
+    # "done" 못 찾았고 rc도 비정상이면 실제 실패
+    if rc != 0:
+        _update_log.error("apply-update failed: rc=%d stderr=%s", rc, stderr)
+        return JSONResponse(
+            {"status": "error", "error": "script_failed",
+             "message": f"업데이트 실패: {stderr[:300]}"},
+            status_code=500,
+        )
+
+    # rc=0인데 phase=done이 없는 경우 — 구버전 스크립트이거나 출력 이상.
+    # 업데이트는 일단 반영된 것으로 가정하고 ok 반환 (client가 /healthz로 검증).
+    return JSONResponse({"status": "ok", "version": "?"})
+
+
+# ── 통계 대조 ──────────────────────────────────────────────────────────────────
+
+
+@router.get("/system/msghub-stats", response_model=None)
+async def msghub_daily_stats(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(_admin_dep),
+    ymd: str = Query(..., description="조회 일자 (YYYYMMDD)"),
+    project_id: str = Query(..., description="msghub 프로젝트 ID"),
+) -> JSONResponse:
+    """msghub 서버측 일자별 발송 통계 조회 + 우리 DB 집계와 비교.
+
+    관리자가 과금/누락 감사용으로 호출. 우리 DB는 webhook 기반이라
+    이론상 msghub 통계와 일치해야 하며, 차이가 나면 webhook 유실 등의
+    신호로 활용한다.
+    """
+    from app.main import get_msghub_client  # noqa: PLC0415
+    from app.models import Campaign, Message  # noqa: PLC0415
+
+    client = get_msghub_client()
+    if client is None:
+        return JSONResponse(
+            {"error": "msghub 설정이 완료되지 않았습니다"}, status_code=503,
+        )
+
+    # 1) msghub 통계 조회
+    try:
+        msghub_stats = await client.get_daily_stats(ymd, project_id)
+    except Exception as exc:
+        return JSONResponse(
+            {"error": f"msghub 통계 조회 실패: {exc}"}, status_code=502,
+        )
+
+    # 2) 우리 DB 집계 (UTC ISO 접두 기준 발송일)
+    from sqlalchemy import case
+
+    ymd_iso = f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:8]}"
+    rows = db.execute(
+        select(
+            Message.channel,
+            func.count().label("total"),
+            func.sum(
+                case((Message.result_code == "10000", 1), else_=0)
+            ).label("succ"),
+        )
+        .join(Campaign, Campaign.id == Message.campaign_id)
+        .where(Campaign.created_at.like(f"{ymd_iso}%"))
+        .group_by(Message.channel)
+    ).all()
+    local_counts: dict[str, dict] = {}
+    for r in rows:
+        ch = r.channel or "UNKNOWN"
+        total = int(r.total or 0)
+        succ = int(r.succ or 0)
+        local_counts[ch] = {"total": total, "succ": succ, "fail": total - succ}
+
+    return JSONResponse({
+        "ymd": ymd,
+        "project_id": project_id,
+        "msghub": msghub_stats,
+        "local_db": local_counts,
+    })
