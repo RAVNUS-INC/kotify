@@ -37,7 +37,10 @@ Environment=PYTHONUNBUFFERED=1
 # 로 해당 스크립트 1개에만 한정되어 있으므로 실효 공격면은 좁음.
 NoNewPrivileges=false
 ProtectSystem=strict
-ReadWritePaths=/var/lib/kotify /var/log/kotify
+# /opt/kotify 포함: 웹 UI 원클릭 업데이트(git pull + pip install -e)가 해당
+# 경로에 쓰기를 요구. 없으면 systemd 네임스페이스 안에서 read-only라 스크립트가
+# stderr 없이 rc=255로 실패한다.
+ReadWritePaths=/var/lib/kotify /var/log/kotify /opt/kotify
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
