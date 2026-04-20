@@ -46,10 +46,23 @@ case "${1:-}" in
         echo '{"phase": "install"}'
         "${VENV}/bin/pip" install -e "${INSTALL_DIR}" --quiet 2>/dev/null
 
-        echo '{"phase": "restart"}'
-        systemctl restart "${SERVICE}"
-
         NEW_HASH=$(git rev-parse --short HEAD)
+
+        # 재시작은 2초 뒤 비동기로. HTTP 응답이 클라이언트에 먼저 도달하도록
+        # 하여 '업데이트 실패:' 오해를 방지하고, 클라이언트가 /healthz의 버전
+        # 필드로 재시작 완료를 정확히 감지할 수 있게 한다.
+        # systemd-run은 현재 프로세스의 cgroup에서 분리된 transient unit을
+        # 생성하므로 systemctl restart가 자신을 죽이는 문제가 없다.
+        echo '{"phase": "restart_scheduled"}'
+        if command -v systemd-run >/dev/null 2>&1; then
+            systemd-run --on-active=2s --unit="kotify-restart-$$" \
+                /bin/systemctl restart "${SERVICE}" >/dev/null 2>&1 || \
+                (nohup bash -c "sleep 2 && systemctl restart ${SERVICE}" >/dev/null 2>&1 &)
+        else
+            nohup bash -c "sleep 2 && systemctl restart ${SERVICE}" >/dev/null 2>&1 &
+        fi
+        disown 2>/dev/null || true
+
         echo '{"phase": "done", "version": "'"${NEW_HASH}"'"}'
         ;;
 

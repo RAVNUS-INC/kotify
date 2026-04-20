@@ -493,68 +493,106 @@ async def check_update(
     if count > 15:
         html_parts.append(f'<div class="text-muted">... 외 {count - 15}건</div>')
     html_parts.append("</div>")
-    # 업데이트 설치 시 systemctl restart 가 업데이트 스크립트 자신을 죽이므로
-    # HTTP 응답이 완료되기 전에 연결이 끊긴다. HTMX는 이를 "실패"로 표시하는데
-    # 실제 업데이트는 성공한 상태가 대부분. 따라서 클릭 즉시 "설치 중..."
-    # 메시지로 바꾸고 30초 후 무조건 자동 새로고침하여 혼선을 방지한다.
+    # 업데이트 UX:
+    # 1) apply-update는 git pull + pip install만 동기 실행하고 systemctl restart는
+    #    2초 뒤로 schedule (deploy/kotify-update.sh). 응답이 먼저 클라이언트에 도달.
+    # 2) 응답 JSON에 target version 포함. 클라이언트는 /healthz를 1초 간격으로
+    #    폴링하며 버전이 target과 일치하면 즉시 새로고침.
+    # 3) 진행 경과(초 단위)가 UI에 실시간 표시되어 "멍때리는 대기" 대신 피드백.
+    # 4) 60초 timeout 시 수동 새로고침 안내.
     html_parts.append(
-        "<script>window.kotifyApplyUpdate=function(){"
-        "var e=document.getElementById('update-result');"
-        "if(e){e.textContent="
-        "'\u23f3 \uc5c5\ub370\uc774\ud2b8 \uc124\uce58 \uc911... "
-        "\uc57d 30\ucd08 \ud6c4 \uc790\ub3d9\uc73c\ub85c \uc0c8\ub85c\uace0\uce68\ub429\ub2c8\ub2e4.';"
-        "e.className='text-muted';}"
-        "setTimeout(function(){location.reload();},30000);};</script>"
+        "<script>window.kotifyApplyUpdate=async function(){"
+        "if(!confirm('업데이트를 설치하시겠습니까? 서비스가 잠시 재시작됩니다.'))return;"
+        "var el=document.getElementById('update-result');"
+        "if(!el)return;"
+        "el.className='text-muted';"
+        "el.textContent='\u23f3 \ud604\uc7ac \ubc84\uc804 \ud655\uc778...';"
+        "var prevVersion=null;"
+        "try{var r0=await fetch('/healthz',{cache:'no-store'});"
+        "if(r0.ok){var j0=await r0.json();prevVersion=j0.version;}}catch(e){}"
+        "el.textContent='\u23f3 \uc5c5\ub370\uc774\ud2b8 \ub2e4\uc6b4\ub85c\ub4dc + \uc124\uce58 \uc911...';"
+        "var csrf='';var m=document.querySelector('meta[name=\"csrf-token\"]');"
+        "if(m)csrf=m.getAttribute('content')||'';"
+        "var targetVersion=null;var errMsg=null;"
+        "try{var resp=await fetch('/admin/system/apply-update',"
+        "{method:'POST',headers:{'X-CSRF-Token':csrf}});"
+        "if(resp.ok){var data=await resp.json();targetVersion=data.version;}"
+        "else{try{var e2=await resp.json();errMsg=e2.message||('HTTP '+resp.status);}"
+        "catch(_){errMsg='HTTP '+resp.status;}}"
+        "}catch(e){errMsg=String(e);}"
+        "if(errMsg){el.className='err';el.textContent='\u2717 '+errMsg;return;}"
+        "el.textContent='\u23f3 \uc11c\ube44\uc2a4 \uc7ac\uc2dc\uc791 \uc911... (0s)';"
+        "var elapsed=0;var maxWait=60;"
+        "var timer=setInterval(async function(){"
+        "elapsed++;"
+        "el.textContent='\u23f3 \uc11c\ube44\uc2a4 \uc7ac\uc2dc\uc791 \uc911... ('+elapsed+'s)';"
+        "try{var r2=await fetch('/healthz',{cache:'no-store'});"
+        "if(r2.ok){var j2=await r2.json();"
+        "var done=targetVersion?(j2.version===targetVersion):"
+        "(prevVersion&&j2.version&&j2.version!==prevVersion);"
+        "if(done){clearInterval(timer);el.className='ok';"
+        "el.textContent='\u2713 \uc5c5\ub370\uc774\ud2b8 \uc644\ub8cc ('+j2.version+'). \uc0c8\ub85c\uace0\uce68 \uc911...';"
+        "setTimeout(function(){location.reload();},500);return;}}"
+        "}catch(e){}"
+        "if(elapsed>=maxWait){clearInterval(timer);el.className='err';"
+        "el.textContent='\u2717 \uc2dc\uac04 \ucd08\uacfc (60\ucd08). \uc218\ub3d9\uc73c\ub85c \uc0c8\ub85c\uace0\uce68\ud574\uc8fc\uc138\uc694.';}"
+        "},1000);};</script>"
     )
-    # hx-swap="none": systemctl restart가 uvicorn을 죽이면서 HTTP 응답이
-    # 잘리거나, 재시작 완료 전에 rc != 0 에러 응답이 먼저 도착하는 레이스가
-    # 발생한다. 이 경우 HTMX가 기본 swap을 하면 "설치 중..." 메시지가
-    # "업데이트 실패:"로 덮어씌워져 사용자가 오해한다. "none"으로 swap을 막고
-    # 30초 타이머로만 상태 확인(새로고침 후 현재 버전 비교)하는 전략.
     html_parts.append(
-        '<button class="btn btn-primary btn-sm" '
-        'hx-post="/admin/system/apply-update" '
-        'hx-target="#update-result" '
-        'hx-swap="none" '
-        'hx-on:htmx:before-request="kotifyApplyUpdate()" '
-        'hx-confirm="업데이트를 설치하시겠습니까? 서비스가 잠시 재시작됩니다.">'
+        '<button type="button" class="btn btn-primary btn-sm" '
+        'onclick="kotifyApplyUpdate()">'
         '<i data-lucide="download"></i> 업데이트 설치'
-        '<span class="htmx-indicator spinner"></span>'
         '</button>'
     )
     return HTMLResponse("".join(html_parts))
 
 
-@router.post("/system/apply-update", response_class=HTMLResponse)
+@router.post("/system/apply-update")
 async def apply_update(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(_admin_dep),
     _csrf: None = Depends(verify_csrf),
-) -> HTMLResponse:
-    """HTMX — 업데이트 적용 (git pull + pip install + restart)."""
+) -> JSONResponse:
+    """업데이트 적용 — git pull + pip install 즉시 실행, 재시작은 2초 뒤.
+
+    응답에 target version을 담아 보내면 클라이언트가 /healthz를 폴링하며
+    버전이 바뀌는 순간을 업데이트 완료로 감지한다.
+    """
     audit.log(db, actor_sub=user.sub, action="system.update")
     db.commit()
 
     try:
         rc, stdout, stderr = await _run_update_script("apply")
     except asyncio.TimeoutError:
-        return HTMLResponse('<span class="err">업데이트 시간 초과 (2분). 수동 확인 필요.</span>')
+        return JSONResponse(
+            {"status": "error", "error": "timeout", "message": "업데이트 시간 초과 (2분)"},
+            status_code=504,
+        )
     except FileNotFoundError:
-        return HTMLResponse('<span class="err">업데이트 스크립트를 찾을 수 없습니다.</span>')
+        return JSONResponse(
+            {"status": "error", "error": "script_missing",
+             "message": "업데이트 스크립트를 찾을 수 없습니다."},
+            status_code=500,
+        )
 
     if rc != 0:
         _update_log.error("apply-update failed: rc=%d stderr=%s", rc, stderr)
-        return HTMLResponse(f'<span class="err">업데이트 실패: {stderr[:300]}</span>')
+        return JSONResponse(
+            {"status": "error", "error": "script_failed",
+             "message": f"업데이트 실패: {stderr[:300]}"},
+            status_code=500,
+        )
 
     lines = stdout.strip().split("\n")
-    try:
-        result = json.loads(lines[-1])
-        version = result.get("version", "?")
-    except (json.JSONDecodeError, IndexError):
-        version = "?"
+    version = "?"
+    for line in reversed(lines):
+        try:
+            result = json.loads(line)
+            if result.get("phase") == "done" and result.get("version"):
+                version = result["version"]
+                break
+        except (json.JSONDecodeError, AttributeError):
+            continue
 
-    return HTMLResponse(
-        f'<span class="ok">✓ 업데이트 완료 ({version}). 서비스가 재시작됩니다...</span>'
-        '<script>setTimeout(function(){location.reload()}, 5000)</script>'
-    )
+    return JSONResponse({"status": "ok", "version": version})
