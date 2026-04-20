@@ -86,11 +86,11 @@
         {% endif %}
       </td>
       <td style="line-height:1.5">
-        {% if msg.status == "FAILED" and not msg.result_code %}
+        {% if msg.status == "FAILED" and not msg.result_code and not msg.result_desc %}
         <span class="err" style="font-size:11px;white-space:normal">메시지 전송에 실패했습니다.</span>
         {% else %}
         {% set result_msg = describe_result(msg.result_code, msg.result_desc) %}
-        <span class="{% if msg.result_code and msg.result_code != '10000' %}err{% else %}text-muted{% endif %}" style="font-size:11px;white-space:normal">{{ result_msg }}</span>
+        <span class="{% if (msg.result_code and msg.result_code != '10000') or msg.status == 'FAILED' %}err{% else %}text-muted{% endif %}" style="font-size:11px;white-space:normal">{{ result_msg }}</span>
         {% endif %}
       </td>
       <td class="text-muted" style="font-size:11px">
