@@ -8,15 +8,12 @@
 
   <link rel="shortcut icon" type="image/png" href="/static/img/favicon.png">
 
-  <!-- Vendor CSS (jqvmap은 향후 지도 위젯용으로 유지) -->
-  <link rel="stylesheet" href="/static/lib/jqvmap/jqvmap.min.css">
-
   <!-- DashForge CSS -->
   <link rel="stylesheet" href="/static/css/dashforge.min.css">
   <link rel="stylesheet" href="/static/css/dashforge.dashboard.css">
   {% block vendor_css_extra %}{% endblock %}
 
-  <!-- 기본 스킨 (쿠키 기반 스위처 — path traversal 방지용 allowlist) -->
+  <!-- 스킨 (쿠키 기반, allowlist) -->
   {% set _allowed_skins = ['light', 'dark', 'charcoal', 'cool', 'deepblue', 'gradient1'] %}
   {% set _raw_skin = request.cookies.get('df-skin') if request.cookies is defined else None %}
   {% set current_skin = _raw_skin if _raw_skin in _allowed_skins else None %}
@@ -24,11 +21,10 @@
   <link id="dfSkin" rel="stylesheet" href="/static/css/skin.{{ current_skin }}.css">
   {% endif %}
 
-  <!-- HTMX (로컬 번들 — CDN 무결성 이슈 회피) -->
+  <!-- HTMX (로컬 번들) -->
   <script src="/static/lib/htmx/htmx.min.js"></script>
 
   <style>
-    /* 스킨 스와치 (aside loggedinMenu 내부) */
     .skin-swatch {
       width: 22px; height: 22px; border-radius: 50%;
       border: 1px solid rgba(255,255,255,0.15);
@@ -36,9 +32,7 @@
       transition: transform 0.12s ease, box-shadow 0.12s ease;
     }
     .skin-swatch:hover { transform: scale(1.1); }
-    .skin-swatch.active {
-      box-shadow: 0 0 0 2px #0168fa, 0 0 0 4px #fff inset;
-    }
+    .skin-swatch.active { box-shadow: 0 0 0 2px #0168fa, 0 0 0 4px #fff inset; }
   </style>
 
   {% block head_extra %}{% endblock %}
@@ -47,7 +41,8 @@
 {% set user_name = request.session.get("user_name", "") if request.session is defined else "" %}
 {% set user_display = request.session.get("user_display", user_name) if request.session is defined else user_name %}
 {% set user_roles = user_roles if user_roles is defined else [] %}
-{% set user_role_label = ('관리자' if 'admin' in user_roles else ('발신자' if 'sender' in user_roles else '조회자')) %}
+{% set user_role_label = ('Administrator' if 'admin' in user_roles else ('Sender' if 'sender' in user_roles else 'Viewer')) %}
+{% set user_initial = (user_display[:1] if user_display else (user_name[:1] if user_name else '?')) | upper %}
 
 {% if user_name %}
 <aside class="aside aside-fixed">
@@ -61,10 +56,10 @@
   <div class="aside-body">
     <div class="aside-loggedin">
       <div class="d-flex align-items-center justify-content-start">
-        <a href="/me" class="avatar"><span class="avatar-initial rounded-circle bg-gray-700">{{ user_display[:1] if user_display else '?' }}</span></a>
+        <a href="/me" class="avatar"><span class="avatar-initial rounded-circle bg-primary">{{ user_initial }}</span></a>
         <div class="aside-alert-link">
-          <a href="/campaigns" data-bs-toggle="tooltip" title="발송 이력"><i data-feather="send"></i></a>
-          <a href="/chat" data-bs-toggle="tooltip" title="대화방"><i data-feather="message-square"></i></a>
+          <a href="/chat" class="new" data-bs-toggle="tooltip" title="대화방"><i data-feather="message-square"></i></a>
+          <a href="/campaigns" data-bs-toggle="tooltip" title="발송 이력"><i data-feather="bell"></i></a>
           <a href="#" data-bs-toggle="tooltip" title="로그아웃" onclick="document.getElementById('aside-logout-form').submit();return false;"><i data-feather="log-out"></i></a>
         </div>
       </div>
@@ -76,7 +71,7 @@
         <p class="tx-color-03 tx-12 mg-b-0">{{ user_role_label }}</p>
       </div>
       <div class="collapse" id="loggedinMenu">
-        <ul class="nav nav-aside mg-b-0 pd-t-15">
+        <ul class="nav nav-aside mg-b-0">
           <li class="nav-item"><a href="/me" class="nav-link"><i data-feather="user"></i> <span>프로필 보기</span></a></li>
           <li class="nav-item"><a href="/help" class="nav-link"><i data-feather="help-circle"></i> <span>도움말</span></a></li>
           <li class="nav-item pd-x-10 pd-y-10">
@@ -101,30 +96,78 @@
       </div>
     </div><!-- aside-loggedin -->
     <ul class="nav nav-aside">
-      {% include "_layout/sidebar.html" %}
+      <li class="nav-label">Dashboard</li>
+      <li class="nav-item {% if request.url.path == '/' %}active{% endif %}">
+        <a href="/" class="nav-link"><i data-feather="home"></i> <span>대시보드</span></a>
+      </li>
+
+      <li class="nav-label mg-t-25">발송</li>
+      {% if "sender" in user_roles or "admin" in user_roles %}
+      <li class="nav-item {% if request.url.path == '/compose' %}active{% endif %}">
+        <a href="/compose" class="nav-link"><i data-feather="send"></i> <span>새 발송</span></a>
+      </li>
+      {% endif %}
+      <li class="nav-item {% if request.url.path.startswith('/campaigns') %}active{% endif %}">
+        <a href="/campaigns" class="nav-link"><i data-feather="mail"></i> <span>발송 이력</span></a>
+      </li>
+      {% if "sender" in user_roles or "admin" in user_roles %}
+      <li class="nav-item {% if request.url.path.startswith('/chat') %}active{% endif %}">
+        <a href="/chat" class="nav-link"><i data-feather="message-square"></i> <span>대화방</span></a>
+      </li>
+      {% endif %}
+
+      <li class="nav-label mg-t-25">수신자</li>
+      <li class="nav-item {% if request.url.path.startswith('/contacts') %}active{% endif %}">
+        <a href="/contacts" class="nav-link"><i data-feather="users"></i> <span>주소록</span></a>
+      </li>
+      <li class="nav-item {% if request.url.path.startswith('/groups') %}active{% endif %}">
+        <a href="/groups" class="nav-link"><i data-feather="layers"></i> <span>그룹</span></a>
+      </li>
+      <li class="nav-item {% if request.url.path == '/admin/callers' %}active{% endif %}">
+        <a href="/admin/callers" class="nav-link"><i data-feather="phone"></i> <span>발신번호</span></a>
+      </li>
+
+      {% if "admin" in user_roles %}
+      <li class="nav-label mg-t-25">시스템</li>
+      <li class="nav-item with-sub {% if request.url.path.startswith('/admin/settings') or request.url.path.startswith('/admin/audit') %}show active{% endif %}">
+        <a href="" class="nav-link"><i data-feather="settings"></i> <span>관리</span></a>
+        <ul>
+          <li><a href="/admin/settings">시스템 설정</a></li>
+          <li><a href="/admin/audit">감사 로그</a></li>
+        </ul>
+      </li>
+      {% endif %}
+
+      <li class="nav-label mg-t-25">도움</li>
+      <li class="nav-item {% if request.url.path == '/help' %}active{% endif %}">
+        <a href="/help" class="nav-link"><i data-feather="help-circle"></i> <span>도움말</span></a>
+      </li>
     </ul>
-  </div><!-- aside-body -->
+  </div>
 </aside>
 {% endif %}
 
-<div class="content {% block content_class %}{% endblock %}">
-  {% if user_name and self.page_title() | trim %}
-  <div class="content-header pd-l-0-f pd-t-30 pd-lg-t-40 pd-r-30 mg-b-10">
-    <div class="d-sm-flex align-items-center justify-content-between">
-      <div>
-        {% block breadcrumb %}{% endblock %}
-        <h4 class="mg-b-0 tx-spacing--1">{% block page_title %}{% endblock %}</h4>
-      </div>
-      <div class="d-flex mg-t-20 mg-sm-t-0">{% block page_actions %}{% endblock %}</div>
+<div class="content {% block content_class %}ht-100v pd-0{% endblock %}">
+  {% if user_name %}
+  <div class="content-header">
+    <div class="content-search">
+      <i data-feather="search"></i>
+      <input type="search" class="form-control" placeholder="캠페인·수신자·발신번호 검색..." id="global-search">
     </div>
-  </div>
+    <nav class="nav">
+      <a href="/help" class="nav-link" data-bs-toggle="tooltip" title="도움말"><i data-feather="help-circle"></i></a>
+      <a href="/" class="nav-link" data-bs-toggle="tooltip" title="대시보드"><i data-feather="grid"></i></a>
+      <a href="/campaigns" class="nav-link" data-bs-toggle="tooltip" title="발송 이력"><i data-feather="align-left"></i></a>
+    </nav>
+  </div><!-- content-header -->
   {% endif %}
+
   <div class="content-body">
     {% block content %}{% endblock %}
   </div>
 </div>
 
-<!-- Core scripts (DashForge 원본 순서) -->
+<!-- Core scripts (원본 순서 준수) -->
 <script src="/static/lib/jquery/jquery.min.js"></script>
 <script src="/static/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
 <script src="/static/lib/feather-icons/feather.min.js"></script>
@@ -136,18 +179,15 @@
 {% block vendor_js_extra %}{% endblock %}
 
 <script>
-  // ── Feather 아이콘 초기화 ──────────────────────────────────────────────
   if (typeof feather !== 'undefined') feather.replace();
   document.body.addEventListener('htmx:afterSwap', function() {
     if (typeof feather !== 'undefined') feather.replace();
   });
 
-  // ── HTMX: CSRF 토큰 자동 주입 ────────────────────────────────────────────
   document.body.addEventListener('htmx:configRequest', function(evt) {
     var t = document.querySelector('meta[name="csrf-token"]');
     if (t) evt.detail.headers['X-CSRF-Token'] = t.content;
   });
-  // ── HTMX: 4xx 응답도 swap ────────────────────────────────────────────────
   document.body.addEventListener('htmx:beforeSwap', function(evt) {
     if (evt.detail.xhr.status >= 400) {
       evt.detail.shouldSwap = true;
@@ -155,16 +195,13 @@
     }
   });
 
-  // ── aside 데스크톱 minimize 상태 localStorage 저장 ──────────────────────
   (function() {
     var KEY = 'kotify-aside-minimized';
     var aside = document.querySelector('.aside');
     if (!aside) return;
-    // 초기 상태 복원 (991px 초과에서만)
     if (window.matchMedia('(min-width: 992px)').matches && localStorage.getItem(KEY) === '1') {
       aside.classList.add('minimize');
     }
-    // 토글 후 상태 저장
     var link = aside.querySelector('.aside-menu-link');
     if (link) {
       link.addEventListener('click', function() {
@@ -177,7 +214,6 @@
     }
   })();
 
-  // ── 단축키 ─────────────────────────────────────────────────────────────
   document.addEventListener('keydown', function(e) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       var activeForm = document.activeElement && document.activeElement.closest('form');
@@ -199,7 +235,6 @@
     }
   });
 
-  // ── 스킨 스위처 (쿠키 기반) ───────────────────────────────────────────
   (function() {
     var wrap = document.getElementById('skin-swatches');
     if (!wrap) return;
@@ -229,7 +264,6 @@
     applyActive();
   })();
 
-  // ── flash 쿼리스트링 URL 정리 ────────────────────────────────────────────
   (function() {
     var flashKeys = ['created','updated','deleted','added','removed',
       'bulk_added','bulk_created','bulk_skipped_member','bulk_skipped_no_contact',
