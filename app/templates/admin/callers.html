@@ -18,7 +18,7 @@
 
   {% if "admin" not in user_roles %}
   <div class="alert alert-info mg-b-20" role="alert">
-    <i data-lucide="info" class="wd-14 ht-14 mg-r-4"></i>
+    <i data-feather="info" class="wd-14 ht-14 mg-r-4"></i>
     발신번호 목록을 열람 중입니다. 추가/수정/삭제는 관리자에게 문의하세요.
   </div>
   {% endif %}
@@ -46,7 +46,7 @@
           <label class="form-check-label tx-12" for="caller-rcs">RCS 등록</label>
         </div>
         <button type="submit" class="btn btn-primary btn-sm">
-          <i data-lucide="plus" class="wd-12 ht-12 mg-r-4"></i> 추가
+          <i data-feather="plus" class="wd-12 ht-12 mg-r-4"></i> 추가
         </button>
       </form>
       <small class="d-block tx-color-03 mg-t-10">
@@ -83,15 +83,15 @@
             <td class="pd-l-20 tx-monospace tx-medium">{{ c.number|phone_fmt }}</td>
             <td>{{ c.label }}</td>
             <td>
-              {% if c.active %}<span class="badge badge-success">활성</span>
-              {% else %}<span class="badge badge-fail">비활성</span>{% endif %}
+              {% if c.active %}<span class="badge bg-success tx-white">활성</span>
+              {% else %}<span class="badge bg-danger tx-white">비활성</span>{% endif %}
             </td>
             <td>
               {% if c.rcs_enabled %}<span class="badge bg-primary tx-white">✓ 양방향</span>
               {% else %}<span class="tx-color-04">—</span>{% endif %}
             </td>
             <td>
-              {% if c.is_default %}<span class="badge badge-dispatched">기본</span>
+              {% if c.is_default %}<span class="badge bg-info tx-white">기본</span>
               {% else %}<span class="tx-color-04">—</span>{% endif %}
             </td>
             <td class="tx-monospace tx-color-03 tx-12">{{ c.created_at[:10] }}</td>
@@ -128,8 +128,8 @@
     </div>
     {% else %}
     <div class="card-body">
-      <div class="empty-state">
-        <i data-lucide="phone-off"></i>
+      <div class="tx-center pd-40 tx-color-03">
+        <i data-feather="phone-off"></i>
         <p>등록된 발신번호가 없습니다.</p>
         {% if "admin" in user_roles %}
         <small class="tx-color-04">위 폼에서 발신번호를 추가하세요.</small>

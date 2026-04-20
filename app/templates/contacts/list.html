@@ -4,14 +4,14 @@
 {% block page_actions %}
   {% if "sender" in user_roles or "admin" in user_roles %}
   <a href="/contacts/new" class="btn btn-primary btn-sm">
-    <i data-lucide="user-plus" class="wd-12 ht-12 mg-r-4"></i> 새 연락처
+    <i data-feather="user-plus" class="wd-12 ht-12 mg-r-4"></i> 새 연락처
   </a>
   <a href="/contacts/import" class="btn btn-outline-light btn-sm mg-l-5">
-    <i data-lucide="upload" class="wd-12 ht-12 mg-r-4"></i> CSV 가져오기
+    <i data-feather="upload" class="wd-12 ht-12 mg-r-4"></i> CSV 가져오기
   </a>
   {% endif %}
   <a href="/contacts/export" class="btn btn-outline-light btn-sm mg-l-5">
-    <i data-lucide="download" class="wd-12 ht-12 mg-r-4"></i> CSV 내보내기
+    <i data-feather="download" class="wd-12 ht-12 mg-r-4"></i> CSV 내보내기
   </a>
 {% endblock %}
 
@@ -42,7 +42,7 @@
           <label class="form-check-label tx-12" for="active_only">활성만</label>
         </div>
         <button type="submit" class="btn btn-primary btn-sm">
-          <i data-lucide="search" class="wd-12 ht-12 mg-r-4"></i> 검색
+          <i data-feather="search" class="wd-12 ht-12 mg-r-4"></i> 검색
         </button>
         <div class="per-page-form mg-l-auto">
           <label for="contacts-per-page">페이지당</label>
@@ -96,9 +96,9 @@
             <td class="tx-color-03">{{ c.department or "—" }}</td>
             <td>
               {% if c.active %}
-                <span class="badge badge-success">활성</span>
+                <span class="badge bg-success tx-white">활성</span>
               {% else %}
-                <span class="badge badge-muted">비활성</span>
+                <span class="badge bg-secondary tx-white">비활성</span>
               {% endif %}
             </td>
             <td class="tx-color-03 tx-monospace tx-12">
@@ -146,8 +146,8 @@
 
     {% else %}
     <div class="card-body">
-      <div class="empty-state">
-        <i data-lucide="users-round"></i>
+      <div class="tx-center pd-40 tx-color-03">
+        <i data-feather="users"></i>
         {% if search or department or active_only %}
         <p>검색 조건에 맞는 연락처가 없습니다.</p>
         <a href="/contacts" class="btn btn-outline-light btn-sm">필터 초기화</a>

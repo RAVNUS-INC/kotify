@@ -2,7 +2,7 @@
    변수: page, total_pages, extra_qs (선택, "?sort=foo&order=asc" 형태의 추가 쿼리)
 #}
 {% if total_pages > 1 %}
-<div style="padding:10px 16px;border-top:1px solid var(--border)">
+<div style="padding:10px 16px;border-top:1px solid #e1e5ee">
   <div class="pagination">
     {% if page > 1 %}
     <a href="?page={{ page - 1 }}{{ extra_qs or '' }}">← 이전</a>

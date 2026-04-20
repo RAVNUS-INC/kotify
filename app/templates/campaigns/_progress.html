@@ -10,27 +10,27 @@
   hx-trigger="every 5s"
   hx-swap="outerHTML"
   {% endif %}>
-  <div class="card-title">
+  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">
     진행 현황
     {% if is_active %}
     <span class="text-muted" style="font-weight:normal;margin-left:6px">5초마다 자동 갱신</span>
     {% endif %}
-  </div>
+  </h6>
 
   <div style="display:flex;align-items:center;gap:16px;margin-bottom:10px;flex-wrap:wrap">
     <span style="font-size:18px;font-weight:700;font-family:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace">
       {{ done }} / {{ total }}
     </span>
     <span class="ok">
-      <i data-lucide="check" style="width:12px;height:12px;vertical-align:middle"></i>
+      <i data-feather="check" style="width:12px;height:12px;vertical-align:middle"></i>
       성공 {{ campaign.ok_count }}
     </span>
     <span class="err">
-      <i data-lucide="x" style="width:12px;height:12px;vertical-align:middle"></i>
+      <i data-feather="x" style="width:12px;height:12px;vertical-align:middle"></i>
       실패 {{ campaign.fail_count }}
     </span>
-    <span style="color:var(--warning)">
-      <i data-lucide="clock" style="width:12px;height:12px;vertical-align:middle"></i>
+    <span style="color:#ffc107">
+      <i data-feather="clock" style="width:12px;height:12px;vertical-align:middle"></i>
       대기 {{ campaign.pending_count }}
     </span>
   </div>
@@ -64,7 +64,7 @@
       hx-post="/campaigns/{{ campaign.id }}/refresh"
       hx-target="#refresh-result"
       hx-swap="innerHTML">
-      <i data-lucide="refresh-cw"></i>
+      <i data-feather="refresh-cw"></i>
       지금 새로고침
       <span class="htmx-indicator spinner"></span>
     </button>

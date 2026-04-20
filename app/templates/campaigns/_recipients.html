@@ -1,6 +1,6 @@
 {% set status_filter = status_filter or "" %}
 {# C2: 상태 필터 탭 + CSV 내보내기 #}
-<div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+<div style="padding:8px 16px;border-bottom:1px solid #e1e5ee;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
   <div style="display:flex;gap:4px;flex-wrap:wrap">
     <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1"
        hx-target="#recipients-table" hx-swap="innerHTML"
@@ -26,12 +26,12 @@
   <div style="display:flex;gap:4px">
     <a href="/campaigns/{{ campaign.id }}/export{% if status_filter %}?status={{ status_filter }}{% endif %}"
        class="btn btn-secondary btn-sm">
-      <i data-lucide="download"></i> CSV
+      <i data-feather="download"></i> CSV
     </a>
   </div>
 </div>
 
-<div class="table-wrapper">
+<div class="table-responsive">
 <table>
   <colgroup>
     <col style="width: 130px">    <!-- 번호 -->
@@ -56,31 +56,31 @@
   <tbody>
     {% for msg in messages %}
     <tr>
-      <td class="mono">{{ msg.to_number|phone_fmt }}</td>
+      <td class="tx-monospace">{{ msg.to_number|phone_fmt }}</td>
       <td>
         {% if msg.channel == "RCS" %}
         <span class="badge" style="background:#dbeafe;color:#1d4ed8">RCS</span>
         {% elif msg.channel == "SMS" %}
-        <span class="badge badge-success">SMS</span>
+        <span class="badge bg-success tx-white">SMS</span>
         {% elif msg.channel == "LMS" %}
-        <span class="badge badge-dispatched">LMS</span>
+        <span class="badge bg-info tx-white">LMS</span>
         {% elif msg.channel == "MMS" %}
-        <span class="badge badge-partial">MMS</span>
+        <span class="badge bg-warning tx-white">MMS</span>
         {% else %}
         <span class="text-muted">—</span>
         {% endif %}
       </td>
       <td>
         {% if msg.result_code == "10000" %}
-        <span class="badge badge-success">성공</span>
+        <span class="badge bg-success tx-white">성공</span>
         {% elif msg.status == "FAILED" %}
-        <span class="badge badge-fail">전송 오류</span>
+        <span class="badge bg-danger tx-white">전송 오류</span>
         {% elif msg.status == "FB_PENDING" %}
-        <span class="badge badge-pending" title="RCS 실패 → SMS 전환 대기">SMS 전환 중</span>
+        <span class="badge bg-warning tx-white" title="RCS 실패 → SMS 전환 대기">SMS 전환 중</span>
         {% elif msg.status in ("PENDING", "REG", "ING") %}
-        <span class="badge badge-pending">대기</span>
+        <span class="badge bg-warning tx-white">대기</span>
         {% elif msg.result_code and msg.result_code != "10000" %}
-        <span class="badge badge-fail">실패</span>
+        <span class="badge bg-danger tx-white">실패</span>
         {% else %}
         <span class="badge">{{ msg.status }}</span>
         {% endif %}
@@ -99,8 +99,8 @@
         {% for f in fb %}{{ f.get("desc", f.get("code", "")) }}{% if not loop.last %}, {% endif %}{% endfor %}
         {% else %}—{% endif %}
       </td>
-      <td class="mono text-right">{{ msg.cost|string + "원" if msg.cost else "—" }}</td>
-      <td class="mono text-muted">{{ msg.complete_time|kst_dt if msg.complete_time else "—" }}</td>
+      <td class="tx-monospace text-right">{{ msg.cost|string + "원" if msg.cost else "—" }}</td>
+      <td class="tx-monospace text-muted">{{ msg.complete_time|kst_dt if msg.complete_time else "—" }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -108,14 +108,14 @@
 </div>
 
 {% if not messages %}
-<div class="empty-state" style="padding:20px">
-  <i data-lucide="inbox"></i>
+<div class="tx-center pd-40 tx-color-03" style="padding:20px">
+  <i data-feather="inbox"></i>
   <p>해당 조건의 수신자가 없습니다.</p>
 </div>
 {% endif %}
 
 {% if total_count > per_page %}
-<div style="padding:10px 16px;border-top:1px solid var(--border)">
+<div style="padding:10px 16px;border-top:1px solid #e1e5ee">
   <div class="pagination">
     {% if page > 1 %}
     <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page - 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}"

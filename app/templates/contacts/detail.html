@@ -4,7 +4,7 @@
 {% block page_actions %}
   {% if "sender" in user_roles or "admin" in user_roles %}
   <a href="/contacts/{{ contact.id }}/edit" class="btn btn-secondary btn-sm">
-    <i data-lucide="edit-2"></i> 편집
+    <i data-feather="edit-2"></i> 편집
   </a>
   {% endif %}
   {% if "admin" in user_roles %}
@@ -12,7 +12,7 @@
     onsubmit="return confirm('이 연락처를 삭제하시겠습니까?')">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <button type="submit" class="btn btn-danger btn-sm">
-      <i data-lucide="trash-2"></i> 삭제
+      <i data-feather="trash-2"></i> 삭제
     </button>
   </form>
   {% endif %}
@@ -28,40 +28,40 @@
 
 <!-- 기본 정보 -->
 <div class="card">
-  <div class="card-title">기본 정보</div>
-  <div class="table-wrapper">
+  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">기본 정보</h6>
+  <div class="table-responsive">
   <table style="width:auto;min-width:320px">
     <colgroup>
       <col style="width: 120px">    <!-- 라벨 -->
       <col>                          <!-- 값 -->
     </colgroup>
     <tbody>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">이름</th><td>{{ contact.name }}</td></tr>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">전화번호</th><td class="mono">{{ contact.phone|phone_fmt or "—" }}</td></tr>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">이메일</th><td>{{ contact.email or "—" }}</td></tr>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">부서</th><td>{{ contact.department or "—" }}</td></tr>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">메모</th><td>{{ contact.notes or "—" }}</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">이름</th><td>{{ contact.name }}</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">전화번호</th><td class="tx-monospace">{{ contact.phone|phone_fmt or "—" }}</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">이메일</th><td>{{ contact.email or "—" }}</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">부서</th><td>{{ contact.department or "—" }}</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">메모</th><td>{{ contact.notes or "—" }}</td></tr>
       <tr>
-        <th style="font-weight:600;background:var(--bg-elevated)">상태</th>
+        <th style="font-weight:600;background:#f8f9fc">상태</th>
         <td>
           {% if contact.active %}
-          <span class="badge badge-success">활성</span>
+          <span class="badge bg-success tx-white">활성</span>
           {% else %}
-          <span class="badge badge-fail">비활성</span>
+          <span class="badge bg-danger tx-white">비활성</span>
           {% endif %}
         </td>
       </tr>
       <tr>
-        <th style="font-weight:600;background:var(--bg-elevated)">마지막 발송</th>
-        <td class="mono text-muted" style="font-size:11px">
+        <th style="font-weight:600;background:#f8f9fc">마지막 발송</th>
+        <td class="tx-monospace text-muted" style="font-size:11px">
           {% if contact.last_sent_at %}
             {{ contact.last_sent_at|kst_dt }}{% if contact.last_sent_channel %} ({{ contact.last_sent_channel }}){% endif %}
           {% else %}—{% endif %}
         </td>
       </tr>
       <tr>
-        <th style="font-weight:600;background:var(--bg-elevated)">등록일</th>
-        <td class="mono text-muted" style="font-size:11px">{{ contact.created_at|kst_dt }}</td>
+        <th style="font-weight:600;background:#f8f9fc">등록일</th>
+        <td class="tx-monospace text-muted" style="font-size:11px">{{ contact.created_at|kst_dt }}</td>
       </tr>
     </tbody>
   </table>
@@ -70,15 +70,15 @@
 
 <!-- 소속 그룹 -->
 <div class="card">
-  <div class="card-title">소속 그룹</div>
+  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">소속 그룹</h6>
   {% if groups %}
   <div class="flex" style="flex-wrap:wrap;gap:6px">
     {% for g in groups %}
-    <a href="/groups/{{ g.id }}" class="badge badge-muted" style="text-decoration:none;padding:3px 8px">{{ g.name }}</a>
+    <a href="/groups/{{ g.id }}" class="badge bg-secondary tx-white" style="text-decoration:none;padding:3px 8px">{{ g.name }}</a>
     {% endfor %}
   </div>
   {% else %}
-  <div class="empty-state" style="padding:20px">
+  <div class="tx-center pd-40 tx-color-03" style="padding:20px">
     <p>소속된 그룹이 없습니다.</p>
   </div>
   {% endif %}
@@ -88,7 +88,7 @@
 {% if ("sender" in user_roles or "admin" in user_roles) and contact.phone %}
 <div class="card" style="padding:12px 16px">
   <a href="/compose" class="btn btn-primary btn-sm">
-    <i data-lucide="send"></i> 이 번호로 새 발송
+    <i data-feather="send"></i> 이 번호로 새 발송
   </a>
 </div>
 {% endif %}

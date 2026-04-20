@@ -4,7 +4,7 @@
 {% block page_actions %}
   {% if "sender" in user_roles or "admin" in user_roles %}
   <a href="/groups/new" class="btn btn-primary btn-sm">
-    <i data-lucide="plus" class="wd-12 ht-12 mg-r-4"></i> 새 그룹
+    <i data-feather="plus" class="wd-12 ht-12 mg-r-4"></i> 새 그룹
   </a>
   {% endif %}
 {% endblock %}
@@ -27,7 +27,7 @@
                  placeholder="그룹명 검색..." class="form-control" autocomplete="off">
         </div>
         <button type="submit" class="btn btn-primary btn-sm">
-          <i data-lucide="search" class="wd-12 ht-12 mg-r-4"></i> 검색
+          <i data-feather="search" class="wd-12 ht-12 mg-r-4"></i> 검색
         </button>
         <div class="per-page-form mg-l-auto">
           <label for="groups-per-page">페이지당</label>
@@ -110,8 +110,8 @@
 
     {% else %}
     <div class="card-body">
-      <div class="empty-state">
-        <i data-lucide="users"></i>
+      <div class="tx-center pd-40 tx-color-03">
+        <i data-feather="users"></i>
         {% if search %}
         <p>검색 조건에 맞는 그룹이 없습니다.</p>
         <a href="/groups" class="btn btn-outline-light btn-sm">검색 초기화</a>

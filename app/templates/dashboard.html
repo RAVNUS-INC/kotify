@@ -1,10 +1,20 @@
 {% extends "base.html" %}
 {% block title %}대시보드 — kotify{% endblock %}
-{% block page_title %}대시보드{% endblock %}
+{% block content_class %}content-fixed{% endblock %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+    <li class="breadcrumb-item"><a href="/">Home</a></li>
+    <li class="breadcrumb-item active" aria-current="page">대시보드</li>
+  </ol>
+</nav>
+{% endblock %}
+{% block page_title %}안녕하세요, {{ request.session.get('user_display', '') or request.session.get('user_name', '') }}님{% endblock %}
 {% block page_actions %}
   {% if "sender" in user_roles or "admin" in user_roles %}
-  <a href="/compose" class="btn btn-primary btn-sm">
-    <i data-lucide="send"></i> 새 발송
+  <a href="/compose" class="btn btn-sm pd-x-15 btn-primary btn-uppercase">
+    <i data-feather="send" class="wd-10 mg-r-5"></i> 새 발송
   </a>
   {% endif %}
 {% endblock %}
@@ -12,43 +22,31 @@
 {% block content %}
 <div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
 
-  <div class="d-sm-flex align-items-center justify-content-between mg-b-20">
-    <div>
-      <nav aria-label="breadcrumb">
-        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
-          <li class="breadcrumb-item"><a href="#">Home</a></li>
-          <li class="breadcrumb-item active" aria-current="page">대시보드</li>
-        </ol>
-      </nav>
-      <h4 class="mg-b-0 tx-spacing--1">안녕하세요, {{ request.session.get('user_display', '') or request.session.get('user_name', '') }}님</h4>
-    </div>
-  </div>
-
   {# C1: 시작 체크리스트 #}
   {% if ("sender" in user_roles or "admin" in user_roles) and (not has_callers or not has_contacts) %}
   <div class="card mg-b-20">
-    <div class="card-header d-flex align-items-center">
-      <i data-lucide="list-checks" class="wd-16 ht-16 mg-r-8"></i>
+    <div class="card-header pd-y-15 d-flex align-items-center">
+      <i data-feather="check-square" class="wd-16 ht-16 mg-r-8 tx-color-03"></i>
       <h6 class="mg-b-0 tx-semibold">시작 체크리스트</h6>
     </div>
-    <div class="card-body">
-      <ul class="list-unstyled mg-b-0">
+    <div class="card-body pd-y-15">
+      <ul class="list-unstyled mg-b-0 tx-13">
         <li class="d-flex align-items-center pd-y-4">
           {% if has_callers %}
-          <i data-lucide="check-circle" class="wd-16 ht-16 tx-success mg-r-8"></i>
+          <i data-feather="check-circle" class="wd-16 ht-16 tx-success mg-r-8"></i>
           <span class="tx-color-03" style="text-decoration:line-through">발신번호 등록</span>
           {% else %}
-          <i data-lucide="circle" class="wd-16 ht-16 tx-warning mg-r-8"></i>
-          <span>발신번호 등록 — <a href="/admin/callers">발신번호 관리 →</a></span>
+          <i data-feather="circle" class="wd-16 ht-16 tx-warning mg-r-8"></i>
+          <span>발신번호 등록 — <a href="/admin/callers" class="link-02">발신번호 관리 →</a></span>
           {% endif %}
         </li>
         <li class="d-flex align-items-center pd-y-4">
           {% if has_contacts %}
-          <i data-lucide="check-circle" class="wd-16 ht-16 tx-success mg-r-8"></i>
+          <i data-feather="check-circle" class="wd-16 ht-16 tx-success mg-r-8"></i>
           <span class="tx-color-03" style="text-decoration:line-through">연락처 등록</span>
           {% else %}
-          <i data-lucide="circle" class="wd-16 ht-16 tx-warning mg-r-8"></i>
-          <span>연락처 등록 — <a href="/contacts/new">연락처 추가 →</a> 또는 <a href="/contacts/import">CSV 가져오기 →</a></span>
+          <i data-feather="circle" class="wd-16 ht-16 tx-warning mg-r-8"></i>
+          <span>연락처 등록 — <a href="/contacts/new" class="link-02">연락처 추가 →</a> 또는 <a href="/contacts/import" class="link-02">CSV 가져오기 →</a></span>
           {% endif %}
         </li>
       </ul>
@@ -56,10 +54,10 @@
   </div>
   {% endif %}
 
-  {# H1: 최근 24시간 실패율 주의 카드 #}
+  {# H1: 최근 24시간 실패율 주의 #}
   {% if fail_rate_24h >= 10 and recent_fail > 0 %}
   <div class="alert alert-warning d-flex align-items-center mg-b-20" role="alert">
-    <i data-lucide="alert-triangle" class="wd-16 ht-16 mg-r-8"></i>
+    <i data-feather="alert-triangle" class="wd-16 ht-16 mg-r-8"></i>
     <div>
       최근 24시간 발송 실패율이 <strong>{{ fail_rate_24h }}%</strong>입니다. (실패 {{ recent_fail }}건)
       <a href="/campaigns?status=FAILED" class="alert-link mg-l-5">실패 캠페인 확인 →</a>
@@ -67,65 +65,86 @@
   </div>
   {% endif %}
 
-  {# 스탯 카드 4/5개 #}
-  <div class="row row-xs mg-b-20">
+  {# KPI 4종 — dashboard-four 패턴 #}
+  <div class="row row-xs">
     <div class="col-sm-6 col-lg-3">
       <div class="card card-body">
         <h6 class="tx-uppercase tx-11 tx-spacing-1 tx-color-02 tx-semibold mg-b-8">오늘 발송 캠페인</h6>
-        <h3 class="tx-normal tx-rubik mg-b-0 lh-1">{{ today_count }}</h3>
+        <div class="d-flex d-lg-block d-xl-flex align-items-end">
+          <h3 class="tx-normal tx-rubik mg-b-0 mg-r-5 lh-1">{{ today_count }}</h3>
+          <p class="tx-11 tx-color-03 mg-b-0">건</p>
+        </div>
       </div>
     </div>
     <div class="col-sm-6 col-lg-3 mg-t-10 mg-sm-t-0">
       <div class="card card-body">
         <h6 class="tx-uppercase tx-11 tx-spacing-1 tx-color-02 tx-semibold mg-b-8">이번 달 캠페인</h6>
-        <h3 class="tx-normal tx-rubik mg-b-0 lh-1">{{ month_count }}</h3>
+        <div class="d-flex d-lg-block d-xl-flex align-items-end">
+          <h3 class="tx-normal tx-rubik mg-b-0 mg-r-5 lh-1">{{ month_count }}</h3>
+          <p class="tx-11 tx-color-03 mg-b-0">건</p>
+        </div>
       </div>
     </div>
     <div class="col-sm-6 col-lg-3 mg-t-10 mg-lg-t-0">
       <div class="card card-body">
         <h6 class="tx-uppercase tx-11 tx-spacing-1 tx-color-02 tx-semibold mg-b-8">이번 달 발송 성공</h6>
-        <h3 class="tx-normal tx-rubik mg-b-0 lh-1">{{ month_recipients }}</h3>
+        <div class="d-flex d-lg-block d-xl-flex align-items-end">
+          <h3 class="tx-normal tx-rubik mg-b-0 mg-r-5 lh-1 tx-success">{{ "{:,}".format(month_recipients) }}</h3>
+          <p class="tx-11 tx-color-03 mg-b-0">건</p>
+        </div>
       </div>
     </div>
-    <a href="/campaigns?status=DISPATCHED" class="col-sm-6 col-lg-3 mg-t-10 mg-lg-t-0 tx-color-02 tx-hover-primary" style="text-decoration:none">
+    <a href="/campaigns?status=DISPATCHED" class="col-sm-6 col-lg-3 mg-t-10 mg-lg-t-0" style="text-decoration:none">
       <div class="card card-body">
         <h6 class="tx-uppercase tx-11 tx-spacing-1 tx-color-02 tx-semibold mg-b-8 d-flex align-items-center">
           진행 중
-          {% if pending_count > 0 %}<i data-lucide="external-link" class="wd-10 ht-10 mg-l-4 op-5"></i>{% endif %}
+          {% if pending_count > 0 %}<i data-feather="external-link" class="wd-10 ht-10 mg-l-4 op-5"></i>{% endif %}
         </h6>
-        <h3 class="tx-normal tx-rubik mg-b-0 lh-1 {% if pending_count > 0 %}tx-warning{% endif %}">{{ pending_count }}</h3>
+        <div class="d-flex d-lg-block d-xl-flex align-items-end">
+          <h3 class="tx-normal tx-rubik mg-b-0 mg-r-5 lh-1 {% if pending_count > 0 %}tx-warning{% endif %}">{{ pending_count }}</h3>
+          <p class="tx-11 tx-color-03 mg-b-0">건</p>
+        </div>
       </div>
     </a>
-  </div>
 
-  <div class="row row-xs mg-b-20">
-    <a href="/campaigns" class="col-sm-6 col-lg-4" style="text-decoration:none">
+    {# RCS 도달률 카드 (폭 넓게) #}
+    <div class="col-lg-12 mg-t-10">
       <div class="card card-body">
-        <h6 class="tx-uppercase tx-11 tx-spacing-1 tx-color-02 tx-semibold mg-b-8">RCS 도달률</h6>
-        <h3 class="tx-normal tx-rubik mg-b-0 lh-1 tx-primary">{{ rcs_rate }}%</h3>
+        <div class="d-flex align-items-center justify-content-between">
+          <div>
+            <h6 class="tx-uppercase tx-11 tx-spacing-1 tx-color-02 tx-semibold mg-b-8">RCS 도달률 (이번 달)</h6>
+            <div class="d-flex align-items-end">
+              <h3 class="tx-normal tx-rubik mg-b-0 mg-r-5 lh-1 tx-primary">{{ rcs_rate }}</h3>
+              <p class="tx-15 tx-color-03 mg-b-2">%</p>
+            </div>
+          </div>
+          <a href="/campaigns" class="btn btn-sm btn-white btn-uppercase pd-x-15">
+            <i data-feather="list" class="wd-10 mg-r-5"></i> 전체 이력
+          </a>
+        </div>
       </div>
-    </a>
-  </div>
+    </div>
+  </div><!-- row -->
 
-  {# 최근 발송 이력 #}
-  <div class="card">
-    <div class="card-header d-flex align-items-center justify-content-between">
+  {# 최근 발송 이력 테이블 — dashboard-four 관용구 #}
+  <div class="card mg-t-10">
+    <div class="card-header pd-y-20 d-md-flex align-items-center justify-content-between">
       <h6 class="mg-b-0 tx-semibold">최근 발송 이력</h6>
-      <a href="/campaigns" class="btn btn-xs btn-outline-primary">
-        <i data-lucide="list" class="wd-12 ht-12 mg-r-4"></i> 전체 보기
+      <a href="/campaigns" class="tx-13 link-03 d-inline-flex align-items-center">
+        전체 보기 <i data-feather="arrow-right" class="wd-12 ht-12 mg-l-3"></i>
       </a>
     </div>
     {% if recent_campaigns %}
     <div class="table-responsive">
-      <table class="table table-hover mg-b-0 tx-13">
-        <thead class="tx-uppercase tx-11 tx-spacing-1 tx-color-03">
+      <table class="table table-dashboard mg-b-0">
+        <thead>
           <tr>
             <th class="pd-l-20">#</th>
             <th>발신번호</th>
             <th>유형</th>
-            <th class="text-right">수신자</th>
-            <th class="text-right">성공</th>
-            <th class="text-right">실패</th>
+            <th class="text-end">수신자</th>
+            <th class="text-end">성공</th>
+            <th class="text-end">실패</th>
             <th>상태</th>
             <th class="pd-r-20">발송 시각</th>
           </tr>
@@ -137,23 +156,23 @@
             <td class="tx-monospace tx-13">{{ c.caller_number|phone_fmt }}</td>
             <td>
               {% if c.message_type == "SMS" %}
-              <span class="badge badge-success">단문</span>
+              <span class="badge bg-success-subtle text-success tx-11">단문</span>
               {% elif c.message_type == "MMS" %}
-              <span class="badge badge-partial">이미지</span>
+              <span class="badge bg-info-subtle text-info tx-11">이미지</span>
               {% else %}
-              <span class="badge badge-dispatched">장문</span>
+              <span class="badge bg-secondary-subtle text-secondary tx-11">장문</span>
               {% endif %}
             </td>
-            <td class="text-right tx-monospace">{{ c.total_count }}</td>
-            <td class="text-right tx-monospace tx-success">{{ c.ok_count }}</td>
-            <td class="text-right tx-monospace {% if c.fail_count > 0 %}tx-danger{% else %}tx-color-03{% endif %}">{{ c.fail_count }}</td>
+            <td class="text-end tx-monospace">{{ c.total_count }}</td>
+            <td class="text-end tx-monospace tx-success">{{ c.ok_count }}</td>
+            <td class="text-end tx-monospace {% if c.fail_count > 0 %}tx-danger{% else %}tx-color-03{% endif %}">{{ c.fail_count }}</td>
             <td>
-              {% if c.state == "COMPLETED" %}<span class="badge badge-completed">완료</span>
-              {% elif c.state == "FAILED" %}<span class="badge badge-failed">실패</span>
-              {% elif c.state == "PARTIAL_FAILED" %}<span class="badge badge-partial">부분 실패</span>
-              {% elif c.state == "DISPATCHED" %}<span class="badge badge-dispatched">발송됨</span>
-              {% elif c.state == "DISPATCHING" %}<span class="badge badge-pending">발송 중</span>
-              {% else %}<span class="badge">{{ c.state }}</span>{% endif %}
+              {% if c.state == "COMPLETED" %}<span class="badge bg-success tx-white tx-11">완료</span>
+              {% elif c.state == "FAILED" %}<span class="badge bg-danger tx-white tx-11">실패</span>
+              {% elif c.state == "PARTIAL_FAILED" %}<span class="badge bg-warning tx-11">부분 실패</span>
+              {% elif c.state == "DISPATCHED" %}<span class="badge bg-info tx-white tx-11">발송됨</span>
+              {% elif c.state == "DISPATCHING" %}<span class="badge bg-warning tx-11">발송 중</span>
+              {% else %}<span class="badge bg-secondary tx-white tx-11">{{ c.state }}</span>{% endif %}
             </td>
             <td class="pd-r-20 tx-color-03 tx-monospace tx-12">{{ c.created_at|kst_dt }}</td>
           </tr>
@@ -162,14 +181,14 @@
       </table>
     </div>
     {% else %}
-    <div class="card-body">
-      <div class="empty-state">
-        <i data-lucide="inbox"></i>
-        <p>아직 발송 이력이 없습니다.</p>
-        {% if "sender" in user_roles or "admin" in user_roles %}
-        <a href="/compose" class="btn btn-primary btn-sm">첫 발송 시작</a>
-        {% endif %}
-      </div>
+    <div class="card-body tx-center pd-y-40">
+      <i data-feather="inbox" class="wd-40 ht-40 tx-color-04 mg-b-10"></i>
+      <p class="tx-color-03 mg-b-15">아직 발송 이력이 없습니다.</p>
+      {% if "sender" in user_roles or "admin" in user_roles %}
+      <a href="/compose" class="btn btn-primary btn-sm pd-x-20">
+        <i data-feather="send" class="wd-10 mg-r-5"></i> 첫 발송 시작
+      </a>
+      {% endif %}
     </div>
     {% endif %}
   </div>

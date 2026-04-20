@@ -144,6 +144,7 @@ from app.routes.contacts import router as contacts_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.groups import router as groups_router
 from app.routes.health import router as health_router
+from app.routes.pages import router as pages_router
 from app.routes.setup import router as setup_router
 from app.routes.webhook import router as webhook_router
 
@@ -158,6 +159,7 @@ app.include_router(chat_router)
 app.include_router(admin_router)
 app.include_router(contacts_router)
 app.include_router(groups_router)
+app.include_router(pages_router)
 
 # ── 정적 파일 마운트 (DashForge 자산) ─────────────────────────────────────────
 from pathlib import Path as _Path

@@ -3,7 +3,7 @@
 {% block page_title %}연락처 CSV 가져오기{% endblock %}
 {% block page_actions %}
   <a href="/contacts" class="btn btn-secondary btn-sm">
-    <i data-lucide="arrow-left"></i> 주소록으로
+    <i data-feather="arrow-left"></i> 주소록으로
   </a>
 {% endblock %}
 
@@ -11,17 +11,17 @@
 <!-- 가져오기 결과 -->
 {% if result is not none %}
 <div class="card">
-  <div class="card-title">가져오기 결과</div>
-  <div class="table-wrapper">
+  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">가져오기 결과</h6>
+  <div class="table-responsive">
   <table style="width:auto">
     <tbody>
-      <tr><th style="background:var(--bg-elevated);font-weight:600;width:100px">새로 추가</th><td><strong>{{ result.created }}</strong>건</td></tr>
-      <tr><th style="background:var(--bg-elevated)">업데이트</th><td><strong>{{ result.updated }}</strong>건</td></tr>
-      <tr><th style="background:var(--bg-elevated)">건너뜀</th><td><strong>{{ result.skipped }}</strong>건</td></tr>
+      <tr><th style="background:#f8f9fc;font-weight:600;width:100px">새로 추가</th><td><strong>{{ result.created }}</strong>건</td></tr>
+      <tr><th style="background:#f8f9fc">업데이트</th><td><strong>{{ result.updated }}</strong>건</td></tr>
+      <tr><th style="background:#f8f9fc">건너뜀</th><td><strong>{{ result.skipped }}</strong>건</td></tr>
       {% if result.errors %}
       <tr>
-        <th style="background:var(--bg-elevated)">오류</th>
-        <td><strong style="color:var(--error)">{{ result.errors | length }}</strong>건</td>
+        <th style="background:#f8f9fc">오류</th>
+        <td><strong style="color:#dc3545">{{ result.errors | length }}</strong>건</td>
       </tr>
       {% endif %}
     </tbody>
@@ -29,7 +29,7 @@
   </div>
 
   {% if result.errors %}
-  <div class="alert alert-error" style="margin-top:10px" role="alert">
+  <div class="alert alert-danger" style="margin-top:10px" role="alert">
     <strong>처리 오류:</strong>
     {% for e in result.errors %}
     <div>• {{ e }}</div>
@@ -40,15 +40,15 @@
   {% if invalid_rows %}
   <div style="margin-top:12px">
     <strong style="font-size:12px">유효하지 않은 행 ({{ invalid_rows | length }}건)</strong>
-    <div class="table-wrapper" style="margin-top:6px">
+    <div class="table-responsive" style="margin-top:6px">
     <table>
       <thead><tr><th>행 번호</th><th>오류</th><th>원본 데이터</th></tr></thead>
       <tbody>
         {% for r in invalid_rows %}
         <tr>
-          <td class="mono text-right">{{ r.row_number }}</td>
+          <td class="tx-monospace text-right">{{ r.row_number }}</td>
           <td class="err">{{ r.error }}</td>
-          <td class="mono" style="font-size:11px">{{ r.raw_data }}</td>
+          <td class="tx-monospace" style="font-size:11px">{{ r.raw_data }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -66,7 +66,7 @@
 
 <!-- 업로드 폼 -->
 <div class="card" style="max-width:640px">
-  <div class="card-title">CSV 파일 업로드</div>
+  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">CSV 파일 업로드</h6>
 
   <div class="alert alert-info" style="margin-bottom:14px">
     <strong>CSV 형식 안내</strong><br>
@@ -103,7 +103,7 @@
 
     <div class="flex" style="margin-top:14px">
       <button type="submit" class="btn btn-primary">
-        <i data-lucide="upload"></i> 가져오기 실행
+        <i data-feather="upload"></i> 가져오기 실행
       </button>
       <a href="/contacts" class="btn btn-secondary">취소</a>
     </div>

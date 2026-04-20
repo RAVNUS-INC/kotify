@@ -1,277 +1,281 @@
 {% extends "base.html" %}
 {% block title %}새 발송 — kotify{% endblock %}
+{% block breadcrumb %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+    <li class="breadcrumb-item"><a href="/">Home</a></li>
+    <li class="breadcrumb-item active" aria-current="page">새 발송</li>
+  </ol>
+</nav>
+{% endblock %}
 {% block page_title %}신규 공지 발송{% endblock %}
 
 {% block content %}
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+
 {% if error_slug %}
-<div class="alert alert-error" role="alert">
-  <i data-lucide="alert-circle" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>
-  {{ t_error(error_slug) }}
+<div class="alert alert-danger d-flex align-items-center mg-b-15" role="alert">
+  <i data-feather="alert-circle" class="wd-16 ht-16 mg-r-8"></i>
+  <div>{{ t_error(error_slug) }}</div>
 </div>
 {% endif %}
 
 {% if not callers %}
-<div class="alert alert-warning" role="alert" style="display:flex;align-items:flex-start;gap:10px">
-  <i data-lucide="alert-triangle" style="width:16px;height:16px;flex-shrink:0;margin-top:1px"></i>
+<div class="alert alert-warning d-flex align-items-start mg-b-15" role="alert">
+  <i data-feather="alert-triangle" class="wd-16 ht-16 mg-r-8 mg-t-2 flex-shrink-0"></i>
   <div>
     <strong>발신번호가 등록되어 있지 않습니다.</strong><br>
     발송을 시작하려면 먼저 발신번호를 등록해야 합니다.
     {% if "admin" in user_roles %}
-    <a href="/admin/callers" style="color:inherit;text-decoration:underline;margin-left:4px">발신번호 관리 →</a>
+    <a href="/admin/callers" class="alert-link mg-l-5">발신번호 관리 →</a>
     {% else %}
-    관리자에게 <a href="/admin/callers" style="color:inherit;text-decoration:underline">발신번호 등록</a>을 요청하세요.
+    관리자에게 <a href="/admin/callers" class="alert-link">발신번호 등록</a>을 요청하세요.
     {% endif %}
   </div>
 </div>
 {% endif %}
 
 <div class="card">
-  <form id="compose-form" action="/compose/send" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  <div class="card-header pd-y-15">
+    <h6 class="mg-b-0 tx-semibold">발송 정보</h6>
+  </div>
+  <div class="card-body pd-25">
+    <form id="compose-form" action="/compose/send" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
-    <div class="form-group">
-      <label for="caller_id">발신번호</label>
-      {% if not callers %}
-      <select name="caller_id" id="caller_id" disabled style="opacity:0.5">
-        <option value="">— 발신번호 없음 —</option>
-      </select>
-      {% else %}
-      <select name="caller_id" id="caller_id" required>
-        {% for c in callers %}
-        <option value="{{ c.id }}"
-          {% if preserved_caller_id and c.id == preserved_caller_id %}selected
-          {% elif not preserved_caller_id and default_caller and c.id == default_caller.id %}selected{% endif %}>
-          {{ c.label }} ({{ c.number|phone_fmt }})
-        </option>
-        {% endfor %}
-      </select>
-      {% endif %}
-    </div>
-
-    <!-- 수신자 선택 방식 -->
-    <div class="form-group">
-      <label>수신자 선택 방식</label>
-      <div class="flex" style="gap:16px;flex-wrap:wrap;margin-top:4px">
-        <label style="font-weight:normal;display:flex;align-items:center;gap:5px">
-          <input type="radio" name="source" value="manual"
-            {% if preselect_group_id == 0 %}checked{% endif %}
-            onchange="toggleSource()"> 직접 입력
-        </label>
-        <label style="font-weight:normal;display:flex;align-items:center;gap:5px">
-          <input type="radio" name="source" value="groups"
-            {% if preselect_group_id != 0 %}checked{% endif %}
-            onchange="toggleSource()"> 그룹 선택
-        </label>
-        <label style="font-weight:normal;display:flex;align-items:center;gap:5px">
-          <input type="radio" name="source" value="contacts" onchange="toggleSource()"> 개별 연락처
-        </label>
-      </div>
-      <div class="form-hint" style="margin-top:4px">다른 모드로 전환해도 입력 내용은 유지됩니다.</div>
-    </div>
-
-    <!-- 직접 입력 -->
-    <div id="source-manual" class="source-section" {% if preselect_group_id != 0 %}style="display:none"{% endif %}>
-      <div class="form-group">
-        <label for="recipients_text">
-          수신자 번호
-          <span class="text-muted">(한 줄에 한 번호 또는 콤마 구분)</span>
-        </label>
-        <textarea name="recipients_text" id="recipients_text" rows="5"
-          placeholder="010-1234-5678&#10;01087654321&#10;+82-10-9999-8888"
-          hx-post="/compose/preview"
-          hx-trigger="keyup changed delay:600ms"
-          hx-target="#preview-result"
-          hx-include="#compose-form"
-          hx-swap="innerHTML">{{ recipients_text or "" }}</textarea>
-      </div>
-    </div>
-
-    <!-- 그룹 선택 (체크박스) -->
-    <div id="source-groups" class="source-section" {% if preselect_group_id == 0 %}style="display:none"{% endif %}>
-      <div class="form-group">
-        <label>그룹 선택</label>
-        {% if groups %}
-        <div class="checkbox-list" style="max-height:240px;overflow-y:auto">
-          {% for g in groups %}
-          <label class="checkbox-item">
-            <input type="checkbox" name="group_ids" value="{{ g.id }}" {% if g.id == preselect_group_id %}checked{% endif %}>
-            <span class="checkbox-label">{{ g.name }} <span class="text-muted">({{ g.member_count }}명)</span></span>
-          </label>
-          {% endfor %}
-        </div>
-        <div class="form-hint">여러 그룹 동시 선택 가능. 중복 멤버는 자동 제거됩니다.</div>
+      <div class="form-group mg-b-20">
+        <label class="d-block tx-13 tx-semibold mg-b-5" for="caller_id">발신번호</label>
+        {% if not callers %}
+        <select name="caller_id" id="caller_id" class="form-control" disabled>
+          <option value="">— 발신번호 없음 —</option>
+        </select>
         {% else %}
-        <div class="alert alert-info">등록된 그룹이 없습니다. <a href="/groups/new">새 그룹 만들기</a></div>
+        <select name="caller_id" id="caller_id" class="form-control" required>
+          {% for c in callers %}
+          <option value="{{ c.id }}"
+            {% if preserved_caller_id and c.id == preserved_caller_id %}selected
+            {% elif not preserved_caller_id and default_caller and c.id == default_caller.id %}selected{% endif %}>
+            {{ c.label }} ({{ c.number|phone_fmt }})
+          </option>
+          {% endfor %}
+        </select>
         {% endif %}
       </div>
-    </div>
 
-    <!-- 개별 연락처 (체크박스 + 검색) -->
-    <div id="source-contacts" class="source-section" style="display:none">
-      <div class="form-group">
-        <label>개별 연락처</label>
-        <input type="text" id="contact-filter" placeholder="이름/전화번호 검색..."
-          onkeyup="filterContacts(this.value)"
-          style="margin-bottom:6px">
-        {% if contacts %}
-        <div class="checkbox-list" id="contact-list" style="max-height:320px;overflow-y:auto">
-          {% for c in contacts %}
-          <label class="checkbox-item"
-            data-search="{{ (c.name or '')|lower }} {{ (c.phone or '')|lower }} {{ (c.department or '')|lower }}">
-            <input type="checkbox" name="contact_ids" value="{{ c.id }}">
-            <span class="checkbox-label">{{ c.name }} <span class="text-muted">{{ c.phone|phone_fmt or "" }}{% if c.department %} · {{ c.department }}{% endif %}</span></span>
-          </label>
-          {% endfor %}
+      <!-- 수신자 선택 방식 -->
+      <div class="form-group mg-b-20">
+        <label class="d-block tx-13 tx-semibold mg-b-8">수신자 선택 방식</label>
+        <div class="d-flex flex-wrap" style="gap:16px">
+          <div class="form-check">
+            <input type="radio" id="src-manual" name="source" value="manual" class="form-check-input"
+              {% if preselect_group_id == 0 %}checked{% endif %}
+              onchange="toggleSource()">
+            <label for="src-manual" class="form-check-label tx-13">직접 입력</label>
+          </div>
+          <div class="form-check">
+            <input type="radio" id="src-groups" name="source" value="groups" class="form-check-input"
+              {% if preselect_group_id != 0 %}checked{% endif %}
+              onchange="toggleSource()">
+            <label for="src-groups" class="form-check-label tx-13">그룹 선택</label>
+          </div>
+          <div class="form-check">
+            <input type="radio" id="src-contacts" name="source" value="contacts" class="form-check-input"
+              onchange="toggleSource()">
+            <label for="src-contacts" class="form-check-label tx-13">개별 연락처</label>
+          </div>
         </div>
-        <div class="form-hint">검색으로 필터링 후 체크. 여러 명 선택 가능.
-          {% if contacts|length >= 1000 %}
-          <span class="warn">최대 1,000명까지 표시됩니다. 더 많은 연락처는 그룹 또는 직접 입력을 사용하세요.</span>
+        <p class="tx-11 tx-color-03 mg-t-5 mg-b-0">다른 모드로 전환해도 입력 내용은 유지됩니다.</p>
+      </div>
+
+      <!-- 직접 입력 -->
+      <div id="source-manual" class="source-section mg-b-20" {% if preselect_group_id != 0 %}style="display:none"{% endif %}>
+        <div class="form-group mg-b-0">
+          <label class="d-block tx-13 tx-semibold mg-b-5" for="recipients_text">
+            수신자 번호 <span class="tx-11 tx-color-03 tx-normal">(한 줄에 한 번호 또는 콤마 구분)</span>
+          </label>
+          <textarea name="recipients_text" id="recipients_text" rows="5" class="form-control"
+            placeholder="010-1234-5678&#10;01087654321&#10;+82-10-9999-8888"
+            hx-post="/compose/preview"
+            hx-trigger="keyup changed delay:600ms"
+            hx-target="#preview-result"
+            hx-include="#compose-form"
+            hx-swap="innerHTML">{{ recipients_text or "" }}</textarea>
+        </div>
+      </div>
+
+      <!-- 그룹 선택 -->
+      <div id="source-groups" class="source-section mg-b-20" {% if preselect_group_id == 0 %}style="display:none"{% endif %}>
+        <div class="form-group mg-b-0">
+          <label class="d-block tx-13 tx-semibold mg-b-5">그룹 선택</label>
+          {% if groups %}
+          <div class="bd rounded pd-10" style="max-height:240px;overflow-y:auto">
+            {% for g in groups %}
+            <div class="form-check mg-b-4">
+              <input type="checkbox" id="grp-{{ g.id }}" name="group_ids" value="{{ g.id }}" class="form-check-input" {% if g.id == preselect_group_id %}checked{% endif %}>
+              <label for="grp-{{ g.id }}" class="form-check-label tx-13">{{ g.name }} <span class="tx-color-03 tx-12">({{ g.member_count }}명)</span></label>
+            </div>
+            {% endfor %}
+          </div>
+          <p class="tx-11 tx-color-03 mg-t-5 mg-b-0">여러 그룹 동시 선택 가능. 중복 멤버는 자동 제거됩니다.</p>
+          {% else %}
+          <div class="alert alert-info mg-b-0 tx-13">등록된 그룹이 없습니다. <a href="/groups/new" class="alert-link">새 그룹 만들기</a></div>
           {% endif %}
         </div>
-        {% else %}
-        <div class="alert alert-info">등록된 연락처가 없습니다. <a href="/contacts/new">연락처 추가</a></div>
+      </div>
+
+      <!-- 개별 연락처 -->
+      <div id="source-contacts" class="source-section mg-b-20" style="display:none">
+        <div class="form-group mg-b-0">
+          <label class="d-block tx-13 tx-semibold mg-b-5">개별 연락처</label>
+          <input type="text" id="contact-filter" class="form-control mg-b-6" placeholder="이름/전화번호 검색..."
+            onkeyup="filterContacts(this.value)">
+          {% if contacts %}
+          <div class="bd rounded pd-10" id="contact-list" style="max-height:320px;overflow-y:auto">
+            {% for c in contacts %}
+            <div class="form-check mg-b-4 contact-item"
+              data-search="{{ (c.name or '')|lower }} {{ (c.phone or '')|lower }} {{ (c.department or '')|lower }}">
+              <input type="checkbox" id="ctc-{{ c.id }}" name="contact_ids" value="{{ c.id }}" class="form-check-input">
+              <label for="ctc-{{ c.id }}" class="form-check-label tx-13">{{ c.name }} <span class="tx-color-03 tx-12">{{ c.phone|phone_fmt or "" }}{% if c.department %} · {{ c.department }}{% endif %}</span></label>
+            </div>
+            {% endfor %}
+          </div>
+          <p class="tx-11 tx-color-03 mg-t-5 mg-b-0">검색으로 필터링 후 체크. 여러 명 선택 가능.
+            {% if contacts|length >= 1000 %}
+            <span class="tx-warning">최대 1,000명까지 표시됩니다. 더 많은 연락처는 그룹 또는 직접 입력을 사용하세요.</span>
+            {% endif %}
+          </p>
+          {% else %}
+          <div class="alert alert-info mg-b-0 tx-13">등록된 연락처가 없습니다. <a href="/contacts/new" class="alert-link">연락처 추가</a></div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- 제목 (LMS/MMS 전용) -->
+      <div class="form-group mg-b-20" id="subject-group" style="opacity:0.4">
+        <label class="d-block tx-13 tx-semibold mg-b-5" for="subject-input">제목 <span class="tx-11 tx-color-03 tx-normal">(LMS/MMS 전용)</span></label>
+        <input type="text" name="subject" id="subject-input" class="form-control" maxlength="40"
+          placeholder="LMS/MMS 메시지 제목 (선택)" value="{{ subject or '' }}" disabled>
+        <p class="tx-11 tx-color-03 mg-t-3 mg-b-0">SMS(90 byte 이하)일 때는 비활성됩니다. 90 byte 초과 또는 첨부 시 자동 활성됩니다.</p>
+      </div>
+
+      <!-- MMS 첨부 -->
+      <div class="form-group mg-b-20">
+        <label class="d-block tx-13 tx-semibold mg-b-5" for="attachment-file">
+          첨부 이미지 <span class="tx-11 tx-color-03 tx-normal">(MMS 전용 — 1장, JPG/PNG/GIF, 자동 전처리)</span>
+        </label>
+        <input type="file" id="attachment-file" class="form-control" accept="image/jpeg,image/jpg,image/png,image/gif"
+          onchange="uploadAttachment()">
+        <input type="hidden" name="attachment_id" id="attachment-id" value="0">
+        <p id="attachment-status" class="tx-11 tx-color-03 mg-t-3 mg-b-0"></p>
+        <div id="attachment-preview" class="mg-t-8" style="display:none">
+          <img id="attachment-thumb" src="" alt="첨부 미리보기" class="rounded bd" style="max-width:240px;max-height:180px">
+          <div class="mg-t-5">
+            <button type="button" class="btn btn-white btn-sm pd-x-15" onclick="clearAttachment()">
+              <i data-feather="x" class="wd-12 ht-12 mg-r-3"></i> 첨부 제거
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 본문 -->
+      <div class="form-group mg-b-20">
+        <label class="d-block tx-13 tx-semibold mg-b-5" for="content-textarea">본문</label>
+        <textarea name="content" id="content-textarea" rows="3" class="form-control"
+          style="min-height:80px;resize:none;overflow-y:hidden"
+          placeholder="메시지를 입력하세요 (SMS: 90byte 이하, LMS: 2000byte 이하)"
+          hx-post="/compose/preview"
+          hx-trigger="keyup delay:600ms"
+          hx-target="#preview-result"
+          hx-include="#compose-form"
+          hx-swap="innerHTML">{{ content or "" }}</textarea>
+        <p id="byte-counter" class="tx-12 mg-t-4 mg-b-0 tx-success">0 byte (SMS)</p>
+      </div>
+
+      <!-- 미리보기 -->
+      <div id="preview-result" class="mg-b-15">
+        {% if preview %}
+          {% include "_compose_preview.html" %}
         {% endif %}
       </div>
-    </div>
 
-    <!-- LMS/MMS 제목 (항상 렌더, SMS일 때 disabled + opacity) -->
-    <div class="form-group" id="subject-group" style="opacity:0.4">
-      <label for="subject-input">제목 <span class="text-muted" style="font-weight:normal">(LMS/MMS 전용)</span></label>
-      <input type="text" name="subject" id="subject-input" maxlength="40"
-        placeholder="LMS/MMS 메시지 제목 (선택)"
-        value="{{ subject or '' }}"
-        disabled>
-      <div class="form-hint">SMS(90 byte 이하)일 때는 비활성됩니다. 90 byte 초과 또는 첨부 시 자동 활성됩니다.</div>
-    </div>
-
-    <!-- MMS 첨부 이미지 -->
-    <div class="form-group">
-      <label for="attachment-file">
-        첨부 이미지
-        <span class="text-muted" style="font-weight:normal">(MMS 전용 — 1장, JPG/PNG/GIF, 자동 전처리)</span>
-      </label>
-      <input type="file" id="attachment-file" accept="image/jpeg,image/jpg,image/png,image/gif"
-        onchange="uploadAttachment()">
-      <input type="hidden" name="attachment_id" id="attachment-id" value="0">
-      <div id="attachment-status" class="form-hint"></div>
-      <div id="attachment-preview" style="margin-top:8px;display:none">
-        <img id="attachment-thumb" src="" alt="첨부 미리보기"
-          style="max-width:240px;max-height:180px;border:1px solid var(--border);border-radius:var(--radius)">
-        <div style="margin-top:4px">
-          <button type="button" class="btn btn-secondary btn-sm" onclick="clearAttachment()">
-            <i data-lucide="x"></i> 첨부 제거
-          </button>
+      <!-- 예약 발송 -->
+      <div class="form-group mg-b-20" id="reserve-group">
+        <div class="form-check">
+          <input type="checkbox" id="reserve-enabled" name="reserve_enabled" value="on" class="form-check-input"
+            onchange="toggleReserve()">
+          <label for="reserve-enabled" class="form-check-label tx-13 tx-semibold">예약 발송</label>
+        </div>
+        <div id="reserve-input-wrap" class="mg-t-8" style="display:none">
+          <input type="datetime-local" name="reserve_time" id="reserve-time-input" class="form-control" style="max-width:240px">
+          <input type="hidden" name="reserve_timezone" value="Asia/Seoul">
+          <p class="tx-11 tx-color-03 mg-t-3 mg-b-0">
+            현재 시각 기준 최소 10분 이후로 설정하세요. 타임존은 <strong>Asia/Seoul (KST)</strong>로 고정됩니다.
+          </p>
         </div>
       </div>
-    </div>
 
-    <!-- 본문 -->
-    <div class="form-group">
-      <label for="content-textarea">본문</label>
-      <textarea name="content" id="content-textarea" rows="3"
-        style="min-height:80px;resize:none;overflow-y:hidden"
-        placeholder="메시지를 입력하세요 (SMS: 90byte 이하, LMS: 2000byte 이하)"
-        hx-post="/compose/preview"
-        hx-trigger="keyup delay:600ms"
-        hx-target="#preview-result"
-        hx-include="#compose-form"
-        hx-swap="innerHTML">{{ content or "" }}</textarea>
-      <div id="byte-counter" class="byte-counter ok">0 byte (SMS)</div>
-    </div>
-
-    <!-- 미리보기 결과 영역 -->
-    <div id="preview-result" style="margin-bottom:12px">
-      {% if preview %}
-        {% include "_compose_preview.html" %}
-      {% endif %}
-    </div>
-
-    <!-- 예약 발송 -->
-    <div class="form-group" id="reserve-group">
-      <label style="display:flex;align-items:center;gap:6px;font-weight:600">
-        <input type="checkbox" name="reserve_enabled" id="reserve-enabled" value="on"
-          onchange="toggleReserve()">
-        예약 발송
-      </label>
-      <div id="reserve-input-wrap" style="display:none;margin-top:6px">
-        <input type="datetime-local" name="reserve_time" id="reserve-time-input"
-          class="ctrl" style="max-width:240px">
-        <input type="hidden" name="reserve_timezone" value="Asia/Seoul">
-        <div class="form-hint">
-          현재 시각 기준 최소 10분 이후로 설정하세요. 타임존은 <b>Asia/Seoul (KST)</b>로 고정됩니다.
-        </div>
+      <div class="d-flex">
+        {% if callers %}
+        <button type="button" class="btn btn-primary pd-x-20" id="send-btn" onclick="openSendModal()">
+          <i data-feather="send" class="wd-14 ht-14 mg-r-5"></i> 발송하기
+        </button>
+        {% else %}
+        <button type="button" class="btn btn-primary pd-x-20" disabled title="발신번호를 먼저 등록하세요">
+          <i data-feather="send" class="wd-14 ht-14 mg-r-5"></i> 발송하기
+        </button>
+        {% endif %}
       </div>
-    </div>
-
-    {# M13: HTMX 자동 미리보기가 이미 있으므로 수동 "미리보기" 버튼 제거.
-       발송하기 버튼만 유지. #}
-    <div class="flex">
-      {% if callers %}
-      <button type="button" class="btn btn-primary" id="send-btn" onclick="openSendModal()">
-        <i data-lucide="send"></i>
-        발송하기
-      </button>
-      {% else %}
-      <button type="button" class="btn btn-primary" disabled title="발신번호를 먼저 등록하세요">
-        <i data-lucide="send"></i>
-        발송하기
-      </button>
-      {% endif %}
-    </div>
-  </form>
+    </form>
+  </div>
 </div>
 
-<!-- C4: 발송 확인 모달 -->
-<div id="send-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.4);align-items:center;justify-content:center">
-  <div style="background:#fff;border:1px solid var(--border-strong);width:480px;max-width:95vw">
-    <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:space-between">
-      <span>발송 확인</span>
-      <button onclick="closeSendModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1">×</button>
-    </div>
-    <div style="padding:16px">
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <colgroup><col style="width:90px"><col></colgroup>
-        <tbody>
-          <tr>
-            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">발신번호</th>
-            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-caller">—</td>
-          </tr>
-          <tr>
-            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">수신자</th>
-            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-count">—</td>
-          </tr>
-          <tr>
-            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">유형</th>
-            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-type">—</td>
-          </tr>
-          <tr>
-            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">발송 방식</th>
-            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-channel">RCS 우선 → SMS 자동 전환</td>
-          </tr>
-          <tr>
-            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary);vertical-align:top">본문</th>
-            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-content">—</td>
-          </tr>
-          <tr>
-            <th style="text-align:left;padding:5px 8px;background:var(--bg-elevated);border:1px solid var(--border);font-weight:600;color:var(--text-secondary)">예상 비용</th>
-            <td style="padding:5px 8px;border:1px solid var(--border)" id="modal-cost">—</td>
-          </tr>
-        </tbody>
-      </table>
-      <div class="alert alert-warning" style="margin-top:10px;margin-bottom:0;font-size:11px">
-        <span id="modal-warn-text">발송 후 취소할 수 없습니다. 내용을 확인하고 진행하세요.</span>
+<!-- 발송 확인 모달 (Bootstrap 5) -->
+<div class="modal fade" id="send-modal" tabindex="-1" aria-labelledby="send-modal-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header pd-y-15 pd-x-20">
+        <h6 class="modal-title tx-semibold" id="send-modal-title">발송 확인</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-    </div>
-    <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
-      <button onclick="closeSendModal()" class="btn btn-secondary">취소</button>
-      <button id="modal-confirm-btn" onclick="confirmSend()" class="btn btn-primary">
-        <i data-lucide="send"></i> 예, 발송합니다
-      </button>
+      <div class="modal-body pd-20">
+        <table class="table table-sm tx-13 mg-b-10">
+          <tbody>
+            <tr><th class="wd-110 bg-light tx-color-03">발신번호</th><td id="modal-caller">—</td></tr>
+            <tr><th class="bg-light tx-color-03">수신자</th><td id="modal-count">—</td></tr>
+            <tr><th class="bg-light tx-color-03">유형</th><td id="modal-type">—</td></tr>
+            <tr><th class="bg-light tx-color-03">발송 방식</th><td id="modal-channel">RCS 우선 → SMS 자동 전환</td></tr>
+            <tr><th class="bg-light tx-color-03">본문</th><td id="modal-content" style="word-break:break-all">—</td></tr>
+            <tr><th class="bg-light tx-color-03">예상 비용</th><td id="modal-cost">—</td></tr>
+          </tbody>
+        </table>
+        <div class="alert alert-warning tx-12 mg-b-0 pd-y-8">
+          <span id="modal-warn-text">발송 후 취소할 수 없습니다. 내용을 확인하고 진행하세요.</span>
+        </div>
+      </div>
+      <div class="modal-footer pd-y-10 pd-x-20">
+        <button type="button" class="btn btn-white pd-x-15" data-bs-dismiss="modal">취소</button>
+        <button type="button" id="modal-confirm-btn" class="btn btn-primary pd-x-15" onclick="confirmSend()">
+          <i data-feather="send" class="wd-14 ht-14 mg-r-5"></i> 예, 발송합니다
+        </button>
+      </div>
     </div>
   </div>
 </div>
 
+</div><!-- container -->
+{% endblock %}
+
+{% block body_extra %}
 <script>
+// 아이콘 리플레이서 (safe DOM)
+function setFeatherIcon(el, iconName, cls) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+  var i = document.createElement('i');
+  i.setAttribute('data-feather', iconName);
+  if (cls) i.className = cls;
+  el.appendChild(i);
+}
+
 // ── MMS 첨부 이미지 업로드 ──────────────────────────────────────────────────
 function uploadAttachment() {
   var fileInput = document.getElementById('attachment-file');
@@ -282,20 +286,17 @@ function uploadAttachment() {
   if (!fileInput.files || fileInput.files.length === 0) return;
 
   var file = fileInput.files[0];
-  // 클라이언트 사이드 1차 가드 (서버가 최종 결정)
   if (file.size > 10 * 1024 * 1024) {
     statusEl.textContent = '파일이 너무 큽니다 (최대 10MB).';
-    statusEl.className = 'form-hint err';
+    statusEl.className = 'tx-11 tx-danger mg-t-3 mg-b-0';
     return;
   }
 
   statusEl.textContent = '업로드 중...';
-  statusEl.className = 'form-hint';
+  statusEl.className = 'tx-11 tx-color-03 mg-t-3 mg-b-0';
 
   var formData = new FormData();
   formData.append('file', file);
-
-  // CSRF 토큰을 form 의 hidden input 에서 가져옴
   var csrfToken = document.querySelector('input[name="csrf_token"]').value;
 
   fetch('/compose/upload-attachment', {
@@ -309,7 +310,7 @@ function uploadAttachment() {
     .then(function (result) {
       if (!result.ok) {
         statusEl.textContent = '실패: ' + (result.data.error || '알 수 없는 오류');
-        statusEl.className = 'form-hint err';
+        statusEl.className = 'tx-11 tx-danger mg-t-3 mg-b-0';
         return;
       }
       hiddenId.value = result.data.attachment_id;
@@ -317,18 +318,16 @@ function uploadAttachment() {
       statusEl.textContent = '✓ 업로드 완료 — '
         + result.data.width + '×' + result.data.height
         + ', ' + sizeKb + 'KB (자동 변환됨)';
-      statusEl.className = 'form-hint ok';
-      // 미리보기 — BLOB URL 사용 (이미 전처리된 결과는 서버에만 있으므로 원본 표시)
+      statusEl.className = 'tx-11 tx-success mg-t-3 mg-b-0';
       var url = URL.createObjectURL(file);
       thumb.src = url;
       preview.style.display = '';
-      // MMS 모드 진입 — subject 활성, byte counter 갱신
       forceMmsMode(true);
-      if (typeof lucide !== 'undefined') lucide.createIcons();
+      if (typeof feather !== 'undefined') feather.replace();
     })
     .catch(function (err) {
       statusEl.textContent = '네트워크 오류: ' + err.message;
-      statusEl.className = 'form-hint err';
+      statusEl.className = 'tx-11 tx-danger mg-t-3 mg-b-0';
     });
 }
 
@@ -340,7 +339,6 @@ function clearAttachment() {
   forceMmsMode(false);
 }
 
-// MMS 모드 진입/해제 — subject 활성/비활성, byte counter 표시 갱신
 function forceMmsMode(on) {
   var subjectGroup = document.getElementById('subject-group');
   var subjectInput = document.getElementById('subject-input');
@@ -349,18 +347,16 @@ function forceMmsMode(on) {
     subjectGroup.style.opacity = '1';
     subjectInput.disabled = false;
   }
-  // off 인 경우는 byte counter 가 자체적으로 다시 결정하도록 둔다
   updateByteCounter();
 }
 
-// ── 예약 발송 토글 + 최소 시각 설정 ────────────────────────────────────────
+// ── 예약 발송 토글 ────────────────────────────────────────
 function toggleReserve() {
   var enabled = document.getElementById('reserve-enabled').checked;
   var wrap = document.getElementById('reserve-input-wrap');
   var input = document.getElementById('reserve-time-input');
   wrap.style.display = enabled ? '' : 'none';
   if (enabled) {
-    // 현재 시각 + 15분을 기본 최소값/초기값으로 제안
     var now = new Date(Date.now() + 15 * 60 * 1000);
     var pad = function (n) { return (n < 10 ? '0' : '') + n; };
     var minStr = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate())
@@ -379,15 +375,15 @@ function updateSendButtonLabel() {
   var enabled = document.getElementById('reserve-enabled');
   var btn = document.getElementById('send-btn');
   if (!btn) return;
-  // 기존 자식 노드 제거 후 safe DOM 생성
   while (btn.firstChild) btn.removeChild(btn.firstChild);
   var icon = document.createElement('i');
-  icon.setAttribute('data-lucide', 'send');
+  icon.setAttribute('data-feather', 'send');
+  icon.className = 'wd-14 ht-14 mg-r-5';
   btn.appendChild(icon);
   btn.appendChild(document.createTextNode(
-    (enabled && enabled.checked) ? ' 예약 등록' : ' 발송하기'
+    (enabled && enabled.checked) ? '예약 등록' : '발송하기'
   ));
-  if (typeof lucide !== 'undefined') lucide.createIcons();
+  if (typeof feather !== 'undefined') feather.replace();
 }
 
 function toggleSource() {
@@ -401,14 +397,14 @@ function filterContacts(query) {
   query = (query || '').toLowerCase().trim();
   var list = document.getElementById('contact-list');
   if (!list) return;
-  var items = list.querySelectorAll('.checkbox-item');
+  var items = list.querySelectorAll('.contact-item');
   for (var i = 0; i < items.length; i++) {
     var search = items[i].getAttribute('data-search') || '';
     items[i].style.display = !query || search.includes(query) ? '' : 'none';
   }
 }
 
-// ── 본문 byte 카운터 + H10 LMS subject 활성/비활성 ──────────────────────────
+// ── 본문 byte 카운터 ──────────────────────────
 function measureEucKrBytes(text) {
   var bytes = 0;
   for (var i = 0; i < text.length; i++) {
@@ -421,18 +417,16 @@ var byteCounter = document.getElementById('byte-counter');
 function updateByteCounter() {
   if (!contentTa || !byteCounter) return;
   var bytes = measureEucKrBytes(contentTa.value);
-  // 첨부가 있으면 MMS 로 강제 — byte 길이로 SMS/LMS 자동 판정 무시
   var hasAttachment = (document.getElementById('attachment-id') || {}).value;
   var isMms = hasAttachment && hasAttachment !== '0';
-  var type = isMms ? 'MMS' : (bytes <= 90 ? 'SMS' : (bytes <= 2000 ? 'LMS' : '초과'));
   var typeLabel = isMms ? '이미지' : (bytes <= 90 ? '단문' : (bytes <= 2000 ? '장문' : '초과'));
   var priceInfo = '';
-  if (type === 'SMS') priceInfo = ' → RCS 양방향 8원/건 (미지원 시 SMS 9원)';
-  else if (type === 'LMS') priceInfo = ' → RCS LMS 27원/건 (미지원 시 LMS 27원)';
-  else if (type === 'MMS') priceInfo = ' → RCS 이미지 40원/건 (미지원 시 MMS 85원)';
+  if (!isMms && bytes <= 90) priceInfo = ' → RCS 양방향 8원/건 (미지원 시 SMS 9원)';
+  else if (!isMms && bytes <= 2000) priceInfo = ' → RCS LMS 27원/건 (미지원 시 LMS 27원)';
+  else if (isMms) priceInfo = ' → RCS 이미지 40원/건 (미지원 시 MMS 85원)';
   byteCounter.textContent = bytes + ' byte · ' + typeLabel + priceInfo;
-  byteCounter.className = 'byte-counter ' + (bytes > 2000 ? 'err' : (bytes > 90 || isMms ? 'warn' : 'ok'));
-  // H10 + MMS: subject 입력란 활성 조건
+  var state = bytes > 2000 ? 'tx-danger' : ((bytes > 90 || isMms) ? 'tx-warning' : 'tx-success');
+  byteCounter.className = 'tx-12 mg-t-4 mg-b-0 ' + state;
   var subjectGroup = document.getElementById('subject-group');
   var subjectInput = document.getElementById('subject-input');
   if (subjectGroup && subjectInput) {
@@ -444,7 +438,6 @@ function updateByteCounter() {
       subjectInput.disabled = true;
     }
   }
-  // textarea auto-grow
   contentTa.style.height = 'auto';
   contentTa.style.height = (contentTa.scrollHeight + 2) + 'px';
 }
@@ -453,23 +446,20 @@ if (contentTa) {
   updateByteCounter();
 }
 
-// ── C4: 발송 확인 모달 ────────────────────────────────────────────────────────
+// ── 발송 확인 모달 ────────────────────────────────────────
+var _sendModalInst = null;
 function openSendModal() {
-  // 미리보기 결과에서 수신자 수 읽기
   var validEl = document.getElementById('current-valid-count');
   var validCount = validEl ? parseInt(validEl.textContent || '0', 10) : 0;
 
-  // 발신번호 선택값 읽기
   var callerSel = document.getElementById('caller_id');
   var callerText = callerSel ? callerSel.options[callerSel.selectedIndex].text : '—';
 
-  // 메시지 유형 읽기 (byte counter + 첨부 여부로 판단)
   var bytes = contentTa ? measureEucKrBytes(contentTa.value) : 0;
   var hasAttachment = (document.getElementById('attachment-id') || {}).value;
   var isMms = hasAttachment && hasAttachment !== '0';
   var msgType = isMms ? '이미지' : (bytes <= 90 ? '단문' : (bytes <= 2000 ? '장문' : '초과'));
 
-  // 비용 계산
   var rcsCost = isMms ? 40 : (bytes <= 90 ? 8 : 27);
   var fbCost = isMms ? 85 : (bytes <= 90 ? 9 : 27);
   var costMin = validCount * rcsCost;
@@ -478,7 +468,6 @@ function openSendModal() {
     ? (costMin === costMax ? costMin.toLocaleString() + '원' : costMin.toLocaleString() + ' ~ ' + costMax.toLocaleString() + '원')
     : '—';
 
-  // 본문 미리보기 (80자 이상이면 말줄임)
   var content = contentTa ? contentTa.value : '';
   var contentPreview = content.length > 80 ? content.slice(0, 80) + '…' : content;
 
@@ -491,46 +480,40 @@ function openSendModal() {
   var rcsMode = (bytes <= 90 && !isMms) ? 'RCS 양방향' : 'RCS';
   document.getElementById('modal-channel').textContent = rcsMode + ' 우선 → 미지원 시 ' + fbLabel + ' 자동 전환';
 
-  // 예약 모드일 때 확인 버튼 문구/경고 메시지 교체
   var reserveEnabled = document.getElementById('reserve-enabled');
   var reserveInput = document.getElementById('reserve-time-input');
   var warn = document.getElementById('modal-warn-text');
   var confirmBtn = document.getElementById('modal-confirm-btn');
   if (reserveEnabled && reserveEnabled.checked && reserveInput && reserveInput.value) {
-    var localStr = reserveInput.value.replace('T', ' ');
-    if (warn) warn.textContent = localStr + ' 에 자동 발송됩니다. 예약 취소는 캠페인 상세에서 가능합니다.';
+    if (warn) warn.textContent = reserveInput.value.replace('T', ' ') + ' 에 자동 발송됩니다. 예약 취소는 캠페인 상세에서 가능합니다.';
     if (confirmBtn) {
       while (confirmBtn.firstChild) confirmBtn.removeChild(confirmBtn.firstChild);
       var icon = document.createElement('i');
-      icon.setAttribute('data-lucide', 'calendar-clock');
+      icon.setAttribute('data-feather', 'calendar');
+      icon.className = 'wd-14 ht-14 mg-r-5';
       confirmBtn.appendChild(icon);
-      confirmBtn.appendChild(document.createTextNode(' 예, 예약합니다'));
+      confirmBtn.appendChild(document.createTextNode('예, 예약합니다'));
     }
   } else {
     if (warn) warn.textContent = '발송 후 취소할 수 없습니다. 내용을 확인하고 진행하세요.';
     if (confirmBtn) {
       while (confirmBtn.firstChild) confirmBtn.removeChild(confirmBtn.firstChild);
       var icon2 = document.createElement('i');
-      icon2.setAttribute('data-lucide', 'send');
+      icon2.setAttribute('data-feather', 'send');
+      icon2.className = 'wd-14 ht-14 mg-r-5';
       confirmBtn.appendChild(icon2);
-      confirmBtn.appendChild(document.createTextNode(' 예, 발송합니다'));
+      confirmBtn.appendChild(document.createTextNode('예, 발송합니다'));
     }
   }
 
-  var modal = document.getElementById('send-modal');
-  modal.style.display = 'flex';
-  if (typeof lucide !== 'undefined') lucide.createIcons();
-}
-function closeSendModal() {
-  document.getElementById('send-modal').style.display = 'none';
+  if (typeof feather !== 'undefined') feather.replace();
+  var modalEl = document.getElementById('send-modal');
+  if (!_sendModalInst) _sendModalInst = new bootstrap.Modal(modalEl);
+  _sendModalInst.show();
 }
 function confirmSend() {
-  document.getElementById('send-modal').style.display = 'none';
+  if (_sendModalInst) _sendModalInst.hide();
   document.getElementById('compose-form').submit();
 }
-// ESC로 모달 닫기
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') closeSendModal();
-});
 </script>
 {% endblock %}

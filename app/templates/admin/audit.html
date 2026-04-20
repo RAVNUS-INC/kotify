@@ -31,7 +31,7 @@
           <input type="date" name="date_to" value="{{ date_to or '' }}" class="form-control">
         </div>
         <button type="submit" class="btn btn-primary btn-sm">
-          <i data-lucide="search" class="wd-12 ht-12 mg-r-4"></i> 검색
+          <i data-feather="search" class="wd-12 ht-12 mg-r-4"></i> 검색
         </button>
         <a href="/admin/audit" class="btn btn-outline-light btn-sm">초기화</a>
         <div class="per-page-form mg-l-auto">
@@ -86,12 +86,12 @@
               {% else %}system{% endif %}
             </td>
             <td>
-              <span class="badge
-                {% if log.action == 'LOGIN' %}badge-success
-                {% elif log.action == 'LOGOUT' %}badge-pending
-                {% elif log.action == 'SEND' %}badge-dispatched
-                {% elif 'DELETE' in log.action %}badge-fail
-                {% else %}badge-info{% endif %}">
+              <span class="badge tx-white
+                {% if log.action == 'LOGIN' %}bg-success
+                {% elif log.action == 'LOGOUT' %}bg-warning
+                {% elif log.action == 'SEND' %}bg-info
+                {% elif 'DELETE' in log.action %}bg-danger
+                {% else %}bg-secondary{% endif %}">
                 {{ log.action }}
               </span>
             </td>
@@ -122,8 +122,8 @@
 
     {% else %}
     <div class="card-body">
-      <div class="empty-state">
-        <i data-lucide="shield-check"></i>
+      <div class="tx-center pd-40 tx-color-03">
+        <i data-feather="shield"></i>
         <p>감사 로그가 없습니다.</p>
       </div>
     </div>

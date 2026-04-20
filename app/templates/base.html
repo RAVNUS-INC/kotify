@@ -6,24 +6,40 @@
   <title>{% block title %}kotify{% endblock %}</title>
   <meta name="csrf-token" content="{{ csrf_token(request) }}">
 
-  <!-- favicon -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔔</text></svg>">
+  <link rel="shortcut icon" type="image/png" href="/static/img/favicon.png">
 
-  <!-- Pretendard 폰트 (CDN) -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <!-- Vendor CSS (jqvmap은 향후 지도 위젯용으로 유지) -->
+  <link rel="stylesheet" href="/static/lib/jqvmap/jqvmap.min.css">
 
-  <!-- Bootstrap 5 (DashForge 의존성) -->
-  <link rel="stylesheet" href="/static/lib/bootstrap/css/bootstrap.min.css">
-  <!-- DashForge 기본 스타일 (perfect-scrollbar 스타일 포함) -->
+  <!-- DashForge CSS -->
   <link rel="stylesheet" href="/static/css/dashforge.css">
   <link rel="stylesheet" href="/static/css/dashforge.dashboard.css">
-  <!-- kotify 모노크롬 스킨 (반드시 맨 마지막) -->
-  <link rel="stylesheet" href="/static/css/skin.mono.css">
+  {% block vendor_css_extra %}{% endblock %}
 
-  <!-- HTMX -->
-  <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
-  <!-- Lucide 아이콘 -->
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <!-- 기본 스킨 (쿠키 기반 스위처 — path traversal 방지용 allowlist) -->
+  {% set _allowed_skins = ['light', 'dark', 'charcoal', 'cool', 'deepblue', 'gradient1'] %}
+  {% set _raw_skin = request.cookies.get('df-skin') if request.cookies is defined else None %}
+  {% set current_skin = _raw_skin if _raw_skin in _allowed_skins else None %}
+  {% if current_skin %}
+  <link id="dfSkin" rel="stylesheet" href="/static/css/skin.{{ current_skin }}.css">
+  {% endif %}
+
+  <!-- HTMX (로컬 번들 — CDN 무결성 이슈 회피) -->
+  <script src="/static/lib/htmx/htmx.min.js"></script>
+
+  <style>
+    /* 스킨 스와치 (aside loggedinMenu 내부) */
+    .skin-swatch {
+      width: 22px; height: 22px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.15);
+      cursor: pointer; padding: 0;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .skin-swatch:hover { transform: scale(1.1); }
+    .skin-swatch.active {
+      box-shadow: 0 0 0 2px #0168fa, 0 0 0 4px #fff inset;
+    }
+  </style>
 
   {% block head_extra %}{% endblock %}
 </head>
@@ -31,70 +47,100 @@
 {% set user_name = request.session.get("user_name", "") if request.session is defined else "" %}
 {% set user_display = request.session.get("user_display", user_name) if request.session is defined else user_name %}
 {% set user_roles = user_roles if user_roles is defined else [] %}
+{% set user_role_label = ('관리자' if 'admin' in user_roles else ('발신자' if 'sender' in user_roles else '조회자')) %}
 
 {% if user_name %}
-<aside class="aside aside-fixed" id="sidebar">
+<aside class="aside aside-fixed">
   <div class="aside-header">
-    <a href="/" class="aside-logo">
-      <i data-lucide="bell" style="width:16px;height:16px"></i>
-      <span>kotify</span>
-    </a>
-    <a href="#" class="aside-menu-link" onclick="toggleSidebar(event)" title="사이드바 토글">
-      <i data-lucide="menu"></i>
+    <a href="/" class="aside-logo">koti<span>fy</span></a>
+    <a href="" class="aside-menu-link">
+      <i data-feather="menu"></i>
+      <i data-feather="x"></i>
     </a>
   </div>
   <div class="aside-body">
+    <div class="aside-loggedin">
+      <div class="d-flex align-items-center justify-content-start">
+        <a href="/me" class="avatar"><span class="avatar-initial rounded-circle bg-gray-700">{{ user_display[:1] if user_display else '?' }}</span></a>
+        <div class="aside-alert-link">
+          <a href="/campaigns" data-bs-toggle="tooltip" title="발송 이력"><i data-feather="send"></i></a>
+          <a href="/chat" data-bs-toggle="tooltip" title="대화방"><i data-feather="message-square"></i></a>
+          <a href="#" data-bs-toggle="tooltip" title="로그아웃" onclick="document.getElementById('aside-logout-form').submit();return false;"><i data-feather="log-out"></i></a>
+        </div>
+      </div>
+      <div class="aside-loggedin-user">
+        <a href="#loggedinMenu" class="d-flex align-items-center justify-content-between mg-b-2" data-bs-toggle="collapse">
+          <h6 class="tx-semibold mg-b-0">{{ user_display or user_name }}</h6>
+          <i data-feather="chevron-down"></i>
+        </a>
+        <p class="tx-color-03 tx-12 mg-b-0">{{ user_role_label }}</p>
+      </div>
+      <div class="collapse" id="loggedinMenu">
+        <ul class="nav nav-aside mg-b-0 pd-t-15">
+          <li class="nav-item"><a href="/me" class="nav-link"><i data-feather="user"></i> <span>프로필 보기</span></a></li>
+          <li class="nav-item"><a href="/help" class="nav-link"><i data-feather="help-circle"></i> <span>도움말</span></a></li>
+          <li class="nav-item pd-x-10 pd-y-10">
+            <span class="tx-10 tx-uppercase tx-medium tx-color-03 tx-sans tx-spacing-1 d-block mg-b-8">테마</span>
+            <div class="d-flex flex-wrap" style="gap:5px" id="skin-swatches" role="group" aria-label="테마 선택">
+              <button type="button" data-skin="default" title="Default" aria-label="테마: Default" class="skin-swatch" style="background:#1b2e4b"></button>
+              <button type="button" data-skin="light" title="Light" aria-label="테마: Light" class="skin-swatch" style="background:#f8f9fc;border-color:#c6cdd9"></button>
+              <button type="button" data-skin="dark" title="Dark" aria-label="테마: Dark" class="skin-swatch" style="background:#1c2030"></button>
+              <button type="button" data-skin="charcoal" title="Charcoal" aria-label="테마: Charcoal" class="skin-swatch" style="background:#2b3949"></button>
+              <button type="button" data-skin="cool" title="Cool" aria-label="테마: Cool" class="skin-swatch" style="background:#3e5879"></button>
+              <button type="button" data-skin="deepblue" title="Deep Blue" aria-label="테마: Deep Blue" class="skin-swatch" style="background:#0168fa"></button>
+              <button type="button" data-skin="gradient1" title="Gradient" aria-label="테마: Gradient" class="skin-swatch" style="background:linear-gradient(135deg,#0168fa,#7c3aed)"></button>
+            </div>
+          </li>
+          <li class="nav-item">
+            <form id="aside-logout-form" action="/auth/logout" method="post" style="margin:0">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+              <a href="#" class="nav-link" onclick="document.getElementById('aside-logout-form').submit();return false;"><i data-feather="log-out"></i> <span>로그아웃</span></a>
+            </form>
+          </li>
+        </ul>
+      </div>
+    </div><!-- aside-loggedin -->
     <ul class="nav nav-aside">
       {% include "_layout/sidebar.html" %}
     </ul>
-  </div>
-  <div class="aside-footer">
-    <span class="aside-footer-text" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-      {{ user_display }}
-    </span>
-    <form action="/auth/logout" method="post" style="margin:0">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-      <button type="submit" class="btn btn-link" title="로그아웃" style="padding:2px 4px">
-        <i data-lucide="log-out" style="width:14px;height:14px"></i>
-      </button>
-    </form>
-  </div>
+  </div><!-- aside-body -->
 </aside>
 {% endif %}
 
-<div class="content">
-  {% if user_name %}
-  <header class="content-header">
-    <h1 class="page-title-text">{% block page_title %}{% endblock %}</h1>
-    <div class="page-actions">{% block page_actions %}{% endblock %}</div>
-  </header>
+<div class="content {% block content_class %}{% endblock %}">
+  {% if user_name and self.page_title() | trim %}
+  <div class="content-header pd-l-0-f pd-t-30 pd-lg-t-40 pd-r-30 mg-b-10">
+    <div class="d-sm-flex align-items-center justify-content-between">
+      <div>
+        {% block breadcrumb %}{% endblock %}
+        <h4 class="mg-b-0 tx-spacing--1">{% block page_title %}{% endblock %}</h4>
+      </div>
+      <div class="d-flex mg-t-20 mg-sm-t-0">{% block page_actions %}{% endblock %}</div>
+    </div>
+  </div>
   {% endif %}
   <div class="content-body">
     {% block content %}{% endblock %}
   </div>
 </div>
 
-<!-- Bootstrap 5 bundle (popper + modals) -->
+<!-- Core scripts (DashForge 원본 순서) -->
 <script src="/static/lib/jquery/jquery.min.js"></script>
 <script src="/static/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="/static/lib/feather-icons/feather.min.js"></script>
 <script src="/static/lib/perfect-scrollbar/perfect-scrollbar.min.js"></script>
+<script src="/static/lib/js-cookie/js.cookie.js"></script>
+<script src="/static/js/dashforge.js"></script>
+<script src="/static/js/dashforge.aside.js"></script>
+
+{% block vendor_js_extra %}{% endblock %}
 
 <script>
-  // ── 사이드바 토글 (localStorage 저장) ───────────────────────────────────
-  var SIDEBAR_KEY = 'kotify-sidebar-collapsed';
-  function toggleSidebar(e) {
-    if (e) e.preventDefault();
-    var aside = document.getElementById('sidebar');
-    if (!aside) return;
-    var minimized = aside.classList.toggle('minimize');
-    localStorage.setItem(SIDEBAR_KEY, minimized ? '1' : '0');
-  }
-  (function() {
-    var aside = document.getElementById('sidebar');
-    if (aside && localStorage.getItem(SIDEBAR_KEY) === '1') {
-      aside.classList.add('minimize');
-    }
-  })();
+  // ── Feather 아이콘 초기화 ──────────────────────────────────────────────
+  if (typeof feather !== 'undefined') feather.replace();
+  document.body.addEventListener('htmx:afterSwap', function() {
+    if (typeof feather !== 'undefined') feather.replace();
+  });
 
   // ── HTMX: CSRF 토큰 자동 주입 ────────────────────────────────────────────
   document.body.addEventListener('htmx:configRequest', function(evt) {
@@ -109,17 +155,30 @@
     }
   });
 
-  // ── Lucide 아이콘 초기화 ─────────────────────────────────────────────────
-  document.addEventListener('DOMContentLoaded', function() {
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-  });
-  document.body.addEventListener('htmx:afterSwap', function() {
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-  });
+  // ── aside 데스크톱 minimize 상태 localStorage 저장 ──────────────────────
+  (function() {
+    var KEY = 'kotify-aside-minimized';
+    var aside = document.querySelector('.aside');
+    if (!aside) return;
+    // 초기 상태 복원 (991px 초과에서만)
+    if (window.matchMedia('(min-width: 992px)').matches && localStorage.getItem(KEY) === '1') {
+      aside.classList.add('minimize');
+    }
+    // 토글 후 상태 저장
+    var link = aside.querySelector('.aside-menu-link');
+    if (link) {
+      link.addEventListener('click', function() {
+        setTimeout(function() {
+          if (window.matchMedia('(min-width: 992px)').matches) {
+            localStorage.setItem(KEY, aside.classList.contains('minimize') ? '1' : '0');
+          }
+        }, 10);
+      });
+    }
+  })();
 
   // ── 단축키 ─────────────────────────────────────────────────────────────
   document.addEventListener('keydown', function(e) {
-    // Ctrl+Enter / Cmd+Enter: 현재 폼 제출
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       var activeForm = document.activeElement && document.activeElement.closest('form');
       if (activeForm) {
@@ -128,18 +187,47 @@
         activeForm.submit();
       }
     }
-    // Esc: 모달이 열려있지 않을 때 사이드바 토글
     if (e.key === 'Escape') {
       var modal = document.querySelector('[id$="-modal"][style*="flex"], .modal.show');
       if (!modal) {
-        var aside = document.getElementById('sidebar');
-        if (aside) {
-          var minimized = aside.classList.toggle('minimize');
-          localStorage.setItem(SIDEBAR_KEY, minimized ? '1' : '0');
+        var aside = document.querySelector('.aside');
+        if (aside && window.matchMedia('(min-width: 992px)').matches) {
+          aside.classList.toggle('minimize');
+          localStorage.setItem('kotify-aside-minimized', aside.classList.contains('minimize') ? '1' : '0');
         }
       }
     }
   });
+
+  // ── 스킨 스위처 (쿠키 기반) ───────────────────────────────────────────
+  (function() {
+    var wrap = document.getElementById('skin-swatches');
+    if (!wrap) return;
+    function getCookie(name) {
+      var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+    function applyActive() {
+      var cur = getCookie('df-skin') || 'default';
+      wrap.querySelectorAll('.skin-swatch').forEach(function(btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-skin') === cur);
+      });
+    }
+    wrap.addEventListener('click', function(e) {
+      var btn = e.target.closest('.skin-swatch');
+      if (!btn) return;
+      e.preventDefault();
+      var skin = btn.getAttribute('data-skin');
+      var maxAge = 365 * 24 * 60 * 60;
+      if (skin === 'default') {
+        document.cookie = 'df-skin=; path=/; max-age=0; SameSite=Lax';
+      } else {
+        document.cookie = 'df-skin=' + encodeURIComponent(skin) + '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+      }
+      location.reload();
+    });
+    applyActive();
+  })();
 
   // ── flash 쿼리스트링 URL 정리 ────────────────────────────────────────────
   (function() {
@@ -155,14 +243,6 @@
       setTimeout(function() {
         history.replaceState(null, '', url.toString());
       }, 800);
-    }
-  })();
-
-  // ── aside 스크롤 (perfect-scrollbar) ─────────────────────────────────────
-  (function() {
-    var asideBody = document.querySelector('.aside-body');
-    if (asideBody && typeof PerfectScrollbar !== 'undefined') {
-      new PerfectScrollbar(asideBody, { suppressScrollX: true });
     }
   })();
 </script>

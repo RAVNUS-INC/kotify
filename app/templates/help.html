@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}도움말 — kotify{% endblock %}
+{% block breadcrumb %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+    <li class="breadcrumb-item"><a href="/">Home</a></li>
+    <li class="breadcrumb-item active" aria-current="page">도움말</li>
+  </ol>
+</nav>
+{% endblock %}
+{% block page_title %}kotify 도움말{% endblock %}
+
+{% block content %}
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+
+  <div class="row row-xs">
+    <div class="col-lg-4">
+      <div class="card card-body">
+        <div class="d-flex align-items-center mg-b-10">
+          <span class="tx-primary"><i data-feather="send" class="wd-24 ht-24"></i></span>
+          <h6 class="mg-b-0 mg-l-10 tx-semibold">발송</h6>
+        </div>
+        <ul class="list-unstyled tx-13 tx-color-02 mg-b-0 lh-6">
+          <li><a href="/compose" class="link-02">새 발송 작성</a></li>
+          <li>SMS(90byte 이하), LMS(2000byte 이하), MMS(이미지 1장) 자동 판정</li>
+          <li>RCS 우선 → 미지원 시 SMS/MMS 자동 전환</li>
+          <li>예약 발송 — 현재 시각 +10분 이후</li>
+          <li><a href="/campaigns" class="link-02">발송 이력 보기</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="col-lg-4 mg-t-10 mg-lg-t-0">
+      <div class="card card-body">
+        <div class="d-flex align-items-center mg-b-10">
+          <span class="tx-success"><i data-feather="users" class="wd-24 ht-24"></i></span>
+          <h6 class="mg-b-0 mg-l-10 tx-semibold">수신자 관리</h6>
+        </div>
+        <ul class="list-unstyled tx-13 tx-color-02 mg-b-0 lh-6">
+          <li><a href="/contacts" class="link-02">주소록</a> — 개별 연락처</li>
+          <li><a href="/contacts/import" class="link-02">CSV 일괄 가져오기</a></li>
+          <li><a href="/groups" class="link-02">그룹</a> — 여러 연락처 묶음</li>
+          <li>그룹 내 중복 멤버는 발송 시 자동 제거</li>
+          <li><a href="/admin/callers" class="link-02">발신번호</a> (관리자/발신자)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="col-lg-4 mg-t-10 mg-lg-t-0">
+      <div class="card card-body">
+        <div class="d-flex align-items-center mg-b-10">
+          <span class="tx-info"><i data-feather="message-square" class="wd-24 ht-24"></i></span>
+          <h6 class="mg-b-0 mg-l-10 tx-semibold">대화방 (RCS 양방향)</h6>
+        </div>
+        <ul class="list-unstyled tx-13 tx-color-02 mg-b-0 lh-6">
+          <li><a href="/chat" class="link-02">대화방 목록</a></li>
+          <li>고객 답장이 오면 "미답" 뱃지 표시</li>
+          <li>24h 세션당 최대 10건(80원) 상한 — 반복 발신 시 자동 적용</li>
+          <li>답장은 90byte 단문만 가능</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="row row-xs mg-t-10">
+    <div class="col-lg-6">
+      <div class="card card-body">
+        <div class="d-flex align-items-center mg-b-10">
+          <span class="tx-warning"><i data-feather="alert-triangle" class="wd-20 ht-20"></i></span>
+          <h6 class="mg-b-0 mg-l-10 tx-semibold">자주 묻는 질문</h6>
+        </div>
+        <div class="tx-13 tx-color-02 lh-6">
+          <p class="mg-b-5"><strong>Q. 발송이 실패해요.</strong><br>
+          A. 발신번호 등록 여부, 수신자 번호 형식, 메시지 길이(byte)를 확인하세요. 반복되면 <a href="/campaigns?status=FAILED" class="link-02">실패 이력</a>에서 원인 코드를 확인할 수 있습니다.</p>
+          <p class="mg-b-5"><strong>Q. 예약 발송을 취소하고 싶어요.</strong><br>
+          A. 캠페인 상세 페이지에서 "예약 취소" 버튼을 누르면 됩니다. 발송 시각 5분 전까지 가능합니다.</p>
+          <p class="mg-b-5"><strong>Q. CSV로 대량 연락처를 가져오고 싶어요.</strong><br>
+          A. <a href="/contacts/import" class="link-02">CSV 가져오기</a>에서 템플릿을 다운로드 받아 사용하세요.</p>
+          <p class="mg-b-0"><strong>Q. 권한이 없다고 나와요.</strong><br>
+          A. 발송·주소록 편집은 <code>sender</code> 또는 <code>admin</code> 역할이 필요합니다. 관리자에게 역할 부여를 요청하세요.</p>
+        </div>
+      </div>
+    </div>
+
+    {% if "admin" in user_roles %}
+    <div class="col-lg-6 mg-t-10 mg-lg-t-0">
+      <div class="card card-body">
+        <div class="d-flex align-items-center mg-b-10">
+          <span class="tx-danger"><i data-feather="settings" class="wd-20 ht-20"></i></span>
+          <h6 class="mg-b-0 mg-l-10 tx-semibold">관리자 전용</h6>
+        </div>
+        <ul class="list-unstyled tx-13 tx-color-02 mg-b-0 lh-6">
+          <li><a href="/admin/settings" class="link-02">시스템 설정</a> — Keycloak, msghub, RCS, 첫 관리자</li>
+          <li><a href="/admin/callers" class="link-02">발신번호 관리</a> — 등록·삭제·활성/비활성</li>
+          <li><a href="/admin/audit" class="link-02">감사 로그</a> — 로그인/발송/삭제 등 전체 기록</li>
+          <li>msghub 인증 오류 시 시스템 설정에서 재설정 필요</li>
+          <li>마스터 키 파일은 서버 <code>/etc/kotify/master.key</code> 에 안전 보관</li>
+        </ul>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card mg-t-10">
+    <div class="card-body tx-13 tx-color-03 tx-center">
+      <p class="mg-b-5">추가 도움이 필요하신가요?</p>
+      <p class="mg-b-0">
+        담당 관리자에게 이메일로 문의하거나, 로그인한 사용자라면 <a href="/me" class="link-02">내 프로필</a>에서 계정 정보를 확인할 수 있습니다.
+      </p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

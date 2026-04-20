@@ -4,10 +4,10 @@
 {% block page_actions %}
   {% if "sender" in user_roles or "admin" in user_roles %}
   <a href="/groups/{{ group.id }}/edit" class="btn btn-secondary btn-sm">
-    <i data-lucide="edit-2"></i> 편집
+    <i data-feather="edit-2"></i> 편집
   </a>
   <a href="/compose?group_id={{ group.id }}" class="btn btn-primary btn-sm">
-    <i data-lucide="send"></i> 이 그룹으로 발송
+    <i data-feather="send"></i> 이 그룹으로 발송
   </a>
   {% endif %}
   {% if "admin" in user_roles %}
@@ -15,7 +15,7 @@
     onsubmit="return confirm('그룹을 삭제하시겠습니까?')">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
     <button type="submit" class="btn btn-danger btn-sm">
-      <i data-lucide="trash-2"></i> 삭제
+      <i data-feather="trash-2"></i> 삭제
     </button>
   </form>
   {% endif %}
@@ -50,18 +50,18 @@
 
 <!-- 그룹 정보 -->
 <div class="card">
-  <div class="card-title">그룹 정보</div>
-  <div class="table-wrapper">
+  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">그룹 정보</h6>
+  <div class="table-responsive">
   <table style="width:auto;min-width:280px">
     <colgroup>
       <col style="width: 80px">     <!-- 라벨 -->
       <col>                          <!-- 값 -->
     </colgroup>
     <tbody>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">그룹명</th><td>{{ group.name }}</td></tr>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">설명</th><td>{{ group.description or "—" }}</td></tr>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">멤버 수</th><td class="mono">{{ member_total }}명</td></tr>
-      <tr><th style="font-weight:600;background:var(--bg-elevated)">생성일</th><td class="mono text-muted" style="font-size:11px">{{ group.created_at[:10] }}</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">그룹명</th><td>{{ group.name }}</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">설명</th><td>{{ group.description or "—" }}</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">멤버 수</th><td class="tx-monospace">{{ member_total }}명</td></tr>
+      <tr><th style="font-weight:600;background:#f8f9fc">생성일</th><td class="tx-monospace text-muted" style="font-size:11px">{{ group.created_at[:10] }}</td></tr>
     </tbody>
   </table>
   </div>
@@ -69,14 +69,14 @@
 
 <!-- 현재 멤버 목록 -->
 <div class="card" style="padding:0">
-  <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
+  <div style="padding:10px 16px;border-bottom:1px solid #e1e5ee">
     <span style="font-size:13px;font-weight:700">멤버 목록 ({{ member_total }}명)</span>
   </div>
 
   {% if members %}
   <form action="/groups/{{ group.id }}/members/remove" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div class="table-wrapper">
+    <div class="table-responsive">
     <table>
       <colgroup>
         {% if "sender" in user_roles or "admin" in user_roles %}
@@ -107,7 +107,7 @@
           <td><input type="checkbox" name="contact_ids" value="{{ m.id }}"></td>
           {% endif %}
           <td><a href="/contacts/{{ m.id }}">{{ m.name }}</a></td>
-          <td class="mono">{{ m.phone|phone_fmt or "—" }}</td>
+          <td class="tx-monospace">{{ m.phone|phone_fmt or "—" }}</td>
           <td class="text-muted">{{ m.email or "—" }}</td>
           <td class="text-muted">{{ m.department or "—" }}</td>
         </tr>
@@ -116,17 +116,17 @@
     </table>
     </div>
     {% if "sender" in user_roles or "admin" in user_roles %}
-    <div style="padding:10px 16px;border-top:1px solid var(--border)">
+    <div style="padding:10px 16px;border-top:1px solid #e1e5ee">
       <button type="submit" class="btn btn-danger btn-sm"
         onclick="return confirm('선택한 멤버를 제거하시겠습니까?')">
-        <i data-lucide="user-minus"></i> 선택 제거
+        <i data-feather="user-minus"></i> 선택 제거
       </button>
     </div>
     {% endif %}
   </form>
 
   {% if member_total_pages > 1 %}
-  <div style="padding:10px 16px;border-top:1px solid var(--border)">
+  <div style="padding:10px 16px;border-top:1px solid #e1e5ee">
     <div class="pagination">
       {% if page > 1 %}
       <a href="?page={{ page - 1 }}">이전</a>
@@ -142,8 +142,8 @@
   {% endif %}
 
   {% else %}
-  <div class="empty-state" style="padding:24px">
-    <i data-lucide="users"></i>
+  <div class="tx-center pd-40 tx-color-03" style="padding:24px">
+    <i data-feather="users"></i>
     <p>멤버가 없습니다.</p>
   </div>
   {% endif %}
@@ -152,8 +152,8 @@
 <!-- 멤버 일괄 추가 (전화번호 paste) -->
 {% if "sender" in user_roles or "admin" in user_roles %}
 <div class="card" style="margin-top:20px">
-  <div class="card-title">전화번호로 일괄 추가</div>
-  <p class="form-hint" style="margin-bottom:8px">
+  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">전화번호로 일괄 추가</h6>
+  <p class="tx-11 tx-color-03 mg-t-3" style="margin-bottom:8px">
     줄바꿈, 콤마, 세미콜론으로 구분해서 한 번에 여러 명 추가할 수 있습니다.
     형식 자동 변환: <code>010-1234-5678</code>, <code>01012345678</code>, <code>+82-10-1234-5678</code>
   </p>
@@ -169,13 +169,13 @@
         <input type="checkbox" name="auto_create" value="1" checked>
         주소록에 없는 번호는 자동으로 새 연락처 생성
       </label>
-      <div class="form-hint">
+      <div class="tx-11 tx-color-03 mg-t-3">
         체크 해제 시: 주소록에 없는 번호는 무시됩니다.<br>
         체크 시: 새 연락처가 자동 생성되며 이름은 전화번호로 임시 저장됩니다 (나중에 수정 가능).
       </div>
     </div>
     <button type="submit" class="btn btn-primary btn-sm">
-      <i data-lucide="users-round"></i> 일괄 추가
+      <i data-feather="users"></i> 일괄 추가
     </button>
   </form>
 </div>
@@ -184,7 +184,7 @@
 <!-- 멤버 추가 (H3: checkbox-list 패턴) -->
 {% if "sender" in user_roles or "admin" in user_roles %}
 <div class="card" style="margin-top:20px">
-  <div class="card-title">기존 연락처에서 선택</div>
+  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">기존 연락처에서 선택</h6>
   <div style="margin-bottom:8px">
     <input type="text" id="contact-search" placeholder="이름/전화번호/이메일 검색..."
       onkeyup="filterContactsAdd(this.value)"
@@ -195,25 +195,25 @@
     <div class="form-group">
       {% set addable = all_contacts | selectattr('id', 'not in', member_ids) | list %}
       {% if addable %}
-      <div class="checkbox-list" id="add-contact-list" style="max-height:280px;overflow-y:auto">
+      <div class="bd rounded pd-10" id="add-contact-list" style="max-height:280px;overflow-y:auto">
         {% for c in addable %}
-        <label class="checkbox-item"
+        <div class="form-check mg-b-4 contact-add-item"
           data-search="{{ (c.name or '')|lower }} {{ (c.phone or '')|lower }} {{ (c.department or '')|lower }}">
-          <input type="checkbox" name="contact_ids" value="{{ c.id }}">
-          <span class="checkbox-label">{{ c.name }}
-            <span class="text-muted">{{ c.phone|phone_fmt or "" }}{% if c.department %} · {{ c.department }}{% endif %}</span>
-          </span>
-        </label>
+          <input type="checkbox" id="add-ctc-{{ c.id }}" name="contact_ids" value="{{ c.id }}" class="form-check-input">
+          <label for="add-ctc-{{ c.id }}" class="form-check-label tx-13">{{ c.name }}
+            <span class="tx-color-03 tx-12">{{ c.phone|phone_fmt or "" }}{% if c.department %} · {{ c.department }}{% endif %}</span>
+          </label>
+        </div>
         {% endfor %}
       </div>
-      <div class="form-hint" style="margin-top:4px">검색으로 필터링 후 체크. 여러 명 선택 가능.</div>
+      <div class="tx-11 tx-color-03 mg-t-3" style="margin-top:4px">검색으로 필터링 후 체크. 여러 명 선택 가능.</div>
       {% else %}
       <div class="alert alert-info">추가 가능한 연락처가 없습니다.</div>
       {% endif %}
     </div>
     {% if addable %}
     <button type="submit" class="btn btn-primary btn-sm">
-      <i data-lucide="user-plus"></i> 선택 추가
+      <i data-feather="user-plus"></i> 선택 추가
     </button>
     {% endif %}
   </form>
@@ -230,7 +230,7 @@ function filterContactsAdd(query) {
   query = (query || '').toLowerCase().trim();
   var list = document.getElementById('add-contact-list');
   if (!list) return;
-  list.querySelectorAll('.checkbox-item').forEach(function(item) {
+  list.querySelectorAll('.contact-add-item').forEach(function(item) {
     var search = item.getAttribute('data-search') || '';
     item.style.display = !query || search.includes(query) ? '' : 'none';
   });

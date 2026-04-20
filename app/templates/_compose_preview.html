@@ -1,37 +1,37 @@
-<div class="card" style="border-color: {% if can_send %}var(--border-strong){% elif msg_error or not msg_ok %}#fca5a5{% else %}var(--border){% endif %}">
+<div class="card bd{% if not can_send or msg_error or not msg_ok %} bd-danger{% endif %} pd-15">
   {% if phone_error == "stub" %}
-  <div class="alert alert-warning" role="alert">
+  <div class="alert alert-warning mg-b-0 tx-12" role="alert">
     전화번호 검증 모듈(phone.py)이 아직 구현되지 않았습니다 (stub). 번호 검증을 사용할 수 없습니다.
   </div>
   {% else %}
-  <div style="margin-bottom:10px">
-    <strong style="font-size:12px">번호 검증 결과</strong>
-    <div style="margin-top:5px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <span class="ok">
-        <i data-lucide="check" style="width:12px;height:12px;vertical-align:middle"></i>
-        유효: <span id="current-valid-count">{{ valid_count }}</span>명
+  <div class="mg-b-10">
+    <strong class="tx-12">번호 검증 결과</strong>
+    <div class="d-flex align-items-center flex-wrap mg-t-5" style="gap:12px">
+      <span class="tx-12 tx-success d-inline-flex align-items-center">
+        <i data-feather="check" class="wd-12 ht-12 mg-r-3"></i>
+        유효: <span id="current-valid-count" class="mg-l-3">{{ valid_count }}</span>명
       </span>
       {% if invalid_numbers %}
-      <span class="err">
-        <i data-lucide="x" style="width:12px;height:12px;vertical-align:middle"></i>
+      <span class="tx-12 tx-danger d-inline-flex align-items-center">
+        <i data-feather="x" class="wd-12 ht-12 mg-r-3"></i>
         잘못된 번호: {{ invalid_numbers|length }}개
       </span>
       {% endif %}
     </div>
 
     {% if invalid_numbers %}
-    <details style="margin-top:6px">
-      <summary class="text-muted" style="cursor:pointer;font-size:11px">잘못된 번호 목록 보기</summary>
-      <ul style="margin:5px 0 0 14px;font-size:11px;color:#991b1b;font-family:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace">
+    <details class="mg-t-6">
+      <summary class="tx-color-03 tx-11" style="cursor:pointer">잘못된 번호 목록 보기</summary>
+      <ul class="mg-t-5 mg-b-0 pd-l-15 tx-11 tx-danger tx-monospace">
         {% for num in invalid_numbers %}
         <li>{{ num }}</li>
         {% endfor %}
       </ul>
     </details>
-    <div style="margin-top:6px">
-      <button type="button" class="btn btn-secondary btn-sm" id="remove-invalid-btn"
+    <div class="mg-t-6">
+      <button type="button" class="btn btn-white btn-sm pd-x-10" id="remove-invalid-btn"
         onclick="removeInvalidNumbers({{ invalid_numbers | tojson }})">
-        <i data-lucide="trash-2"></i>
+        <i data-feather="trash-2" class="wd-12 ht-12 mg-r-3"></i>
         잘못된 번호 {{ invalid_numbers|length }}개 자동 제거
       </button>
     </div>
@@ -39,36 +39,36 @@
   </div>
   {% endif %}
 
-  <div style="margin-bottom:8px">
-    <strong style="font-size:12px">메시지 정보</strong>
-    <div style="margin-top:5px">
+  <div class="mg-b-8">
+    <strong class="tx-12">메시지 정보</strong>
+    <div class="mg-t-5 tx-12">
       {% if msg_ok %}
-      <span class="ok mono">{{ byte_len }} byte</span>
+      <span class="tx-success tx-monospace">{{ byte_len }} byte</span>
       &nbsp;→&nbsp;
       {% if message_type == "SMS" %}
-      <span class="badge badge-success">단문</span>
-      <span class="text-muted">(≤ 90 byte)</span>
+      <span class="badge bg-success tx-white tx-11">단문</span>
+      <span class="tx-color-03">(≤ 90 byte)</span>
       {% elif message_type == "MMS" %}
-      <span class="badge badge-partial">이미지</span>
+      <span class="badge bg-info tx-white tx-11">이미지</span>
       {% else %}
-      <span class="badge badge-dispatched">장문</span>
-      <span class="text-muted">(≤ 2000 byte)</span>
+      <span class="badge bg-secondary tx-white tx-11">장문</span>
+      <span class="tx-color-03">(≤ 2000 byte)</span>
       {% endif %}
       {% else %}
-      <span class="err">{{ msg_error }}</span>
+      <span class="tx-danger">{{ msg_error }}</span>
       {% endif %}
     </div>
   </div>
 
   {% if valid_count > 0 and msg_ok %}
-  <div style="margin-bottom:8px">
-    <strong style="font-size:12px">발송 채널</strong>
-    <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
+  <div class="mg-b-8">
+    <strong class="tx-12">발송 채널</strong>
+    <div class="mg-t-4 tx-11 tx-color-03">
       {% if message_type == "SMS" %}RCS 양방향 → 미지원 시 SMS 자동 전환{% elif message_type == "MMS" %}RCS 이미지 → 미지원 시 MMS 자동 전환{% else %}RCS LMS → 미지원 시 LMS 자동 전환{% endif %}
     </div>
   </div>
-  <div style="margin-bottom:8px">
-    <strong style="font-size:12px">예상 비용</strong>
+  <div class="mg-b-8">
+    <strong class="tx-12">예상 비용</strong>
     {% if message_type == "SMS" %}
     {% set rcs_unit = 8 %}{% set fb_unit = 9 %}
     {% elif message_type == "MMS" %}
@@ -76,29 +76,29 @@
     {% else %}
     {% set rcs_unit = 27 %}{% set fb_unit = 27 %}
     {% endif %}
-    <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
+    <div class="mg-t-4 tx-11 tx-color-03 lh-5">
       전체 RCS 성공 시: {{ "{:,}".format(rcs_unit * valid_count) }}원 ({{ rcs_unit }}원 × {{ valid_count }}명)<br>
       {% if rcs_unit != fb_unit %}
       전체 {{ "MMS" if message_type == "MMS" else ("LMS" if message_type == "LMS" else "SMS") }} 전환 시: {{ "{:,}".format(fb_unit * valid_count) }}원 ({{ fb_unit }}원 × {{ valid_count }}명)<br>
-      예상 범위: <strong>{{ "{:,}".format(rcs_unit * valid_count) }} ~ {{ "{:,}".format(fb_unit * valid_count) }}원</strong>
-      {% if message_type == "MMS" %}<br><span class="text-muted">※ RCS 도달률에 따라 실제 비용 결정</span>{% endif %}
+      예상 범위: <strong class="tx-color-01">{{ "{:,}".format(rcs_unit * valid_count) }} ~ {{ "{:,}".format(fb_unit * valid_count) }}원</strong>
+      {% if message_type == "MMS" %}<br><span class="tx-color-03">※ RCS 도달률에 따라 실제 비용 결정</span>{% endif %}
       {% else %}
-      <strong>{{ "{:,}".format(rcs_unit * valid_count) }}원</strong> (RCS/LMS 동일 단가)
+      <strong class="tx-color-01">{{ "{:,}".format(rcs_unit * valid_count) }}원</strong> (RCS/LMS 동일 단가)
       {% endif %}
       {% if message_type == "SMS" %}
-      <br><span class="text-muted">※ RCS 양방향은 24h 세션당 최대 80원(10건) 상한. 동일 고객에게 반복 발송 시 상한 적용.</span>
+      <br><span class="tx-color-03">※ RCS 양방향은 24h 세션당 최대 80원(10건) 상한. 동일 고객에게 반복 발송 시 상한 적용.</span>
       {% endif %}
     </div>
   </div>
   {% endif %}
 
   {% if too_many %}
-  <div class="alert alert-error" role="alert" style="margin-bottom:0">
-    <i data-lucide="alert-circle" style="width:12px;height:12px;vertical-align:middle"></i>
+  <div class="alert alert-danger mg-b-0 tx-12 pd-y-8" role="alert">
+    <i data-feather="alert-circle" class="wd-12 ht-12 mg-r-3"></i>
     수신자가 {{ valid_count }}명으로 1회 최대 {{ max_recipients }}명을 초과합니다. 수신자 수를 줄이세요.
   </div>
   {% elif not can_send %}
-  <div class="alert alert-error" role="alert" style="margin-bottom:0">
+  <div class="alert alert-danger mg-b-0 tx-12 pd-y-8" role="alert">
     {% if invalid_numbers %}
     잘못된 번호를 수정하거나 제거한 뒤 발송하세요.
     {% elif valid_count == 0 %}
@@ -108,27 +108,24 @@
     {% endif %}
   </div>
   {% elif can_send %}
-  <div class="alert alert-success" role="alert" style="margin-bottom:0;padding:6px 10px">
-    <i data-lucide="check-circle" style="width:12px;height:12px;vertical-align:middle"></i>
+  <div class="alert alert-success mg-b-0 tx-12 pd-y-8" role="alert">
+    <i data-feather="check-circle" class="wd-12 ht-12 mg-r-3"></i>
     발송 가능 — {{ valid_count }}명에게 {% if message_type == "SMS" %}단문{% elif message_type == "MMS" %}이미지{% else %}장문{% endif %} 발송합니다.
   </div>
   {% endif %}
 </div>
 
 <script>
-// #U3: 잘못된 번호 자동 제거
 function removeInvalidNumbers(invalidList) {
   var ta = document.getElementById('recipients_text');
   if (!ta) return;
   var lines = ta.value.split(/[\n,]+/).map(function(s) { return s.trim(); }).filter(Boolean);
-  // 정규화하여 비교 (숫자만)
   var invalidNormalized = invalidList.map(function(n) { return n.replace(/\D/g, ''); });
   var filtered = lines.filter(function(line) {
     return !invalidNormalized.includes(line.replace(/\D/g, ''));
   });
   ta.value = filtered.join('\n');
-  // HTMX로 미리보기 갱신
   ta.dispatchEvent(new Event('change'));
 }
-if (typeof lucide !== 'undefined') lucide.createIcons();
+if (typeof feather !== 'undefined') feather.replace();
 </script>

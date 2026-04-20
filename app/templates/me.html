@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}내 프로필 — kotify{% endblock %}
+{% block breadcrumb %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+    <li class="breadcrumb-item"><a href="/">Home</a></li>
+    <li class="breadcrumb-item active" aria-current="page">내 프로필</li>
+  </ol>
+</nav>
+{% endblock %}
+{% block page_title %}내 프로필{% endblock %}
+
+{% block content %}
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+
+  <div class="row row-xs">
+    <div class="col-lg-4">
+      <div class="card card-body tx-center pd-y-30">
+        <div class="avatar avatar-xxl mg-b-15 mg-auto">
+          <span class="avatar-initial rounded-circle bg-primary tx-28">{{ (user.name or user.email or '?')[:1] | upper }}</span>
+        </div>
+        <h5 class="tx-semibold mg-b-5">{{ user.name or user.email }}</h5>
+        <p class="tx-13 tx-color-03 mg-b-15">{{ user.email }}</p>
+        <div class="d-flex justify-content-center flex-wrap" style="gap:5px">
+          {% for role in user_roles %}
+            {% if role == 'admin' %}
+            <span class="badge bg-danger tx-white">관리자</span>
+            {% elif role == 'sender' %}
+            <span class="badge bg-primary tx-white">발신자</span>
+            {% elif role == 'viewer' %}
+            <span class="badge bg-secondary tx-white">조회자</span>
+            {% else %}
+            <span class="badge bg-info tx-white">{{ role }}</span>
+            {% endif %}
+          {% endfor %}
+          {% if not user_roles %}
+          <span class="badge bg-secondary tx-white">권한 없음</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8 mg-t-10 mg-lg-t-0">
+      <div class="card">
+        <div class="card-header pd-y-15">
+          <h6 class="mg-b-0 tx-semibold">계정 정보</h6>
+        </div>
+        <div class="card-body pd-0">
+          <table class="table table-dashboard mg-b-0 tx-13">
+            <tbody>
+              <tr>
+                <th class="pd-l-20 wd-140 bg-light tx-color-03 tx-semibold">이메일</th>
+                <td class="pd-r-20 tx-monospace">{{ user.email or '—' }}</td>
+              </tr>
+              <tr>
+                <th class="pd-l-20 bg-light tx-color-03 tx-semibold">이름</th>
+                <td class="pd-r-20">{{ user.name or '—' }}</td>
+              </tr>
+              <tr>
+                <th class="pd-l-20 bg-light tx-color-03 tx-semibold">Keycloak Sub</th>
+                <td class="pd-r-20 tx-monospace tx-11 tx-color-03">{{ user.sub }}</td>
+              </tr>
+              <tr>
+                <th class="pd-l-20 bg-light tx-color-03 tx-semibold">권한</th>
+                <td class="pd-r-20">{{ user_roles | join(', ') if user_roles else '—' }}</td>
+              </tr>
+              <tr>
+                <th class="pd-l-20 bg-light tx-color-03 tx-semibold">첫 로그인</th>
+                <td class="pd-r-20 tx-color-03">{{ user.created_at | kst_dt }}</td>
+              </tr>
+              <tr>
+                <th class="pd-l-20 bg-light tx-color-03 tx-semibold">최근 로그인</th>
+                <td class="pd-r-20 tx-color-03">{{ user.last_login_at | kst_dt }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card mg-t-10">
+        <div class="card-header pd-y-15">
+          <h6 class="mg-b-0 tx-semibold">세션</h6>
+        </div>
+        <div class="card-body tx-13 tx-color-02">
+          <p class="mg-b-10">
+            이 세션은 Keycloak OIDC로 인증되었습니다. 비밀번호·이름 등 계정 정보를 바꾸려면 Keycloak 계정 페이지에서 변경하세요.
+          </p>
+          <form action="/auth/logout" method="post" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+            <button type="submit" class="btn btn-white pd-x-15 btn-sm">
+              <i data-feather="log-out" class="wd-12 ht-12 mg-r-4"></i> 로그아웃
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
