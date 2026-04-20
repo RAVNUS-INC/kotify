@@ -193,24 +193,56 @@ async def _dispatch_chat_messages(
 ) -> int:
     """양방향 CHAT 발송 (단문 전용, 1건씩 동시 발송).
 
+    RCS 양방향이 콘솔 설정 문제(29003 등)로 실패하면 즉시 SMS로 전환해
+    고객에게 메시지가 반드시 도달하도록 한다. 전환된 메시지는 channel=SMS,
+    cost=9로 기록되며 사용자가 과금 차이를 확인할 수 있다.
+
     Returns:
-        API 호출 실패 수신자 수 (웹훅 전 즉시 실패).
+        API 호출 실패 수신자 수 (RCS + SMS 모두 실패한 건수).
     """
     semaphore = asyncio.Semaphore(_CHAT_CONCURRENCY)
     sent_at = _now_iso()
 
-    async def _send_one(idx: int, phone: str) -> tuple[int, str, str, SendResponse | None, str | None]:
+    async def _send_one(
+        idx: int, phone: str
+    ) -> tuple[int, str, str, SendResponse | None, str | None, str]:
+        """returns: (idx, phone, cli_key, resp, err, path)
+        path: 'RCS_CHAT' | 'SMS_FALLBACK' | 'FAILED'
+        """
         cli_key = _make_cli_key(campaign.id, 0, idx)
         async with semaphore:
+            # 1차: RCS 양방향 CHAT (8원)
             try:
                 resp = await client.send_rcs_chat(
                     description=content,
                     phone=phone,
                     cli_key=cli_key,
                 )
-                return idx, phone, cli_key, resp, None
+                return idx, phone, cli_key, resp, None, "RCS_CHAT"
+            except MsghubBadRequest as exc:
+                log.warning(
+                    "RCS 양방향 실패 → SMS 전환: cli_key=%s, err=%s",
+                    cli_key, exc,
+                )
+            except (MsghubRateLimited, MsghubServerError) as exc:
+                return idx, phone, cli_key, None, str(exc), "FAILED"
             except Exception as exc:
-                return idx, phone, cli_key, None, str(exc)
+                return idx, phone, cli_key, None, str(exc), "FAILED"
+
+            # 2차: SMS 직접 발송 (9원, -fb cli_key로 중복 방지)
+            fb_cli_key = f"{cli_key}-fb"
+            try:
+                recv = RecvInfo(cli_key=fb_cli_key, phone=phone)
+                resp = await client.send_sms(
+                    callback=callback, msg=content, recv_list=[recv],
+                )
+                return idx, phone, fb_cli_key, resp, None, "SMS_FALLBACK"
+            except Exception as sms_exc:
+                return (
+                    idx, phone, cli_key, None,
+                    f"RCS+SMS 모두 실패 (SMS: {sms_exc})",
+                    "FAILED",
+                )
 
     results = await asyncio.gather(
         *[_send_one(i, p) for i, p in enumerate(recipients)]
@@ -233,8 +265,13 @@ async def _dispatch_chat_messages(
         db.add(msghub_req)
         db.flush()
 
-        for idx, phone, cli_key, resp, err in group:
-            if err:
+        for idx, phone, cli_key, resp, err, path in group:
+            # 응답에서 msg_key 추출 (SendResponse.items[0].msg_key)
+            msg_key = None
+            if resp is not None and hasattr(resp, "items") and resp.items:
+                msg_key = resp.items[0].msg_key or None
+
+            if err or path == "FAILED":
                 msg = Message(
                     campaign_id=campaign.id,
                     msghub_request_id=msghub_req.id,
@@ -242,9 +279,24 @@ async def _dispatch_chat_messages(
                     to_number_raw=phone,
                     cli_key=cli_key,
                     status="FAILED",
-                    result_desc=err,
+                    result_desc=err or "알 수 없는 실패",
                 )
                 failed_count += 1
+            elif path == "SMS_FALLBACK":
+                # RCS 실패 후 SMS로 전환됨. 리포트 웹훅 오면 확정되지만
+                # UI에서 즉시 "SMS로 전환" 상태가 보이도록 미리 기록.
+                msg = Message(
+                    campaign_id=campaign.id,
+                    msghub_request_id=msghub_req.id,
+                    to_number=phone,
+                    to_number_raw=phone,
+                    cli_key=cli_key,
+                    msg_key=msg_key,
+                    status="REG",
+                    channel="SMS",
+                    product_code="SMS",
+                    result_desc="RCS 양방향 실패 → SMS 자동 전환",
+                )
             else:
                 msg = Message(
                     campaign_id=campaign.id,
@@ -252,7 +304,7 @@ async def _dispatch_chat_messages(
                     to_number=phone,
                     to_number_raw=phone,
                     cli_key=cli_key,
-                    msg_key=getattr(resp, "msg_key", None),
+                    msg_key=msg_key,
                     status="REG",
                 )
             db.add(msg)
@@ -364,11 +416,42 @@ async def _dispatch_rcs_chunks(
                 failed_chunk_sizes.append(len(chunk))
 
         except MsghubBadRequest as exc:
+            # RCS 설정 문제(29003 등)로 즉시 실패 → 직접 SMS/LMS/MMS로 전환
+            log.warning(
+                "RCS 단방향 실패 → %s 직접 발송 전환: chunk=%d, err=%s",
+                msg_type.upper(), chunk_idx, exc,
+            )
             db.rollback()
-            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, str(exc))
-            db.commit()
-            failed_chunks.append(chunk_idx)
-            failed_chunk_sizes.append(len(chunk))
+            sent_at = _now_iso()
+            try:
+                resp = await _send_chunk_direct(
+                    client, campaign, callback, content,
+                    subject, chunk, chunk_idx, msg_type, mms_file_id,
+                )
+                msghub_req = MsghubRequest(
+                    campaign_id=campaign.id,
+                    chunk_index=chunk_idx,
+                    response_code=resp.code,
+                    response_message=f"RCS 실패 → 직접 발송: {resp.message}",
+                    error_body=None,
+                    sent_at=sent_at,
+                )
+                db.add(msghub_req)
+                db.flush()
+                _create_messages_from_response(
+                    db, campaign.id, msghub_req.id, resp, chunk, chunk_idx,
+                )
+                db.flush()
+                db.commit()
+            except Exception as retry_exc:
+                db.rollback()
+                _record_failed_chunk(
+                    db, campaign.id, chunk_idx, chunk, sent_at,
+                    f"RCS: {exc} / 직접 발송: {retry_exc}",
+                )
+                db.commit()
+                failed_chunks.append(chunk_idx)
+                failed_chunk_sizes.append(len(chunk))
 
         except MsghubAuthError:
             db.rollback()
@@ -550,10 +633,13 @@ async def _send_chunk_direct(
     msg_type: str,
     mms_file_id: str | None = None,
 ) -> SendResponse | ReserveResponse:
-    """RCS 실패 시 직접 SMS/LMS/MMS 발송 (재시도 fallback)."""
+    """RCS 실패 시 직접 SMS/LMS/MMS 발송 (재시도 fallback).
+
+    cliKey 10분 중복 금지 규칙을 피하기 위해 원본 키에 -fb 접미사를 붙인다.
+    """
     recv_list = [
         RecvInfo(
-            cli_key=_make_cli_key(campaign.id, chunk_idx, i),
+            cli_key=f"{_make_cli_key(campaign.id, chunk_idx, i)}-fb",
             phone=phone,
         )
         for i, phone in enumerate(chunk)
