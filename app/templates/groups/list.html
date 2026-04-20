@@ -4,45 +4,130 @@
 {% block page_actions %}
   {% if "sender" in user_roles or "admin" in user_roles %}
   <a href="/groups/new" class="btn btn-primary btn-sm">
-    <i data-lucide="plus"></i> 새 그룹
+    <i data-lucide="plus" class="wd-12 ht-12 mg-r-4"></i> 새 그룹
   </a>
   {% endif %}
 {% endblock %}
 
 {% block content %}
-{% if request.query_params.get("created") %}
-<div class="alert alert-success" role="alert">그룹이 생성되었습니다.</div>
-{% elif request.query_params.get("deleted") %}
-<div class="alert alert-success" role="alert">그룹이 삭제되었습니다.</div>
-{% endif %}
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+  {% if request.query_params.get("created") %}
+  <div class="alert alert-success mg-b-20" role="alert">그룹이 생성되었습니다.</div>
+  {% elif request.query_params.get("deleted") %}
+  <div class="alert alert-success mg-b-20" role="alert">그룹이 삭제되었습니다.</div>
+  {% endif %}
 
-<!-- 검색 -->
-<div class="card" style="padding:10px 16px">
-  <form id="groups-filter-form" method="get" action="/groups" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-    <input type="hidden" name="per_page" value="{{ per_page }}">
-    <div style="flex:1;min-width:160px">
-      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px" for="grp-search">그룹명 검색</label>
-      <input type="text" id="grp-search" name="search" value="{{ search }}"
-        placeholder="그룹명 검색..." class="ctrl" style="width:100%" autocomplete="off">
+  <div class="card mg-b-20">
+    <div class="card-body pd-y-15 pd-x-20">
+      <form id="groups-filter-form" method="get" action="/groups" class="d-flex flex-wrap" style="gap:10px;align-items:flex-end">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+        <div class="flex-fill" style="min-width:200px">
+          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4" for="grp-search">그룹명 검색</label>
+          <input type="text" id="grp-search" name="search" value="{{ search }}"
+                 placeholder="그룹명 검색..." class="form-control" autocomplete="off">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="search" class="wd-12 ht-12 mg-r-4"></i> 검색
+        </button>
+        <div class="per-page-form mg-l-auto">
+          <label for="groups-per-page">페이지당</label>
+          <select id="groups-per-page" name="per_page" form="groups-filter-form" onchange="this.form.submit()">
+            <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
+            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+            <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+            <option value="200" {% if per_page == 200 %}selected{% endif %}>200</option>
+          </select>
+        </div>
+      </form>
     </div>
-    <button type="submit" class="btn btn-secondary btn-sm">
-      <i data-lucide="search"></i> 검색
-    </button>
-    <!-- H7: per_page 선택 -->
-    <form class="per-page-form" method="get" action="/groups">
-      <input type="hidden" name="search" value="{{ search }}">
-      <label for="groups-per-page">페이지당</label>
-      <select id="groups-per-page" name="per_page" onchange="this.form.submit()">
-        <option value="20" {% if per_page == 20 %}selected{% endif %}>20개</option>
-        <option value="50" {% if per_page == 50 %}selected{% endif %}>50개</option>
-        <option value="100" {% if per_page == 100 %}selected{% endif %}>100개</option>
-        <option value="200" {% if per_page == 200 %}selected{% endif %}>200개</option>
-      </select>
-    </form>
-  </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <h6 class="mg-b-0 tx-semibold">그룹 목록</h6>
+      <span class="tx-12 tx-color-03">총 {{ total }}개</span>
+    </div>
+
+    {% if groups %}
+    <div class="table-responsive">
+      <table class="table table-hover mg-b-0 tx-13">
+        <thead class="tx-uppercase tx-11 tx-spacing-1 tx-color-03">
+          <tr>
+            <th class="pd-l-20">그룹명</th>
+            <th>설명</th>
+            <th class="text-right">멤버</th>
+            <th>생성일</th>
+            <th class="pd-r-20">관리</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for g in groups %}
+          <tr>
+            <td class="pd-l-20 tx-medium"><a href="/groups/{{ g.id }}" class="link-02">{{ g.name }}</a></td>
+            <td class="tx-color-03">{{ g.description or "—" }}</td>
+            <td class="text-right tx-monospace">{{ group_sizes.get(g.id, 0) }}명</td>
+            <td class="tx-color-03 tx-monospace tx-12">{{ g.created_at[:10] }}</td>
+            <td class="pd-r-20">
+              <div class="d-flex" style="gap:4px">
+                {% if "sender" in user_roles or "admin" in user_roles %}
+                <a href="/groups/{{ g.id }}/edit" class="btn btn-outline-light btn-xs">편집</a>
+                <a href="/compose?group_id={{ g.id }}" class="btn btn-primary btn-xs">발송</a>
+                {% endif %}
+                {% if "admin" in user_roles %}
+                <form action="/groups/{{ g.id }}/delete" method="post" style="display:inline"
+                      onsubmit="return confirm('삭제하시겠습니까?')">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+                  <button type="submit" class="btn btn-danger btn-xs">삭제</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if total_pages > 1 %}
+    <div class="card-footer d-flex justify-content-center">
+      <nav>
+        <ul class="pagination mg-b-0">
+          {% if page > 1 %}
+          <li class="page-item"><a class="page-link" href="?search={{ search }}&per_page={{ per_page }}&page={{ page - 1 }}">이전</a></li>
+          {% endif %}
+          {% for p in range(1, total_pages + 1) %}
+          <li class="page-item {% if p == page %}active{% endif %}">
+            <a class="page-link" href="?search={{ search }}&per_page={{ per_page }}&page={{ p }}">{{ p }}</a>
+          </li>
+          {% endfor %}
+          {% if page < total_pages %}
+          <li class="page-item"><a class="page-link" href="?search={{ search }}&per_page={{ per_page }}&page={{ page + 1 }}">다음</a></li>
+          {% endif %}
+        </ul>
+      </nav>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="card-body">
+      <div class="empty-state">
+        <i data-lucide="users"></i>
+        {% if search %}
+        <p>검색 조건에 맞는 그룹이 없습니다.</p>
+        <a href="/groups" class="btn btn-outline-light btn-sm">검색 초기화</a>
+        {% else %}
+        <p>등록된 그룹이 없습니다.</p>
+        {% if "sender" in user_roles or "admin" in user_roles %}
+        <a href="/groups/new" class="btn btn-primary btn-sm">첫 그룹 만들기</a>
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
 </div>
+
 <script>
-// M5: 그룹 검색 debounce
 (function() {
   var inp = document.getElementById('grp-search');
   if (!inp) return;
@@ -55,89 +140,4 @@
   });
 })();
 </script>
-
-<div class="card" style="padding:0">
-  <div style="padding:8px 16px;border-bottom:1px solid var(--border)">
-    <span class="text-muted">총 {{ total }}개 그룹</span>
-  </div>
-
-  {% if groups %}
-  <div class="table-wrapper">
-  <table>
-    <colgroup>
-      <col style="width: 200px">    <!-- 그룹명 -->
-      <col>                          <!-- 설명 -->
-      <col style="width: 80px">     <!-- 멤버수 -->
-      <col style="width: 100px">    <!-- 생성일 -->
-      <col style="width: 160px">    <!-- 관리 -->
-    </colgroup>
-    <thead>
-      <tr>
-        <th>그룹명</th>
-        <th>설명</th>
-        <th class="text-right">멤버</th>
-        <th>생성일</th>
-        <th>관리</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for g in groups %}
-      <tr>
-        <td title="{{ g.name }}"><a href="/groups/{{ g.id }}">{{ g.name }}</a></td>
-        <td class="text-muted" title="{{ g.description or '' }}">{{ g.description or "—" }}</td>
-        <td class="mono text-right">{{ group_sizes.get(g.id, 0) }}명</td>
-        <td class="mono text-muted">{{ g.created_at[:10] }}</td>
-        <td>
-          <div class="flex" style="gap:3px">
-            {% if "sender" in user_roles or "admin" in user_roles %}
-            <a href="/groups/{{ g.id }}/edit" class="btn btn-secondary btn-sm">편집</a>
-            <a href="/compose?group_id={{ g.id }}" class="btn btn-primary btn-sm">발송</a>
-            {% endif %}
-            {% if "admin" in user_roles %}
-            <form action="/groups/{{ g.id }}/delete" method="post" style="display:inline"
-              onsubmit="return confirm('삭제하시겠습니까?')">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-              <button type="submit" class="btn btn-danger btn-sm">삭제</button>
-            </form>
-            {% endif %}
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-
-  {% if total_pages > 1 %}
-  <div style="padding:10px 16px;border-top:1px solid var(--border)">
-    <div class="pagination">
-      {% if page > 1 %}
-      <a href="?search={{ search }}&per_page={{ per_page }}&page={{ page - 1 }}">이전</a>
-      {% endif %}
-      {% for p in range(1, total_pages + 1) %}
-      <a href="?search={{ search }}&per_page={{ per_page }}&page={{ p }}"
-         {% if p == page %}class="active"{% endif %}>{{ p }}</a>
-      {% endfor %}
-      {% if page < total_pages %}
-      <a href="?search={{ search }}&per_page={{ per_page }}&page={{ page + 1 }}">다음</a>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
-
-  {% else %}
-  <div class="empty-state">
-    <i data-lucide="users"></i>
-    {% if search %}
-    <p>검색 조건에 맞는 그룹이 없습니다.</p>
-    <a href="/groups" class="btn btn-secondary btn-sm">검색 초기화</a>
-    {% else %}
-    <p>등록된 그룹이 없습니다.</p>
-    {% if "sender" in user_roles or "admin" in user_roles %}
-    <a href="/groups/new" class="btn btn-primary btn-sm">첫 그룹 만들기</a>
-    {% endif %}
-    {% endif %}
-  </div>
-  {% endif %}
-</div>
 {% endblock %}

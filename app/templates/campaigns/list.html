@@ -4,198 +4,180 @@
 {% block page_actions %}
   {% if "sender" in user_roles or "admin" in user_roles %}
   <a href="/compose" class="btn btn-primary btn-sm">
-    <i data-lucide="send"></i> 새 발송
+    <i data-lucide="send" class="wd-12 ht-12 mg-r-4"></i> 새 발송
   </a>
   {% endif %}
 {% endblock %}
 
 {% block content %}
-<!-- 필터 바 -->
-<div class="card" style="padding:10px 16px">
-  <form method="get" action="/campaigns" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
-    <input type="hidden" name="per_page" value="{{ per_page }}">
-    <div>
-      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">상태</label>
-      <select name="status" class="ctrl">
-        <option value="">전체</option>
-        <option value="RESERVED" {% if status_filter == "RESERVED" %}selected{% endif %}>예약됨</option>
-        <option value="DISPATCHING" {% if status_filter == "DISPATCHING" %}selected{% endif %}>발송 중</option>
-        <option value="DISPATCHED" {% if status_filter == "DISPATCHED" %}selected{% endif %}>발송됨</option>
-        <option value="COMPLETED" {% if status_filter == "COMPLETED" %}selected{% endif %}>완료</option>
-        <option value="FAILED" {% if status_filter == "FAILED" %}selected{% endif %}>실패</option>
-        <option value="PARTIAL_FAILED" {% if status_filter == "PARTIAL_FAILED" %}selected{% endif %}>부분 실패</option>
-        <option value="RESERVE_CANCELED" {% if status_filter == "RESERVE_CANCELED" %}selected{% endif %}>예약 취소됨</option>
-        <option value="RESERVE_FAILED" {% if status_filter == "RESERVE_FAILED" %}selected{% endif %}>예약 실패</option>
-      </select>
-    </div>
-    <div>
-      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">시작일</label>
-      <input type="date" name="date_from" value="{{ date_from or '' }}" class="ctrl">
-    </div>
-    <div>
-      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">종료일</label>
-      <input type="date" name="date_to" value="{{ date_to or '' }}" class="ctrl">
-    </div>
-    <div style="display:flex;gap:4px">
-      <button type="submit" class="btn btn-secondary btn-sm">
-        <i data-lucide="search"></i> 검색
-      </button>
-      <a href="/campaigns" class="btn btn-secondary btn-sm">초기화</a>
-    </div>
-    <!-- H7: per_page -->
-    <form class="per-page-form" method="get" action="/campaigns">
-      <input type="hidden" name="status" value="{{ status_filter or '' }}">
-      <input type="hidden" name="date_from" value="{{ date_from or '' }}">
-      <input type="hidden" name="date_to" value="{{ date_to or '' }}">
-      <input type="hidden" name="sort" value="{{ sort }}">
-      <input type="hidden" name="order" value="{{ order }}">
-      <label for="campaigns-per-page">페이지당</label>
-      <select id="campaigns-per-page" name="per_page" onchange="this.form.submit()">
-        <option value="20" {% if per_page == 20 %}selected{% endif %}>20개</option>
-        <option value="50" {% if per_page == 50 %}selected{% endif %}>50개</option>
-        <option value="100" {% if per_page == 100 %}selected{% endif %}>100개</option>
-        <option value="200" {% if per_page == 200 %}selected{% endif %}>200개</option>
-      </select>
-    </form>
-  </form>
-</div>
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
 
-<div class="card" style="padding:0">
-  <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-    <span class="text-muted">총 {{ total_count }}건</span>
+  <div class="card mg-b-20">
+    <div class="card-body pd-y-15 pd-x-20">
+      <form id="campaigns-filter-form" method="get" action="/campaigns" class="d-flex flex-wrap" style="gap:10px;align-items:flex-end">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+        <div style="min-width:160px">
+          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4">상태</label>
+          <select name="status" class="form-select">
+            <option value="">전체</option>
+            <option value="RESERVED" {% if status_filter == "RESERVED" %}selected{% endif %}>예약됨</option>
+            <option value="DISPATCHING" {% if status_filter == "DISPATCHING" %}selected{% endif %}>발송 중</option>
+            <option value="DISPATCHED" {% if status_filter == "DISPATCHED" %}selected{% endif %}>발송됨</option>
+            <option value="COMPLETED" {% if status_filter == "COMPLETED" %}selected{% endif %}>완료</option>
+            <option value="FAILED" {% if status_filter == "FAILED" %}selected{% endif %}>실패</option>
+            <option value="PARTIAL_FAILED" {% if status_filter == "PARTIAL_FAILED" %}selected{% endif %}>부분 실패</option>
+            <option value="RESERVE_CANCELED" {% if status_filter == "RESERVE_CANCELED" %}selected{% endif %}>예약 취소</option>
+            <option value="RESERVE_FAILED" {% if status_filter == "RESERVE_FAILED" %}selected{% endif %}>예약 실패</option>
+          </select>
+        </div>
+        <div>
+          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4">시작일</label>
+          <input type="date" name="date_from" value="{{ date_from or '' }}" class="form-control">
+        </div>
+        <div>
+          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4">종료일</label>
+          <input type="date" name="date_to" value="{{ date_to or '' }}" class="form-control">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="search" class="wd-12 ht-12 mg-r-4"></i> 검색
+        </button>
+        <a href="/campaigns" class="btn btn-outline-light btn-sm">초기화</a>
+        <div class="per-page-form mg-l-auto">
+          <label>페이지당</label>
+          <select name="per_page" form="campaigns-filter-form" onchange="this.form.submit()">
+            <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
+            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+            <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+            <option value="200" {% if per_page == 200 %}selected{% endif %}>200</option>
+          </select>
+        </div>
+      </form>
+    </div>
   </div>
 
-  {% if campaigns %}
-  <div class="table-wrapper">
-  <table>
-    <colgroup>
-      <col style="width: 50px">     <!-- # -->
-      {% if is_admin %}<col style="width: 110px">{% endif %}  <!-- 작성자 -->
-      <col style="width: 130px">    <!-- 발신번호 -->
-      <col style="width: 60px">     <!-- 유형 -->
-      <col style="width: 60px">     <!-- 수신자 -->
-      <col style="width: 120px">    <!-- 성공/실패/대기 -->
-      <col style="width: 90px">     <!-- 상태 -->
-      <col style="width: 130px">    <!-- 발송 시각 -->
-    </colgroup>
-    {% macro sort_th(label, col, cls="") %}
-    {% set next_order = "asc" if (sort == col and order == "desc") else "desc" %}
-    {% set icon = " ↑" if (sort == col and order == "asc") else (" ↓" if (sort == col and order == "desc") else " ↕") %}
-    <th class="{{ cls }}" style="cursor:pointer">
-      <a href="?sort={{ col }}&order={{ next_order }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&page=1"
-         style="color:inherit;text-decoration:none">{{ label }}<span style="opacity:0.5;font-size:10px">{{ icon }}</span></a>
-    </th>
-    {% endmacro %}
-    <thead>
-      <tr>
-        <th>#</th>
-        {% if is_admin %}<th>작성자</th>{% endif %}
-        <th>발신번호</th>
-        <th>유형</th>
-        <th class="text-right">수신자</th>
-        {{ sort_th("성공 / 실패 / 대기", "ok_count", "text-right") }}
-        <th>상태</th>
-        {{ sort_th("발송 시각", "created_at") }}
-      </tr>
-    </thead>
-    <tbody>
-      {% for c in campaigns %}
-      <tr class="row-link" data-href="/campaigns/{{ c.id }}" style="cursor:pointer">
-        <td><a href="/campaigns/{{ c.id }}">#{{ c.id }}</a></td>
-        {% if is_admin %}
-        <td class="text-muted truncate" style="max-width:110px" title="{{ c.created_by }}">
-          {{ creator_emails.get(c.created_by, c.created_by[:12] ~ '…') }}
-        </td>
-        {% endif %}
-        <td class="mono">{{ c.caller_number|phone_fmt }}</td>
-        <td>
-          {% if c.message_type == "SMS" %}
-          <span class="badge badge-success">단문</span>
-          {% elif c.message_type == "MMS" %}
-          <span class="badge badge-partial">이미지</span>
-          {% else %}
-          <span class="badge badge-dispatched">장문</span>
+  <div class="card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <h6 class="mg-b-0 tx-semibold">발송 이력</h6>
+      <span class="tx-12 tx-color-03">총 {{ total_count }}건</span>
+    </div>
+
+    {% if campaigns %}
+    <div class="table-responsive">
+      <table class="table table-hover mg-b-0 tx-13">
+        {% macro sort_th(label, col, cls="") %}
+        {% set next_order = "asc" if (sort == col and order == "desc") else "desc" %}
+        {% set icon = "↑" if (sort == col and order == "asc") else ("↓" if (sort == col and order == "desc") else "↕") %}
+        <th class="{{ cls }}">
+          <a href="?sort={{ col }}&order={{ next_order }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&page=1"
+             class="tx-color-03 tx-uppercase tx-11 tx-spacing-1" style="text-decoration:none">
+            {{ label }} <span class="tx-color-04">{{ icon }}</span>
+          </a>
+        </th>
+        {% endmacro %}
+        <thead class="tx-uppercase tx-11 tx-spacing-1 tx-color-03">
+          <tr>
+            <th class="pd-l-20">#</th>
+            {% if is_admin %}<th>작성자</th>{% endif %}
+            <th>발신번호</th>
+            <th>유형</th>
+            <th class="text-right">수신자</th>
+            {{ sort_th("성공/실패/대기", "ok_count", "text-right") }}
+            <th>상태</th>
+            {{ sort_th("발송 시각", "created_at", "pd-r-20") }}
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in campaigns %}
+          <tr class="row-link" data-href="/campaigns/{{ c.id }}" style="cursor:pointer">
+            <td class="pd-l-20 tx-medium"><a href="/campaigns/{{ c.id }}" class="link-02">#{{ c.id }}</a></td>
+            {% if is_admin %}
+            <td class="tx-color-03 tx-12" title="{{ c.created_by }}">
+              {{ creator_emails.get(c.created_by, c.created_by[:12] ~ '…') }}
+            </td>
+            {% endif %}
+            <td class="tx-monospace">{{ c.caller_number|phone_fmt }}</td>
+            <td>
+              {% if c.message_type == "SMS" %}<span class="badge badge-success">단문</span>
+              {% elif c.message_type == "MMS" %}<span class="badge badge-partial">이미지</span>
+              {% else %}<span class="badge badge-dispatched">장문</span>{% endif %}
+            </td>
+            <td class="text-right tx-monospace">{{ c.total_count }}</td>
+            <td class="text-right">
+              <span class="tx-success tx-monospace">{{ c.ok_count }}</span>
+              <span class="tx-color-04"> / </span>
+              <span class="{% if c.fail_count > 0 %}tx-danger{% else %}tx-color-04{% endif %} tx-monospace">{{ c.fail_count }}</span>
+              <span class="tx-color-04"> / </span>
+              <span class="tx-warning tx-monospace">{{ c.pending_count }}</span>
+              {% if c.total_cost > 0 %}
+              <small class="tx-color-03 mg-l-5">· {{ "{:,}".format(c.total_cost) }}원</small>
+              {% endif %}
+            </td>
+            <td>
+              {% if c.state == "COMPLETED" %}<span class="badge badge-completed">완료</span>
+              {% elif c.state == "FAILED" %}<span class="badge badge-failed">실패</span>
+              {% elif c.state == "PARTIAL_FAILED" %}<span class="badge badge-partial">부분실패</span>
+              {% elif c.state == "DISPATCHED" %}<span class="badge badge-dispatched">발송됨</span>
+              {% elif c.state == "DISPATCHING" %}<span class="badge badge-pending">발송중</span>
+              {% elif c.state == "RESERVED" %}<span class="badge badge-pending">예약{% if c.reserve_time %}<br><small class="tx-10">{{ c.reserve_time }}</small>{% endif %}</span>
+              {% elif c.state == "RESERVE_CANCELED" %}<span class="badge badge-muted">취소</span>
+              {% elif c.state == "RESERVE_FAILED" %}<span class="badge badge-failed">예약실패</span>
+              {% else %}<span class="badge">{{ c.state }}</span>{% endif %}
+            </td>
+            <td class="pd-r-20 tx-monospace tx-color-03 tx-12">{{ c.created_at|kst_dt }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if total_count > per_page %}
+    <div class="card-footer d-flex justify-content-center align-items-center">
+      <nav>
+        <ul class="pagination mg-b-0">
+          {% if page > 1 %}
+          <li class="page-item"><a class="page-link" href="?page={{ page - 1 }}&per_page={{ per_page }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&sort={{ sort }}&order={{ order }}">이전</a></li>
           {% endif %}
-        </td>
-        <td class="mono text-right">{{ c.total_count }}</td>
-        <td class="text-right">
-          <span class="ok mono">{{ c.ok_count }}</span>
-          <span class="text-muted"> / </span>
-          <span class="{% if c.fail_count > 0 %}err{% else %}text-muted{% endif %} mono">{{ c.fail_count }}</span>
-          <span class="text-muted"> / </span>
-          <span class="mono" style="color:var(--warning)">{{ c.pending_count }}</span>
-          {% if c.total_cost > 0 %}
-          <span class="text-muted" style="font-size:10px;margin-left:4px">· {{ "{:,}".format(c.total_cost) }}원</span>
+          <li class="page-item disabled"><span class="page-link">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span></li>
+          {% if page * per_page < total_count %}
+          <li class="page-item"><a class="page-link" href="?page={{ page + 1 }}&per_page={{ per_page }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&sort={{ sort }}&order={{ order }}">다음</a></li>
           {% endif %}
-        </td>
-        <td>
-          {% if c.state == "COMPLETED" %}<span class="badge badge-completed">완료</span>
-          {% elif c.state == "FAILED" %}<span class="badge badge-failed">실패</span>
-          {% elif c.state == "PARTIAL_FAILED" %}<span class="badge badge-partial">부분실패</span>
-          {% elif c.state == "DISPATCHED" %}<span class="badge badge-dispatched">발송됨</span>
-          {% elif c.state == "DISPATCHING" %}<span class="badge badge-pending">발송중</span>
-          {% elif c.state == "RESERVED" %}<span class="badge badge-pending">예약됨{% if c.reserve_time %}<br><small class="text-muted" style="font-size:10px">{{ c.reserve_time }}</small>{% endif %}</span>
-          {% elif c.state == "RESERVE_CANCELED" %}<span class="badge">예약취소</span>
-          {% elif c.state == "RESERVE_FAILED" %}<span class="badge badge-failed">예약실패</span>
-          {% else %}<span class="badge">{{ c.state }}</span>{% endif %}
-        </td>
-        <td class="mono text-muted">{{ c.created_at|kst_dt }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-
-  {% if total_count > per_page %}
-  <div style="padding:10px 16px;border-top:1px solid var(--border)">
-    <div class="pagination">
-      {% if page > 1 %}
-      <a href="?page={{ page - 1 }}&per_page={{ per_page }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&sort={{ sort }}&order={{ order }}">이전</a>
-      {% endif %}
-      <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
-      {% if page * per_page < total_count %}
-      <a href="?page={{ page + 1 }}&per_page={{ per_page }}&status={{ status_filter or '' }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&sort={{ sort }}&order={{ order }}">다음</a>
-      {% endif %}
+        </ul>
+      </nav>
     </div>
-  </div>
-  {% endif %}
+    {% endif %}
 
-  <script>
-    // 행 전체 클릭 → 상세 이동. 내부 링크/드래그 선택 기본 동작 보존.
-    document.querySelectorAll('tr.row-link').forEach(function(tr) {
-      tr.addEventListener('click', function(e) {
-        if (e.target.closest('a')) return;
-        if (window.getSelection && window.getSelection().toString()) return;
-        var href = tr.dataset.href;
-        if (!href) return;
-        if (e.ctrlKey || e.metaKey || e.button === 1) {
-          window.open(href, '_blank');
-        } else {
-          window.location.href = href;
-        }
+    <script>
+      document.querySelectorAll('tr.row-link').forEach(function(tr) {
+        tr.addEventListener('click', function(e) {
+          if (e.target.closest('a')) return;
+          if (window.getSelection && window.getSelection().toString()) return;
+          var href = tr.dataset.href;
+          if (!href) return;
+          if (e.ctrlKey || e.metaKey || e.button === 1) {
+            window.open(href, '_blank');
+          } else {
+            window.location.href = href;
+          }
+        });
       });
-      tr.addEventListener('mouseenter', function() {
-        tr.style.background = 'var(--surface-hover, rgba(0,0,0,0.03))';
-      });
-      tr.addEventListener('mouseleave', function() {
-        tr.style.background = '';
-      });
-    });
-  </script>
+    </script>
 
-  {% else %}
-  <div class="empty-state">
-    <i data-lucide="inbox"></i>
-    {% if status_filter or date_from or date_to %}
-    <p>조건에 맞는 발송 이력이 없습니다.</p>
-    <a href="/campaigns" class="btn btn-secondary btn-sm">필터 초기화</a>
     {% else %}
-    <p>발송 이력이 없습니다.</p>
-    {% if "sender" in user_roles or "admin" in user_roles %}
-    <a href="/compose" class="btn btn-primary btn-sm">첫 발송 시작</a>
-    {% endif %}
+    <div class="card-body">
+      <div class="empty-state">
+        <i data-lucide="inbox"></i>
+        {% if status_filter or date_from or date_to %}
+        <p>조건에 맞는 발송 이력이 없습니다.</p>
+        <a href="/campaigns" class="btn btn-outline-light btn-sm">필터 초기화</a>
+        {% else %}
+        <p>발송 이력이 없습니다.</p>
+        {% if "sender" in user_roles or "admin" in user_roles %}
+        <a href="/compose" class="btn btn-primary btn-sm">첫 발송 시작</a>
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
     {% endif %}
   </div>
-  {% endif %}
 </div>
 {% endblock %}

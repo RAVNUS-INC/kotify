@@ -3,150 +3,142 @@
 {% block page_title %}발신번호 관리{% endblock %}
 
 {% block content %}
-{% if request.query_params.get("created") %}
-<div class="alert alert-success" role="alert">발신번호가 추가되었습니다.</div>
-{% elif request.query_params.get("deleted") %}
-<div class="alert alert-success" role="alert">발신번호가 삭제되었습니다.</div>
-{% elif request.query_params.get("error") == "duplicate" %}
-<div class="alert alert-error" role="alert">이미 등록된 번호입니다.</div>
-{% elif request.query_params.get("error") == "invalid_number" %}
-<div class="alert alert-error" role="alert">올바르지 않은 번호 형식입니다.</div>
-{% elif request.query_params.get("error") == "active_cannot_delete" %}
-<div class="alert alert-error" role="alert">활성 번호는 삭제할 수 없습니다. 먼저 비활성화하세요.</div>
-{% endif %}
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+  {% if request.query_params.get("created") %}
+  <div class="alert alert-success mg-b-20" role="alert">발신번호가 추가되었습니다.</div>
+  {% elif request.query_params.get("deleted") %}
+  <div class="alert alert-success mg-b-20" role="alert">발신번호가 삭제되었습니다.</div>
+  {% elif request.query_params.get("error") == "duplicate" %}
+  <div class="alert alert-danger mg-b-20" role="alert">이미 등록된 번호입니다.</div>
+  {% elif request.query_params.get("error") == "invalid_number" %}
+  <div class="alert alert-danger mg-b-20" role="alert">올바르지 않은 번호 형식입니다.</div>
+  {% elif request.query_params.get("error") == "active_cannot_delete" %}
+  <div class="alert alert-danger mg-b-20" role="alert">활성 번호는 삭제할 수 없습니다. 먼저 비활성화하세요.</div>
+  {% endif %}
 
-{% if "admin" not in user_roles %}
-<div class="alert alert-info" role="alert">
-  <i data-lucide="info" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"></i>
-  발신번호 목록을 열람 중입니다. 추가/수정/삭제는 관리자에게 문의하세요.
-</div>
-{% endif %}
-
-<!-- 추가 폼 (admin 전용) -->
-{% if "admin" in user_roles %}
-<div class="card">
-  <div class="card-title">발신번호 추가</div>
-  <form action="/admin/callers" method="post"
-    style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div style="flex:1;min-width:160px">
-      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px" for="caller-number">전화번호</label>
-      <input type="text" id="caller-number" name="number" class="ctrl" style="width:100%"
-        placeholder="02-1234-5678 또는 0212345678" required>
-    </div>
-    <div style="flex:1;min-width:160px">
-      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px" for="caller-label">표시 이름</label>
-      <input type="text" id="caller-label" name="label" class="ctrl" style="width:100%"
-        placeholder="예: 대표번호" required>
-    </div>
-    <div style="display:flex;align-items:center;gap:4px;padding-top:14px">
-      <input type="checkbox" id="caller-rcs" name="rcs_enabled" value="on">
-      <label style="font-size:11px;color:var(--text-muted);white-space:nowrap" for="caller-rcs">RCS 등록</label>
-    </div>
-    <button type="submit" class="btn btn-primary btn-sm">
-      <i data-lucide="plus"></i> 추가
-    </button>
-  </form>
-  <div class="form-hint" style="margin-top:6px">
-    숫자 외 문자는 자동 제거됩니다. msghub 콘솔에서 사전 등록된 번호만 사용 가능합니다.
-    RCS 발송을 위해 해당 번호가 챗봇(양방향)으로 등록되어 있어야 합니다.
-  </div>
-</div>
-{% endif %}
-
-<!-- 목록 -->
-<div class="card" style="padding:0">
-  {% if callers %}
-  <div class="table-wrapper">
-  <table>
-    <colgroup>
-      <col style="width: 130px">    <!-- 번호 -->
-      <col>                          <!-- 표시 이름 -->
-      <col style="width: 60px">     <!-- 상태 -->
-      <col style="width: 80px">     <!-- RCS -->
-      <col style="width: 60px">     <!-- 기본 -->
-      <col style="width: 100px">    <!-- 등록일 -->
-      {% if "admin" in user_roles %}<col style="width: 180px">{% endif %}  <!-- 관리 -->
-    </colgroup>
-    <thead>
-      <tr>
-        <th>번호</th>
-        <th>표시 이름</th>
-        <th>상태</th>
-        <th>RCS</th>
-        <th>기본</th>
-        <th>등록일</th>
-        {% if "admin" in user_roles %}<th>관리</th>{% endif %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for c in callers %}
-      <tr>
-        <td class="mono">{{ c.number|phone_fmt }}</td>
-        <td>{{ c.label }}</td>
-        <td>
-          {% if c.active %}
-          <span class="badge badge-success">활성</span>
-          {% else %}
-          <span class="badge badge-fail">비활성</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if c.rcs_enabled %}
-          <span class="badge" style="background:#dbeafe;color:#1d4ed8">✓ 양방향</span>
-          {% else %}
-          <span class="text-muted">—</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if c.is_default %}
-          <span class="badge badge-dispatched">기본</span>
-          {% else %}—{% endif %}
-        </td>
-        <td class="mono text-muted">{{ c.created_at[:10] }}</td>
-        {% if "admin" in user_roles %}
-        <td>
-          <div class="flex" style="gap:3px">
-            <form action="/admin/callers/{{ c.id }}/toggle" method="post" style="display:inline"
-              {% if not c.active %}onsubmit="return confirm('이 번호를 활성화하시겠습니까?')"{% endif %}>
-              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-              <button type="submit" class="btn btn-secondary btn-sm">
-                {{ "비활성" if c.active else "활성" }}
-              </button>
-            </form>
-            {% if not c.is_default %}
-            <form action="/admin/callers/{{ c.id }}/default" method="post" style="display:inline">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-              <button type="submit" class="btn btn-secondary btn-sm">기본 지정</button>
-            </form>
-            {% if not c.active %}
-            <form action="/admin/callers/{{ c.id }}/delete" method="post" style="display:inline"
-              onsubmit="return confirm('삭제하시겠습니까?')">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-              <button type="submit" class="btn btn-danger btn-sm">삭제</button>
-            </form>
-            {% else %}
-            <button class="btn btn-danger btn-sm" disabled title="활성 번호는 삭제할 수 없습니다. 먼저 비활성화하세요.">삭제</button>
-            {% endif %}
-            {% endif %}
-          </div>
-        </td>
-        {% endif %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% else %}
-  <div class="empty-state">
-    <i data-lucide="phone-off"></i>
-    <p>등록된 발신번호가 없습니다.</p>
-    {% if "admin" in user_roles %}
-    <p class="text-muted" style="font-size:11px;margin-top:4px">위 폼에서 발신번호를 추가하세요.</p>
-    {% else %}
-    <p class="text-muted" style="font-size:11px;margin-top:4px">관리자에게 발신번호 등록을 요청하세요.</p>
-    {% endif %}
+  {% if "admin" not in user_roles %}
+  <div class="alert alert-info mg-b-20" role="alert">
+    <i data-lucide="info" class="wd-14 ht-14 mg-r-4"></i>
+    발신번호 목록을 열람 중입니다. 추가/수정/삭제는 관리자에게 문의하세요.
   </div>
   {% endif %}
+
+  {% if "admin" in user_roles %}
+  <div class="card mg-b-20">
+    <div class="card-header">
+      <h6 class="mg-b-0 tx-semibold">발신번호 추가</h6>
+    </div>
+    <div class="card-body">
+      <form action="/admin/callers" method="post" class="d-flex flex-wrap" style="gap:10px;align-items:flex-end">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+        <div class="flex-fill" style="min-width:160px">
+          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4" for="caller-number">전화번호</label>
+          <input type="text" id="caller-number" name="number" class="form-control"
+                 placeholder="02-1234-5678 또는 0212345678" required>
+        </div>
+        <div class="flex-fill" style="min-width:160px">
+          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4" for="caller-label">표시 이름</label>
+          <input type="text" id="caller-label" name="label" class="form-control"
+                 placeholder="예: 대표번호" required>
+        </div>
+        <div class="form-check" style="padding-bottom:9px">
+          <input type="checkbox" class="form-check-input" id="caller-rcs" name="rcs_enabled" value="on">
+          <label class="form-check-label tx-12" for="caller-rcs">RCS 등록</label>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i data-lucide="plus" class="wd-12 ht-12 mg-r-4"></i> 추가
+        </button>
+      </form>
+      <small class="d-block tx-color-03 mg-t-10">
+        숫자 외 문자는 자동 제거됩니다. msghub 콘솔에서 사전 등록된 번호만 사용 가능합니다.
+        RCS 발송을 위해 해당 번호가 챗봇(양방향)으로 등록되어 있어야 합니다.
+      </small>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <h6 class="mg-b-0 tx-semibold">등록된 발신번호</h6>
+      <span class="tx-12 tx-color-03">{{ callers|length }}개</span>
+    </div>
+
+    {% if callers %}
+    <div class="table-responsive">
+      <table class="table table-hover mg-b-0 tx-13">
+        <thead class="tx-uppercase tx-11 tx-spacing-1 tx-color-03">
+          <tr>
+            <th class="pd-l-20">번호</th>
+            <th>표시 이름</th>
+            <th>상태</th>
+            <th>RCS</th>
+            <th>기본</th>
+            <th>등록일</th>
+            {% if "admin" in user_roles %}<th class="pd-r-20">관리</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in callers %}
+          <tr>
+            <td class="pd-l-20 tx-monospace tx-medium">{{ c.number|phone_fmt }}</td>
+            <td>{{ c.label }}</td>
+            <td>
+              {% if c.active %}<span class="badge badge-success">활성</span>
+              {% else %}<span class="badge badge-fail">비활성</span>{% endif %}
+            </td>
+            <td>
+              {% if c.rcs_enabled %}<span class="badge bg-primary tx-white">✓ 양방향</span>
+              {% else %}<span class="tx-color-04">—</span>{% endif %}
+            </td>
+            <td>
+              {% if c.is_default %}<span class="badge badge-dispatched">기본</span>
+              {% else %}<span class="tx-color-04">—</span>{% endif %}
+            </td>
+            <td class="tx-monospace tx-color-03 tx-12">{{ c.created_at[:10] }}</td>
+            {% if "admin" in user_roles %}
+            <td class="pd-r-20">
+              <div class="d-flex" style="gap:4px">
+                <form action="/admin/callers/{{ c.id }}/toggle" method="post" style="display:inline"
+                      {% if not c.active %}onsubmit="return confirm('이 번호를 활성화하시겠습니까?')"{% endif %}>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+                  <button type="submit" class="btn btn-outline-light btn-xs">{{ "비활성" if c.active else "활성" }}</button>
+                </form>
+                {% if not c.is_default %}
+                <form action="/admin/callers/{{ c.id }}/default" method="post" style="display:inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+                  <button type="submit" class="btn btn-outline-light btn-xs">기본 지정</button>
+                </form>
+                {% if not c.active %}
+                <form action="/admin/callers/{{ c.id }}/delete" method="post" style="display:inline"
+                      onsubmit="return confirm('삭제하시겠습니까?')">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+                  <button type="submit" class="btn btn-danger btn-xs">삭제</button>
+                </form>
+                {% else %}
+                <button class="btn btn-danger btn-xs" disabled title="활성 번호는 삭제할 수 없습니다. 먼저 비활성화하세요.">삭제</button>
+                {% endif %}
+                {% endif %}
+              </div>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body">
+      <div class="empty-state">
+        <i data-lucide="phone-off"></i>
+        <p>등록된 발신번호가 없습니다.</p>
+        {% if "admin" in user_roles %}
+        <small class="tx-color-04">위 폼에서 발신번호를 추가하세요.</small>
+        {% else %}
+        <small class="tx-color-04">관리자에게 발신번호 등록을 요청하세요.</small>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

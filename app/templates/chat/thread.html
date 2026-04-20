@@ -2,108 +2,155 @@
 {% block title %}{{ phone | phone_fmt }} — 대화방 — kotify{% endblock %}
 {% block page_title %}{{ phone | phone_fmt }}{% endblock %}
 {% block page_actions %}
-  <a href="/chat" class="btn btn-secondary btn-sm">
-    <i data-lucide="arrow-left"></i> 대화방 목록
+  <a href="/chat" class="btn btn-outline-light btn-sm">
+    <i data-lucide="arrow-left" class="wd-12 ht-12 mg-r-4"></i> 목록
   </a>
 {% endblock %}
 
 {% block content %}
-<div style="max-width:640px;margin:0 auto">
-
-  <div class="card" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-    <div>
-      <div style="font-weight:600">{{ phone | phone_fmt }}</div>
-      <div style="font-size:12px;color:var(--text-muted)">발신번호 {{ caller | phone_fmt }}</div>
-    </div>
-    <div style="font-size:12px;color:var(--text-muted);text-align:right">
-      {{ messages | length }}개 메시지
-      {% if session and session.recent_out_count > 0 %}
-      <div style="margin-top:2px">
-        24h 세션 과금:
-        <strong style="color:var(--text)">{{ session.session_billed }}원</strong>
-        <span title="24시간 내 발신 {{ session.recent_out_count }}건. RCS 양방향은 세션당 최대 {{ session.max_units }}건({{ session.cap_krw }}원) 상한 적용."
-              style="cursor:help;text-decoration:underline dotted">
-          ({{ session.recent_out_count }}/{{ session.max_units }}건{% if session.capped %} · 상한 도달{% endif %})
-        </span>
+<div class="chat-wrapper chat-wrapper-two">
+  <div class="chat-content" style="width:100%">
+    <div class="chat-content-header">
+      <div class="d-flex align-items-center">
+        <div class="avatar avatar-sm avatar-online mg-r-10">
+          <span class="avatar-initial rounded-circle bg-primary">
+            {{ phone[-2:] if phone|length >= 2 else phone }}
+          </span>
+        </div>
+        <div>
+          <h6 class="mg-b-0 tx-semibold">{{ phone | phone_fmt }}</h6>
+          <small class="tx-11 tx-color-03">발신번호 {{ caller | phone_fmt }}</small>
+        </div>
       </div>
-      {% endif %}
+      <div class="d-flex align-items-center tx-12 tx-color-03">
+        {{ messages | length }}개 메시지
+        {% if session and session.recent_out_count > 0 %}
+        <span class="mg-l-10" title="24h 세션 과금 — 24시간 내 발신 {{ session.recent_out_count }}건. RCS 양방향 세션당 최대 {{ session.max_units }}건({{ session.cap_krw }}원) 상한.">
+          24h <strong class="tx-color-01">{{ session.session_billed }}원</strong>
+          <span class="tx-color-04">({{ session.recent_out_count }}/{{ session.max_units }}{% if session.capped %} · 상한{% endif %})</span>
+        </span>
+        {% endif %}
+      </div>
     </div>
-  </div>
 
-  <div id="messages" style="padding:16px 0;display:flex;flex-direction:column;gap:6px">
-    {% for m in messages %}
-      <div style="display:flex;{% if m.direction == 'OUT' %}justify-content:flex-end{% else %}justify-content:flex-start{% endif %}">
-        <div style="max-width:75%;padding:9px 14px;{% if m.direction == 'OUT' %}background:#3b82f6;color:white;border-radius:14px 14px 2px 14px{% else %}background:#f3f4f6;color:#111;border-radius:14px 14px 14px 2px{% endif %}">
-          <div style="white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.45">{{ m.body or '(빈 메시지)' }}</div>
-          <div style="font-size:10px;opacity:0.78;margin-top:4px;display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">
-            {% if m.direction == 'OUT' %}
-              {% if m.channel %}<span>{{ m.channel }}</span>{% endif %}
-              {% if m.cost is not none and m.cost > 0 %}<span>· {{ m.cost }}원</span>{% endif %}
-              {% if m.status and m.status not in ('DONE',) %}<span>· {{ m.status }}</span>{% endif %}
-            {% else %}
-              {% if m.telco %}<span>{{ m.telco }}</span>{% endif %}
-              {% if m.product_code %}<span>· {{ m.product_code }}</span>{% endif %}
-            {% endif %}
-            <span>{{ m.timestamp | kst_dt }}</span>
+    <div class="chat-content-body" id="messages">
+      <div class="chat-group">
+        {% for m in messages %}
+        {% if m.direction == 'OUT' %}
+        <div class="media reverse">
+          <div class="avatar avatar-sm"><span class="avatar-initial rounded-circle bg-primary">me</span></div>
+          <div class="media-body">
+            <h6 class="text-end">kotify <small class="tx-color-04 mg-l-4">{{ m.timestamp | kst_dt }}</small></h6>
+            <p class="chat-msg outgoing">{{ m.body or '(빈 메시지)' }}</p>
+            <small class="d-block text-end tx-color-04 tx-10">
+              {% if m.channel %}{{ m.channel }}{% endif %}
+              {% if m.cost is not none and m.cost > 0 %} · {{ m.cost }}원{% endif %}
+              {% if m.status and m.status not in ('DONE',) %} · {{ m.status }}{% endif %}
+            </small>
           </div>
         </div>
-      </div>
-    {% endfor %}
-  </div>
-
-  {# 답장 폼 #}
-  <div class="card" style="padding:12px;position:sticky;bottom:0;background:var(--surface)">
-    <form method="post" action="/chat/{{ caller }}/{{ phone }}/reply">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-      {% if error %}
-      <div style="color:#b91c1c;background:#fef2f2;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:13px">
-        {{ error }}
-      </div>
-      {% endif %}
-      <textarea name="content" id="reply-content" rows="3"
-                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box"
-                placeholder="답장 입력 (90바이트 이내 단문 — RCS 양방향 CHAT 8원, 미지원 시 SMS 자동 전환 9원)"
-                maxlength="500">{{ draft or '' }}</textarea>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
-        <span id="reply-bytes" style="font-size:11px;color:var(--text-muted)">0 byte</span>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span style="font-size:11px;color:var(--text-muted)">Ctrl+Enter 전송</span>
-          <button type="submit" class="btn btn-primary btn-sm">
-            <i data-lucide="send"></i> 답장 전송
-          </button>
+        {% else %}
+        <div class="media">
+          <div class="avatar avatar-sm avatar-online">
+            <span class="avatar-initial rounded-circle bg-gray-500">
+              {{ phone[-2:] if phone|length >= 2 else phone }}
+            </span>
+          </div>
+          <div class="media-body">
+            <h6>{{ phone | phone_fmt }} <small class="tx-color-04 mg-l-4">{{ m.timestamp | kst_dt }}</small></h6>
+            <p class="chat-msg">{{ m.body or '(빈 메시지)' }}</p>
+            {% if m.telco or m.product_code %}
+            <small class="d-block tx-color-04 tx-10">
+              {% if m.telco %}{{ m.telco }}{% endif %}
+              {% if m.product_code %} · {{ m.product_code }}{% endif %}
+            </small>
+            {% endif %}
+          </div>
         </div>
+        {% endif %}
+        {% endfor %}
       </div>
-    </form>
+    </div>
+
+    <div class="chat-content-footer">
+      <form method="post" action="/chat/{{ caller }}/{{ phone }}/reply" class="d-flex flex-column wd-100p">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+        {% if error %}
+        <div class="alert alert-danger tx-12 mg-b-8 pd-y-6 pd-x-10">{{ error }}</div>
+        {% endif %}
+        <textarea name="content" id="reply-content" rows="2" class="form-control mg-b-8"
+                  placeholder="답장 입력 (90바이트 이내 단문 — RCS 양방향 CHAT 8원, SMS 자동 전환 9원)"
+                  maxlength="500">{{ draft or '' }}</textarea>
+        <div class="d-flex justify-content-between align-items-center">
+          <small id="reply-bytes" class="tx-11 tx-color-03">0 byte</small>
+          <div class="d-flex align-items-center">
+            <small class="tx-11 tx-color-04 mg-r-10">Ctrl+Enter 전송</small>
+            <button type="submit" class="btn btn-primary btn-sm">
+              <i data-lucide="send" class="wd-12 ht-12 mg-r-4"></i> 답장 전송
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 
+<style>
+/* 채팅 말풍선 — DashForge에 없는 요소 */
+.chat-content-body .chat-msg {
+  display: inline-block;
+  max-width: 75%;
+  padding: 8px 14px;
+  border-radius: 14px 14px 14px 2px;
+  background: #f4f5f8;
+  color: #1b2e4b;
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+.chat-content-body .chat-msg.outgoing {
+  background: #0168fa;
+  color: #fff;
+  border-radius: 14px 14px 2px 14px;
+  margin-left: auto;
+  display: inline-block;
+}
+.chat-content-body .media.reverse { justify-content: flex-end; }
+.chat-content-body .media.reverse .media-body { order: -1; margin-right: 10px; margin-left: 0; }
+.chat-content-body .media.reverse .avatar { margin-left: 0; }
+.chat-content-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+.chat-content-footer form { width: 100%; }
+</style>
+
 <script>
 (function() {
-  const ta = document.getElementById('reply-content');
-  const out = document.getElementById('reply-bytes');
+  var ta = document.getElementById('reply-content');
+  var out = document.getElementById('reply-bytes');
   if (!ta || !out) return;
-
   function measureBytes(s) {
-    let n = 0;
-    for (const ch of s) {
-      n += (ch.charCodeAt(0) > 0x7f) ? 2 : 1;
+    var n = 0;
+    for (var i = 0; i < s.length; i++) {
+      n += (s.charCodeAt(i) > 0x7f) ? 2 : 1;
     }
     return n;
   }
-
   function update() {
-    const n = measureBytes(ta.value);
+    var n = measureBytes(ta.value);
     out.textContent = n + ' byte' + (n > 90 ? ' (90byte 초과 — 답장 불가)' : '');
-    out.style.color = n > 90 ? '#dc2626' : 'var(--text-muted)';
+    out.classList.toggle('tx-danger', n > 90);
   }
-
   ta.addEventListener('input', update);
   ta.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.key === 'Enter') { ta.form.submit(); }
+    if (e.ctrlKey && e.key === 'Enter') ta.form.submit();
   });
   update();
-  // 가장 최근 메시지가 보이도록 스크롤
-  window.scrollTo(0, document.body.scrollHeight);
+  var messages = document.getElementById('messages');
+  if (messages) messages.scrollTop = messages.scrollHeight;
 })();
 </script>
 {% endblock %}
