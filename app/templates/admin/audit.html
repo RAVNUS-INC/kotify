@@ -1,42 +1,65 @@
 {% extends "base.html" %}
 {% block title %}감사 로그 — kotify{% endblock %}
-{% block page_title %}감사 로그{% endblock %}
+{% block content_class %}pd-0 pd-lg-x-20 pd-lg-t-20 pd-lg-b-40{% endblock %}
 
 {% block content %}
 <div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
 
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20 mg-lg-b-30">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item"><a href="#">시스템</a></li>
+          <li class="breadcrumb-item active" aria-current="page">감사 로그</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">감사 로그</h4>
+    </div>
+    <div class="d-none d-md-block">
+      <span class="tx-13 tx-color-03">총 <strong class="tx-color-01">{{ total_count }}</strong>건</span>
+    </div>
+  </div>
+
+  {# =============== 필터 카드 =============== #}
   <div class="card mg-b-20">
-    <div class="card-body pd-y-15 pd-x-20">
-      <form id="audit-filter-form" method="get" action="/admin/audit" class="d-flex flex-wrap" style="gap:10px;align-items:flex-end">
+    <div class="card-body pd-20">
+      <form id="audit-filter-form" method="get" action="/admin/audit">
         <input type="hidden" name="per_page" value="{{ per_page }}">
-        <div style="min-width:140px">
-          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4">액션</label>
-          <select name="action_filter" class="form-select">
-            <option value="">전체 액션</option>
-            {% for a in audit_actions %}
-            <option value="{{ a }}" {% if action_filter == a %}selected{% endif %}>{{ a }}</option>
-            {% endfor %}
-          </select>
+        <div class="row row-sm">
+          <div class="col-md-3 form-group">
+            <label class="d-block tx-11 tx-color-03 tx-uppercase tx-spacing-1 mg-b-4">액션</label>
+            <select name="action_filter" class="form-select">
+              <option value="">전체 액션</option>
+              {% for a in audit_actions %}
+              <option value="{{ a }}" {% if action_filter == a %}selected{% endif %}>{{ a }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3 form-group">
+            <label class="d-block tx-11 tx-color-03 tx-uppercase tx-spacing-1 mg-b-4">사용자</label>
+            <input type="text" name="actor_filter" value="{{ actor_filter or '' }}" placeholder="이메일 / sub" class="form-control">
+          </div>
+          <div class="col-md-2 form-group">
+            <label class="d-block tx-11 tx-color-03 tx-uppercase tx-spacing-1 mg-b-4">시작일</label>
+            <input type="date" name="date_from" value="{{ date_from or '' }}" class="form-control">
+          </div>
+          <div class="col-md-2 form-group">
+            <label class="d-block tx-11 tx-color-03 tx-uppercase tx-spacing-1 mg-b-4">종료일</label>
+            <input type="date" name="date_to" value="{{ date_to or '' }}" class="form-control">
+          </div>
+          <div class="col-md-2 form-group d-flex align-items-end">
+            <button type="submit" class="btn btn-primary flex-fill mg-r-5">
+              <i data-feather="search" class="wd-12 ht-12 mg-r-4"></i> 검색
+            </button>
+            <a href="/admin/audit" class="btn btn-outline-light" title="초기화">
+              <i data-feather="rotate-ccw" class="wd-12 ht-12"></i>
+            </a>
+          </div>
         </div>
-        <div style="min-width:160px">
-          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4">사용자</label>
-          <input type="text" name="actor_filter" value="{{ actor_filter or '' }}" placeholder="이메일 / sub" class="form-control">
-        </div>
-        <div>
-          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4">시작일</label>
-          <input type="date" name="date_from" value="{{ date_from or '' }}" class="form-control">
-        </div>
-        <div>
-          <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4">종료일</label>
-          <input type="date" name="date_to" value="{{ date_to or '' }}" class="form-control">
-        </div>
-        <button type="submit" class="btn btn-primary btn-sm">
-          <i data-feather="search" class="wd-12 ht-12 mg-r-4"></i> 검색
-        </button>
-        <a href="/admin/audit" class="btn btn-outline-light btn-sm">초기화</a>
-        <div class="per-page-form mg-l-auto">
-          <label>페이지당</label>
-          <select name="per_page" form="audit-filter-form" onchange="this.form.submit()">
+        <div class="d-flex align-items-center justify-content-end tx-12 tx-color-03">
+          <label class="mg-b-0 mg-r-8">페이지당</label>
+          <select name="per_page" form="audit-filter-form" onchange="this.form.submit()" class="form-select wd-100" style="width:auto">
             <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
             <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
             <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
@@ -47,15 +70,16 @@
     </div>
   </div>
 
+  {# =============== 로그 테이블 =============== #}
   <div class="card">
     <div class="card-header d-flex align-items-center justify-content-between">
-      <h6 class="mg-b-0 tx-semibold">감사 로그</h6>
+      <h6 class="tx-uppercase tx-semibold mg-b-0">감사 로그</h6>
       <span class="tx-12 tx-color-03">총 {{ total_count }}건</span>
     </div>
 
     {% if logs %}
     <div class="table-responsive">
-      <table class="table table-hover mg-b-0 tx-13">
+      <table class="table table-dashboard table-hover mg-b-0 tx-13">
         {% macro sort_th(label, col, cls="") %}
         {% set next_order = "asc" if (sort == col and order == "desc") else "desc" %}
         {% set icon = "↑" if (sort == col and order == "asc") else ("↓" if (sort == col and order == "desc") else "↕") %}
@@ -66,7 +90,7 @@
           </a>
         </th>
         {% endmacro %}
-        <thead class="tx-uppercase tx-11 tx-spacing-1 tx-color-03">
+        <thead>
           <tr>
             {{ sort_th("시각 (KST)", "created_at", "pd-l-20") }}
             <th>사용자</th>
@@ -78,7 +102,7 @@
         </thead>
         <tbody>
           {% for log in logs %}
-          <tr class="audit-row" onclick="showAuditDetail(this)" data-detail="{{ log.detail or '' }}">
+          <tr class="audit-row" onclick="showAuditDetail(this)" data-detail="{{ log.detail or '' }}" style="cursor:pointer">
             <td class="pd-l-20 tx-monospace tx-color-03 tx-12">{{ log.created_at|kst_dt }}</td>
             <td class="tx-monospace tx-color-03" title="{{ log.actor_sub or 'system' }}">
               {% if log.actor_email %}{{ log.actor_email }}
@@ -96,7 +120,7 @@
               </span>
             </td>
             <td class="tx-color-03">{{ log.target or "—" }}</td>
-            <td class="tx-monospace tx-color-03 tx-11 truncate" style="max-width:240px">{{ log.detail or "" }}</td>
+            <td class="tx-monospace tx-color-03 tx-11" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ log.detail or "" }}</td>
             <td class="pd-r-20 tx-monospace tx-color-03">{{ log.ip or "—" }}</td>
           </tr>
           {% endfor %}
@@ -105,7 +129,7 @@
     </div>
 
     {% if total_count > per_page %}
-    <div class="card-footer d-flex justify-content-center align-items-center">
+    <div class="card-footer d-flex justify-content-center align-items-center bd-t">
       <nav>
         <ul class="pagination mg-b-0">
           {% if page > 1 %}
@@ -123,25 +147,28 @@
     {% else %}
     <div class="card-body">
       <div class="tx-center pd-40 tx-color-03">
-        <i data-feather="shield"></i>
-        <p>감사 로그가 없습니다.</p>
+        <i data-feather="shield" class="wd-32 ht-32 tx-color-04 mg-b-10"></i>
+        <p class="tx-13 mg-b-0">감사 로그가 없습니다.</p>
       </div>
     </div>
     {% endif %}
   </div>
 </div>
 
-<!-- Bootstrap 5 모달 -->
-<div class="modal fade" id="auditDetailModal" tabindex="-1">
+<!-- Bootstrap 5 modal — 감사 로그 상세 -->
+<div class="modal fade" id="auditDetailModal" tabindex="-1" aria-labelledby="auditDetailModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h6 class="modal-title tx-semibold">감사 로그 상세</h6>
+        <h6 class="modal-title tx-uppercase tx-semibold" id="auditDetailModalLabel">감사 로그 상세</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
       </div>
-      <div class="modal-body">
-        <pre id="audit-detail-content" class="pd-10 bg-gray-100 tx-11 tx-monospace mg-b-0"
-             style="white-space:pre-wrap;max-height:60vh;overflow:auto"></pre>
+      <div class="modal-body pd-20">
+        <pre id="audit-detail-content" class="pd-15 bg-gray-100 tx-11 tx-monospace mg-b-0"
+             style="white-space:pre-wrap;max-height:60vh;overflow:auto;border-radius:4px"></pre>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">닫기</button>
       </div>
     </div>
   </div>

@@ -1,112 +1,160 @@
 {% extends "base.html" %}
 {% block title %}CSV 가져오기 — 주소록 — kotify{% endblock %}
-{% block page_title %}연락처 CSV 가져오기{% endblock %}
-{% block page_actions %}
-  <a href="/contacts" class="btn btn-secondary btn-sm">
-    <i data-feather="arrow-left"></i> 주소록으로
-  </a>
-{% endblock %}
 
 {% block content %}
-<!-- 가져오기 결과 -->
-{% if result is not none %}
-<div class="card">
-  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">가져오기 결과</h6>
-  <div class="table-responsive">
-  <table style="width:auto">
-    <tbody>
-      <tr><th style="background:#f8f9fc;font-weight:600;width:100px">새로 추가</th><td><strong>{{ result.created }}</strong>건</td></tr>
-      <tr><th style="background:#f8f9fc">업데이트</th><td><strong>{{ result.updated }}</strong>건</td></tr>
-      <tr><th style="background:#f8f9fc">건너뜀</th><td><strong>{{ result.skipped }}</strong>건</td></tr>
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20 mg-lg-b-30">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item"><a href="/contacts">주소록</a></li>
+          <li class="breadcrumb-item active" aria-current="page">CSV 가져오기</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">연락처 CSV 가져오기</h4>
+    </div>
+    <div class="d-none d-md-block">
+      <a href="/contacts" class="btn btn-sm pd-x-15 btn-white btn-uppercase">
+        <i data-feather="arrow-left" class="wd-10 mg-r-5"></i> 주소록으로
+      </a>
+    </div>
+  </div>
+
+  {# 결과 영역 #}
+  {% if result is not none %}
+  <div class="card mg-b-20">
+    <div class="card-header">
+      <h6 class="mg-b-0 tx-semibold">가져오기 결과</h6>
+    </div>
+    <div class="card-body">
+      <div class="row row-xs">
+        <div class="col-6 col-md-3">
+          <div class="bd bd-1 rounded pd-15 tx-center">
+            <h4 class="tx-rubik tx-success mg-b-0">{{ result.created }}</h4>
+            <span class="tx-11 tx-color-03 tx-uppercase tx-spacing-1">새로 추가</span>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="bd bd-1 rounded pd-15 tx-center">
+            <h4 class="tx-rubik tx-primary mg-b-0">{{ result.updated }}</h4>
+            <span class="tx-11 tx-color-03 tx-uppercase tx-spacing-1">업데이트</span>
+          </div>
+        </div>
+        <div class="col-6 col-md-3 mg-t-10 mg-md-t-0">
+          <div class="bd bd-1 rounded pd-15 tx-center">
+            <h4 class="tx-rubik tx-color-03 mg-b-0">{{ result.skipped }}</h4>
+            <span class="tx-11 tx-color-03 tx-uppercase tx-spacing-1">건너뜀</span>
+          </div>
+        </div>
+        <div class="col-6 col-md-3 mg-t-10 mg-md-t-0">
+          <div class="bd bd-1 rounded pd-15 tx-center">
+            <h4 class="tx-rubik {% if result.errors %}tx-danger{% else %}tx-color-03{% endif %} mg-b-0">{{ result.errors | length if result.errors else 0 }}</h4>
+            <span class="tx-11 tx-color-03 tx-uppercase tx-spacing-1">오류</span>
+          </div>
+        </div>
+      </div>
+
       {% if result.errors %}
-      <tr>
-        <th style="background:#f8f9fc">오류</th>
-        <td><strong style="color:#dc3545">{{ result.errors | length }}</strong>건</td>
-      </tr>
+      <div class="alert alert-danger mg-t-20 mg-b-0" role="alert">
+        <strong>처리 오류:</strong>
+        <ul class="mg-t-5 mg-b-0 pd-l-20">
+          {% for e in result.errors %}
+          <li>{{ e }}</li>
+          {% endfor %}
+        </ul>
+      </div>
       {% endif %}
-    </tbody>
-  </table>
-  </div>
 
-  {% if result.errors %}
-  <div class="alert alert-danger" style="margin-top:10px" role="alert">
-    <strong>처리 오류:</strong>
-    {% for e in result.errors %}
-    <div>• {{ e }}</div>
-    {% endfor %}
-  </div>
-  {% endif %}
+      {% if invalid_rows %}
+      <h6 class="tx-13 tx-semibold mg-t-20 mg-b-10">유효하지 않은 행 ({{ invalid_rows | length }}건)</h6>
+      <div class="table-responsive">
+        <table class="table table-hover mg-b-0 tx-13">
+          <thead class="tx-uppercase tx-11 tx-spacing-1 tx-color-03">
+            <tr>
+              <th class="pd-l-20">행 번호</th>
+              <th>오류</th>
+              <th class="pd-r-20">원본 데이터</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in invalid_rows %}
+            <tr>
+              <td class="pd-l-20 tx-monospace text-right">{{ r.row_number }}</td>
+              <td class="tx-danger">{{ r.error }}</td>
+              <td class="pd-r-20 tx-monospace tx-11 tx-color-03">{{ r.raw_data }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
 
-  {% if invalid_rows %}
-  <div style="margin-top:12px">
-    <strong style="font-size:12px">유효하지 않은 행 ({{ invalid_rows | length }}건)</strong>
-    <div class="table-responsive" style="margin-top:6px">
-    <table>
-      <thead><tr><th>행 번호</th><th>오류</th><th>원본 데이터</th></tr></thead>
-      <tbody>
-        {% for r in invalid_rows %}
-        <tr>
-          <td class="tx-monospace text-right">{{ r.row_number }}</td>
-          <td class="err">{{ r.error }}</td>
-          <td class="tx-monospace" style="font-size:11px">{{ r.raw_data }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  </div>
-  {% endif %}
-
-  <div class="flex" style="margin-top:12px">
-    <a href="/contacts" class="btn btn-primary btn-sm">주소록으로 이동</a>
-    <a href="/contacts/import" class="btn btn-secondary btn-sm">다시 가져오기</a>
-  </div>
-</div>
-{% endif %}
-
-<!-- 업로드 폼 -->
-<div class="card" style="max-width:640px">
-  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">CSV 파일 업로드</h6>
-
-  <div class="alert alert-info" style="margin-bottom:14px">
-    <strong>CSV 형식 안내</strong><br>
-    첫 번째 행은 헤더여야 합니다. 지원 열: <code>name, phone, email, department, notes</code><br>
-    <strong>필수:</strong> name + (phone 또는 email 중 하나 이상)<br>
-    예시: <code>홍길동,010-1234-5678,hong@example.com,마케팅팀,VIP</code>
-  </div>
-
-  <form action="/contacts/import" method="post" enctype="multipart/form-data">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-
-    <div class="form-group">
-      <label for="csv_file">CSV 파일 선택</label>
-      <input type="file" name="csv_file" id="csv_file" accept=".csv,text/csv" required>
-    </div>
-
-    <div class="form-group">
-      <label>중복 처리 방식 (전화번호 기준)</label>
-      <div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
-        <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:13px">
-          <input type="radio" name="mode" value="skip" checked>
-          건너뜀 — 이미 있으면 무시
-        </label>
-        <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:13px">
-          <input type="radio" name="mode" value="update">
-          업데이트 — 이미 있으면 덮어씀
-        </label>
-        <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:13px">
-          <input type="radio" name="mode" value="create">
-          항상 새로 추가
-        </label>
+      <div class="d-flex mg-t-20">
+        <a href="/contacts" class="btn btn-primary btn-sm">주소록으로 이동</a>
+        <a href="/contacts/import" class="btn btn-white btn-sm mg-l-5">다시 가져오기</a>
       </div>
     </div>
+  </div>
+  {% endif %}
 
-    <div class="flex" style="margin-top:14px">
-      <button type="submit" class="btn btn-primary">
-        <i data-feather="upload"></i> 가져오기 실행
-      </button>
-      <a href="/contacts" class="btn btn-secondary">취소</a>
+  {# 업로드 폼 #}
+  <div class="row row-xs">
+    <div class="col-lg-8 col-xl-7">
+      <div class="card">
+        <div class="card-header">
+          <h6 class="mg-b-0 tx-semibold">CSV 파일 업로드</h6>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-info mg-b-20" role="alert">
+            <strong>CSV 형식 안내</strong>
+            <div class="tx-12 mg-t-5">
+              첫 번째 행은 헤더여야 합니다. 지원 열: <code>name, phone, email, department, notes</code><br>
+              <strong>필수:</strong> name + (phone 또는 email 중 하나 이상)<br>
+              예시: <code>홍길동,010-1234-5678,hong@example.com,마케팅팀,VIP</code>
+            </div>
+          </div>
+
+          <form action="/contacts/import" method="post" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
+            <div class="form-group">
+              <label class="d-block" for="csv_file">CSV 파일 선택 <span class="tx-danger">*</span></label>
+              <input type="file" class="form-control" name="csv_file" id="csv_file" accept=".csv,text/csv" required>
+            </div>
+
+            <div class="form-group">
+              <label class="d-block">중복 처리 방식 (전화번호 기준)</label>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="mode" id="mode-skip" value="skip" checked>
+                <label class="form-check-label" for="mode-skip">
+                  <strong>건너뜀</strong> — 이미 있으면 무시
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="mode" id="mode-update" value="update">
+                <label class="form-check-label" for="mode-update">
+                  <strong>업데이트</strong> — 이미 있으면 덮어씀
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="mode" id="mode-create" value="create">
+                <label class="form-check-label" for="mode-create">
+                  <strong>항상 새로 추가</strong>
+                </label>
+              </div>
+            </div>
+
+            <div class="d-flex mg-t-20">
+              <button type="submit" class="btn btn-primary">
+                <i data-feather="upload" class="wd-12 ht-12 mg-r-4"></i> 가져오기 실행
+              </button>
+              <a href="/contacts" class="btn btn-white mg-l-5">취소</a>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
-  </form>
+  </div>
 </div>
 {% endblock %}

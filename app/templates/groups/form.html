@@ -1,39 +1,62 @@
 {% extends "base.html" %}
 {% block title %}{% if group %}그룹 편집{% else %}새 그룹{% endif %} — kotify{% endblock %}
-{% block page_title %}{% if group %}그룹 편집{% else %}새 그룹 만들기{% endif %}{% endblock %}
-{% block page_actions %}
-  <a href="{% if group %}/groups/{{ group.id }}{% else %}/groups{% endif %}"
-     class="btn btn-secondary btn-sm">
-    <i data-feather="arrow-left"></i> 취소
-  </a>
-{% endblock %}
 
 {% block content %}
-<div class="card" style="max-width:480px">
-  <p class="form-legend">* 필수 항목</p>
-  <form action="{{ action }}" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-
-    <div class="form-group">
-      <label for="name">그룹명 <span class="required">*</span></label>
-      <input type="text" name="name" id="name"
-        value="{{ group.name if group else '' }}"
-        placeholder="예: VIP 고객, 마케팅팀" required>
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20 mg-lg-b-30">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item"><a href="/groups">그룹</a></li>
+          <li class="breadcrumb-item active" aria-current="page">{% if group %}편집{% else %}새 그룹{% endif %}</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">{% if group %}그룹 편집{% else %}새 그룹 만들기{% endif %}</h4>
     </div>
-
-    <div class="form-group">
-      <label for="description">설명</label>
-      <textarea name="description" id="description" rows="2"
-        placeholder="그룹에 대한 간단한 설명">{{ group.description if group else '' }}</textarea>
-    </div>
-
-    <div class="flex" style="margin-top:14px">
-      <button type="submit" class="btn btn-primary">
-        <i data-feather="save"></i> 저장
-      </button>
+    <div class="d-none d-md-block">
       <a href="{% if group %}/groups/{{ group.id }}{% else %}/groups{% endif %}"
-         class="btn btn-secondary">취소</a>
+         class="btn btn-sm pd-x-15 btn-white btn-uppercase">
+        <i data-feather="arrow-left" class="wd-10 mg-r-5"></i> 취소
+      </a>
     </div>
-  </form>
+  </div>
+
+  <div class="row row-xs">
+    <div class="col-lg-6 col-xl-5">
+      <div class="card">
+        <div class="card-header">
+          <h6 class="mg-b-0 tx-semibold">그룹 정보</h6>
+        </div>
+        <div class="card-body">
+          <p class="tx-12 tx-color-03 mg-b-20"><span class="tx-danger">*</span> 표시는 필수 항목입니다.</p>
+          <form action="{{ action }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
+            <div class="form-group">
+              <label class="d-block" for="name">그룹명 <span class="tx-danger">*</span></label>
+              <input type="text" class="form-control" name="name" id="name"
+                value="{{ group.name if group else '' }}"
+                placeholder="예: VIP 고객, 마케팅팀" required>
+            </div>
+
+            <div class="form-group">
+              <label class="d-block" for="description">설명</label>
+              <textarea class="form-control" name="description" id="description" rows="3"
+                placeholder="그룹에 대한 간단한 설명">{{ group.description if group else '' }}</textarea>
+            </div>
+
+            <div class="d-flex mg-t-20">
+              <button type="submit" class="btn btn-primary">
+                <i data-feather="save" class="wd-12 ht-12 mg-r-4"></i> 저장
+              </button>
+              <a href="{% if group %}/groups/{{ group.id }}{% else %}/groups{% endif %}"
+                 class="btn btn-white mg-l-5">취소</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

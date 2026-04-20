@@ -1,205 +1,254 @@
 {% extends "base.html" %}
 {% block title %}시스템 설정 — kotify{% endblock %}
-{% block page_title %}시스템 설정{% endblock %}
+{% block content_class %}pd-0 pd-lg-x-20 pd-lg-t-20 pd-lg-b-40{% endblock %}
 
 {% block content %}
-<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0" style="max-width:780px">
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20 mg-lg-b-30">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item"><a href="#">시스템</a></li>
+          <li class="breadcrumb-item active" aria-current="page">시스템 설정</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">시스템 설정</h4>
+    </div>
+  </div>
+
   {% if request.query_params.get("saved") %}
-  <div class="alert alert-success mg-b-20" role="alert">설정이 저장되었습니다.</div>
+  <div class="alert alert-success d-flex align-items-center mg-b-20" role="alert">
+    <i data-feather="check-circle" class="wd-16 ht-16 mg-r-10"></i>
+    <div>설정이 저장되었습니다.</div>
+  </div>
   {% endif %}
 
-  <div class="alert alert-info mg-b-20" role="alert">
-    <i data-feather="info" class="wd-14 ht-14 mg-r-4"></i>
-    <strong>참고:</strong> session.secret을 변경하면 서비스를 재시작해야 적용됩니다.
-  </div>
-
-  <!-- msghub 연동 상태 -->
-  <div class="card mg-b-20">
-    <div class="card-header">
-      <h6 class="mg-b-0 tx-semibold">msghub 연동 상태</h6>
-    </div>
-    <div class="card-body d-flex align-items-center flex-wrap" style="gap:10px">
-      <button class="btn btn-outline-primary btn-sm"
-              hx-post="/admin/settings/test-msghub"
-              hx-target="#msghub-test-result"
-              hx-swap="innerHTML">
-        <i data-feather="zap" class="wd-12 ht-12 mg-r-4"></i>
-        인증 테스트
-        <span class="htmx-indicator spinner mg-l-4"></span>
-      </button>
-      <span id="msghub-test-result" class="tx-13"></span>
+  <div class="alert alert-info d-flex align-items-start mg-b-20" role="alert">
+    <i data-feather="info" class="wd-16 ht-16 mg-r-10 mg-t-2"></i>
+    <div class="tx-13">
+      <strong>참고:</strong> session.secret을 변경하면 서비스를 재시작해야 적용됩니다.
     </div>
   </div>
 
-  <!-- Keycloak -->
-  <form action="/admin/settings" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div class="card mg-b-20">
-      <div class="card-header">
-        <h6 class="mg-b-0 tx-semibold">Keycloak 설정</h6>
-      </div>
-      <div class="card-body">
-        <div class="form-group">
-          <label for="kc-issuer">Issuer URL</label>
-          <input type="text" id="kc-issuer" name="keycloak_issuer" class="form-control"
-                 value="{{ public_settings.get('keycloak.issuer', '') }}"
-                 placeholder="https://keycloak.example.com/realms/sms-sys">
-        </div>
-        <div class="form-group">
-          <label for="kc-client-id">Client ID</label>
-          <input type="text" id="kc-client-id" name="keycloak_client_id" class="form-control"
-                 value="{{ public_settings.get('keycloak.client_id', '') }}"
-                 placeholder="sms-sys">
-        </div>
-        <div class="form-group mg-b-0">
-          <label for="kc-client-secret">Client Secret</label>
-          {% if secret_display.get('keycloak.client_secret') %}
-          <div class="current-value">현재: {{ secret_display.get('keycloak.client_secret') }}</div>
-          {% endif %}
-          <input type="password" id="kc-client-secret" name="keycloak_client_secret" class="form-control"
-                 placeholder="변경하지 않으려면 비워두세요">
-          <small class="tx-color-03 tx-11">빈 값이면 변경되지 않습니다.</small>
-        </div>
-      </div>
-      <div class="card-footer">
-        <button type="submit" class="btn btn-primary btn-sm">
-          <i data-feather="save" class="wd-12 ht-12 mg-r-4"></i> Keycloak 저장
-        </button>
-      </div>
-    </div>
-  </form>
+  <div class="row row-xs">
+    <div class="col-lg-8">
 
-  <!-- msghub API -->
-  <form action="/admin/settings" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div class="card mg-b-20">
-      <div class="card-header">
-        <h6 class="mg-b-0 tx-semibold">msghub API 설정</h6>
-      </div>
-      <div class="card-body">
-        <div class="form-group">
-          <label for="msghub-api-key">API Key</label>
-          {% if secret_display.get('msghub.api_key') %}
-          <div class="current-value">현재: {{ secret_display.get('msghub.api_key') }}</div>
-          {% endif %}
-          <input type="text" id="msghub-api-key" name="msghub_api_key" class="form-control" placeholder="변경하지 않으려면 비워두세요">
-        </div>
-        <div class="form-group">
-          <label for="msghub-api-pwd">API Password</label>
-          {% if secret_display.get('msghub.api_pwd') %}
-          <div class="current-value">현재: {{ secret_display.get('msghub.api_pwd') }}</div>
-          {% endif %}
-          <input type="password" id="msghub-api-pwd" name="msghub_api_pwd" class="form-control" placeholder="변경하지 않으려면 비워두세요">
-        </div>
-        <div class="form-group mg-b-0">
-          <label>환경</label>
-          <div class="d-flex" style="gap:20px">
-            <div class="form-check">
-              <input type="radio" class="form-check-input" id="env-prod" name="msghub_env" value="production"
-                     {{ 'checked' if public_settings.get('msghub.env', 'production') == 'production' else '' }}>
-              <label class="form-check-label tx-13" for="env-prod">상용</label>
-            </div>
-            <div class="form-check">
-              <input type="radio" class="form-check-input" id="env-qa" name="msghub_env" value="qa"
-                     {{ 'checked' if public_settings.get('msghub.env') == 'qa' else '' }}>
-              <label class="form-check-label tx-13" for="env-qa">QA</label>
+      {# =============== Keycloak =============== #}
+      <form action="/admin/settings" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+        <div class="card mg-b-20">
+          <div class="card-header">
+            <h6 class="tx-uppercase tx-semibold mg-b-0">Keycloak 설정</h6>
+          </div>
+          <div class="card-body pd-20 pd-lg-25">
+            <div class="row row-sm">
+              <div class="col-md-12 form-group">
+                <label class="d-block">Issuer URL</label>
+                <input type="text" name="keycloak_issuer" class="form-control"
+                       value="{{ public_settings.get('keycloak.issuer', '') }}"
+                       placeholder="https://keycloak.example.com/realms/sms-sys">
+              </div>
+              <div class="col-md-6 form-group">
+                <label class="d-block">Client ID</label>
+                <input type="text" name="keycloak_client_id" class="form-control"
+                       value="{{ public_settings.get('keycloak.client_id', '') }}"
+                       placeholder="sms-sys">
+              </div>
+              <div class="col-md-6 form-group">
+                <label class="d-block">Client Secret</label>
+                {% if secret_display.get('keycloak.client_secret') %}
+                <div class="current-value tx-12 tx-color-03 mg-b-4">현재: <span class="tx-monospace">{{ secret_display.get('keycloak.client_secret') }}</span></div>
+                {% endif %}
+                <input type="password" name="keycloak_client_secret" class="form-control"
+                       placeholder="변경하지 않으려면 비워두세요">
+                <small class="d-block tx-color-03 mg-t-5">빈 값이면 변경되지 않습니다.</small>
+              </div>
             </div>
           </div>
+          <div class="card-footer bd-t pd-y-15 pd-x-20 tx-right">
+            <button type="submit" class="btn btn-primary">
+              <i data-feather="save" class="wd-12 ht-12 mg-r-5"></i> Keycloak 저장
+            </button>
+          </div>
         </div>
-      </div>
-      <div class="card-footer">
-        <button type="submit" class="btn btn-primary btn-sm">
-          <i data-feather="save" class="wd-12 ht-12 mg-r-4"></i> msghub 저장
-        </button>
-      </div>
-    </div>
-  </form>
+      </form>
 
-  <!-- RCS -->
-  <form action="/admin/settings" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div class="card mg-b-20">
-      <div class="card-header">
-        <h6 class="mg-b-0 tx-semibold">RCS 설정</h6>
-      </div>
-      <div class="card-body">
-        <div class="form-group">
-          <label for="msghub-brand-id">브랜드 ID</label>
-          <input type="text" id="msghub-brand-id" name="msghub_brand_id" class="form-control"
-                 value="{{ public_settings.get('msghub.brand_id', '') }}"
-                 placeholder="RCS 브랜드 ID">
+      {# =============== msghub API =============== #}
+      <form action="/admin/settings" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+        <div class="card mg-b-20">
+          <div class="card-header d-sm-flex align-items-center justify-content-between">
+            <h6 class="tx-uppercase tx-semibold mg-b-0">msghub API 설정</h6>
+            <div class="d-flex align-items-center flex-wrap mg-t-10 mg-sm-t-0" style="gap:8px">
+              <button type="button" class="btn btn-outline-primary btn-sm"
+                      hx-post="/admin/settings/test-msghub"
+                      hx-target="#msghub-test-result"
+                      hx-swap="innerHTML">
+                <i data-feather="zap" class="wd-12 ht-12 mg-r-4"></i>
+                인증 테스트
+                <span class="htmx-indicator spinner mg-l-4"></span>
+              </button>
+              <span id="msghub-test-result" class="tx-13"></span>
+            </div>
+          </div>
+          <div class="card-body pd-20 pd-lg-25">
+            <div class="row row-sm">
+              <div class="col-md-6 form-group">
+                <label class="d-block">API Key</label>
+                {% if secret_display.get('msghub.api_key') %}
+                <div class="current-value tx-12 tx-color-03 mg-b-4">현재: <span class="tx-monospace">{{ secret_display.get('msghub.api_key') }}</span></div>
+                {% endif %}
+                <input type="text" name="msghub_api_key" class="form-control" placeholder="변경하지 않으려면 비워두세요">
+              </div>
+              <div class="col-md-6 form-group">
+                <label class="d-block">API Password</label>
+                {% if secret_display.get('msghub.api_pwd') %}
+                <div class="current-value tx-12 tx-color-03 mg-b-4">현재: <span class="tx-monospace">{{ secret_display.get('msghub.api_pwd') }}</span></div>
+                {% endif %}
+                <input type="password" name="msghub_api_pwd" class="form-control" placeholder="변경하지 않으려면 비워두세요">
+              </div>
+              <div class="col-md-12 form-group mg-b-0">
+                <label class="d-block">환경</label>
+                <div class="d-flex flex-wrap" style="gap:20px">
+                  <div class="form-check">
+                    <input type="radio" class="form-check-input" id="env-prod" name="msghub_env" value="production"
+                           {{ 'checked' if public_settings.get('msghub.env', 'production') == 'production' else '' }}>
+                    <label class="form-check-label tx-13" for="env-prod">상용</label>
+                  </div>
+                  <div class="form-check">
+                    <input type="radio" class="form-check-input" id="env-qa" name="msghub_env" value="qa"
+                           {{ 'checked' if public_settings.get('msghub.env') == 'qa' else '' }}>
+                    <label class="form-check-label tx-13" for="env-qa">QA</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer bd-t pd-y-15 pd-x-20 tx-right">
+            <button type="submit" class="btn btn-primary">
+              <i data-feather="save" class="wd-12 ht-12 mg-r-5"></i> msghub 저장
+            </button>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="msghub-chatbot-id">챗봇 ID</label>
-          <input type="text" id="msghub-chatbot-id" name="msghub_chatbot_id" class="form-control"
-                 value="{{ public_settings.get('msghub.chatbot_id', '') }}"
-                 placeholder="양방향 발신번호와 동일합니다">
-          <small class="tx-color-03 tx-11">양방향 발신번호와 동일합니다.</small>
-        </div>
-        <div class="alert alert-light mg-b-0 tx-11 lh-4">
-          단문 메시지는 <strong>RCS 양방향 CHAT</strong>(건당 8원)으로 발송. RCS 미지원 수신자에게는 SMS(9원)로 자동 전환.<br>
-          장문/이미지는 RCS 단방향 + 자동 fallback으로 발송.
-        </div>
-      </div>
-      <div class="card-footer">
-        <button type="submit" class="btn btn-primary btn-sm">
-          <i data-feather="save" class="wd-12 ht-12 mg-r-4"></i> RCS 설정 저장
-        </button>
-      </div>
-    </div>
-  </form>
+      </form>
 
-  <!-- 앱 설정 -->
-  <form action="/admin/settings" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div class="card mg-b-20">
-      <div class="card-header">
-        <h6 class="mg-b-0 tx-semibold">앱 설정</h6>
-      </div>
-      <div class="card-body">
-        <div class="form-group">
-          <label for="app-public-url">공개 URL</label>
-          <input type="text" id="app-public-url" name="app_public_url" class="form-control"
-                 value="{{ public_settings.get('app.public_url', '') }}"
-                 placeholder="https://sms.example.com">
+      {# =============== RCS =============== #}
+      <form action="/admin/settings" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+        <div class="card mg-b-20">
+          <div class="card-header">
+            <h6 class="tx-uppercase tx-semibold mg-b-0">RCS 설정</h6>
+          </div>
+          <div class="card-body pd-20 pd-lg-25">
+            <div class="row row-sm">
+              <div class="col-md-6 form-group">
+                <label class="d-block">브랜드 ID</label>
+                <input type="text" name="msghub_brand_id" class="form-control"
+                       value="{{ public_settings.get('msghub.brand_id', '') }}"
+                       placeholder="RCS 브랜드 ID">
+              </div>
+              <div class="col-md-6 form-group">
+                <label class="d-block">챗봇 ID</label>
+                <input type="text" name="msghub_chatbot_id" class="form-control"
+                       value="{{ public_settings.get('msghub.chatbot_id', '') }}"
+                       placeholder="양방향 발신번호와 동일합니다">
+                <small class="d-block tx-color-03 mg-t-5">양방향 발신번호와 동일합니다.</small>
+              </div>
+            </div>
+            <div class="alert alert-light mg-b-0 mg-t-10 tx-12 lh-4">
+              단문 메시지는 <strong>RCS 양방향 CHAT</strong>(건당 8원)으로 발송. RCS 미지원 수신자에게는 SMS(9원)로 자동 전환.<br>
+              장문/이미지는 RCS 단방향 + 자동 fallback으로 발송.
+            </div>
+          </div>
+          <div class="card-footer bd-t pd-y-15 pd-x-20 tx-right">
+            <button type="submit" class="btn btn-primary">
+              <i data-feather="save" class="wd-12 ht-12 mg-r-5"></i> RCS 설정 저장
+            </button>
+          </div>
         </div>
-        <div class="form-group mg-b-0">
-          <label for="session-secret">세션 시크릿</label>
-          {% if secret_display.get('session.secret') %}
-          <div class="current-value">현재: {{ secret_display.get('session.secret') }}</div>
-          {% endif %}
-          <input type="password" id="session-secret" name="session_secret" class="form-control" placeholder="변경하지 않으려면 비워두세요">
-          <small class="tx-color-03 tx-11">변경 시 모든 사용자 세션이 만료됩니다.</small>
-        </div>
-      </div>
-      <div class="card-footer">
-        <button type="submit" class="btn btn-primary btn-sm">
-          <i data-feather="save" class="wd-12 ht-12 mg-r-4"></i> 앱 설정 저장
-        </button>
-      </div>
-    </div>
-  </form>
+      </form>
 
-  <!-- 시스템 업데이트 -->
-  <div class="card mg-b-20">
-    <div class="card-header">
-      <h6 class="mg-b-0 tx-semibold">시스템 업데이트</h6>
-    </div>
-    <div class="card-body">
-      <button class="btn btn-outline-primary btn-sm"
-              hx-post="/admin/system/check-update"
-              hx-target="#update-result"
-              hx-swap="innerHTML">
-        <i data-feather="refresh-cw" class="wd-12 ht-12 mg-r-4"></i>
-        업데이트 확인
-        <span class="htmx-indicator spinner mg-l-4"></span>
-      </button>
-      <div id="update-result" class="mg-t-12"></div>
-      <small class="d-block tx-color-03 tx-11 mg-t-10">
-        GitHub에서 최신 버전을 확인하고, 업데이트가 있으면 원클릭으로 설치할 수 있습니다.
-        업데이트 설치 시 서비스가 자동으로 재시작됩니다.
-      </small>
-    </div>
-  </div>
+      {# =============== 앱 설정 =============== #}
+      <form action="/admin/settings" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+        <div class="card mg-b-20">
+          <div class="card-header">
+            <h6 class="tx-uppercase tx-semibold mg-b-0">앱 설정</h6>
+          </div>
+          <div class="card-body pd-20 pd-lg-25">
+            <div class="row row-sm">
+              <div class="col-md-12 form-group">
+                <label class="d-block">공개 URL</label>
+                <input type="text" name="app_public_url" class="form-control"
+                       value="{{ public_settings.get('app.public_url', '') }}"
+                       placeholder="https://sms.example.com">
+              </div>
+              <div class="col-md-12 form-group mg-b-0">
+                <label class="d-block">세션 시크릿</label>
+                {% if secret_display.get('session.secret') %}
+                <div class="current-value tx-12 tx-color-03 mg-b-4">현재: <span class="tx-monospace">{{ secret_display.get('session.secret') }}</span></div>
+                {% endif %}
+                <input type="password" name="session_secret" class="form-control" placeholder="변경하지 않으려면 비워두세요">
+                <small class="d-block tx-color-03 mg-t-5">변경 시 모든 사용자 세션이 만료됩니다.</small>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer bd-t pd-y-15 pd-x-20 tx-right">
+            <button type="submit" class="btn btn-primary">
+              <i data-feather="save" class="wd-12 ht-12 mg-r-5"></i> 앱 설정 저장
+            </button>
+          </div>
+        </div>
+      </form>
+
+    </div><!-- col-lg-8 -->
+
+    {# =============== 우측 사이드 — 시스템 업데이트 + 안내 =============== #}
+    <div class="col-lg-4 mg-t-10 mg-lg-t-0">
+      <div class="card mg-b-20">
+        <div class="card-header">
+          <h6 class="tx-uppercase tx-semibold mg-b-0">시스템 업데이트</h6>
+        </div>
+        <div class="card-body pd-20">
+          <button class="btn btn-outline-primary btn-block wd-100p"
+                  hx-post="/admin/system/check-update"
+                  hx-target="#update-result"
+                  hx-swap="innerHTML">
+            <i data-feather="refresh-cw" class="wd-12 ht-12 mg-r-5"></i>
+            업데이트 확인
+            <span class="htmx-indicator spinner mg-l-4"></span>
+          </button>
+          <div id="update-result" class="mg-t-15"></div>
+          <small class="d-block tx-color-03 tx-11 mg-t-15 lh-4">
+            GitHub에서 최신 버전을 확인하고, 업데이트가 있으면 원클릭으로 설치할 수 있습니다.
+            업데이트 설치 시 서비스가 자동으로 재시작됩니다.
+          </small>
+        </div>
+      </div>
+
+      <div class="card mg-b-20">
+        <div class="card-header">
+          <h6 class="tx-uppercase tx-semibold mg-b-0">운영 가이드</h6>
+        </div>
+        <ul class="list-group list-group-flush tx-13">
+          <li class="list-group-item d-flex align-items-start pd-y-12">
+            <i data-feather="shield" class="wd-14 ht-14 tx-primary mg-r-10 mg-t-2"></i>
+            <span class="tx-color-02">시크릿은 마스킹되어 표시되며 빈 값 입력 시 유지됩니다.</span>
+          </li>
+          <li class="list-group-item d-flex align-items-start pd-y-12">
+            <i data-feather="zap" class="wd-14 ht-14 tx-warning mg-r-10 mg-t-2"></i>
+            <span class="tx-color-02">msghub 저장 후 <strong>인증 테스트</strong>로 연결을 확인하세요.</span>
+          </li>
+          <li class="list-group-item d-flex align-items-start pd-y-12">
+            <i data-feather="alert-triangle" class="wd-14 ht-14 tx-danger mg-r-10 mg-t-2"></i>
+            <span class="tx-color-02">세션 시크릿 변경 시 재시작이 필요합니다.</span>
+          </li>
+        </ul>
+      </div>
+    </div><!-- col-lg-4 -->
+  </div><!-- row -->
+
 </div>
 {% endblock %}

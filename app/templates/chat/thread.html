@@ -1,15 +1,85 @@
 {% extends "base.html" %}
 {% block title %}{{ phone | phone_fmt }} — 대화방 — kotify{% endblock %}
-{% block page_title %}{{ phone | phone_fmt }}{% endblock %}
-{% block page_actions %}
-  <a href="/chat" class="btn btn-outline-light btn-sm">
-    <i data-feather="arrow-left" class="wd-12 ht-12 mg-r-4"></i> 목록
-  </a>
+
+{% block vendor_css_extra %}
+<link rel="stylesheet" href="/static/css/dashforge.chat.css">
+<style>
+/* 채팅 말풍선 — DashForge 원본에 없는 요소 (기존 방식 유지) */
+.chat-content-body .chat-msg {
+  display: inline-block;
+  max-width: 75%;
+  padding: 8px 14px;
+  border-radius: 14px 14px 14px 2px;
+  background: #f4f5f8;
+  color: #1b2e4b;
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+.chat-content-body .chat-msg.outgoing {
+  background: #0168fa;
+  color: #fff;
+  border-radius: 14px 14px 2px 14px;
+}
+.chat-content-body .media.reverse { justify-content: flex-end; text-align: right; }
+.chat-content-body .media.reverse .media-body { order: -1; margin-right: 10px; margin-left: 0; }
+.chat-content-body .media.reverse .avatar { margin-left: 0; }
+.chat-content-footer {
+  padding: 14px 20px;
+  border-top: 1px solid #e1e5ee;
+  background: #fff;
+  flex-wrap: wrap;
+}
+.chat-content-footer form { width: 100%; }
+</style>
 {% endblock %}
 
 {% block content %}
 <div class="chat-wrapper chat-wrapper-two">
-  <div class="chat-content" style="width:100%">
+
+  {# =============== 좌측 컬럼 — 대화 리스트 (원본 chat-sidebar) =============== #}
+  <div class="chat-sidebar">
+
+    <div class="chat-sidebar-header">
+      <div class="d-flex align-items-center">
+        <div class="avatar avatar-sm mg-r-8"><span class="avatar-initial rounded-circle bg-primary"><i data-feather="message-square" class="wd-14 ht-14"></i></span></div>
+        <span class="tx-color-01 tx-semibold">RCS 대화방</span>
+      </div>
+      <a href="/chat" class="tx-12 link-03 d-flex align-items-center">
+        <i data-feather="list" class="wd-12 ht-12 mg-r-3"></i> 전체
+      </a>
+    </div><!-- chat-sidebar-header -->
+
+    <div class="chat-sidebar-body">
+      <div class="flex-fill pd-y-20 pd-x-10">
+        <span class="tx-10 tx-uppercase tx-medium tx-color-03 tx-sans tx-spacing-1 pd-l-10 d-block mg-b-10">현재 대화</span>
+        <div class="chat-msg-list">
+          <a href="/chat/{{ caller }}/{{ phone }}" class="media active">
+            <div class="avatar avatar-sm avatar-online">
+              <span class="avatar-initial rounded-circle bg-primary">
+                {{ phone[-2:] if phone|length >= 2 else phone }}
+              </span>
+            </div>
+            <div class="media-body mg-l-10">
+              <h6 class="mg-b-0">{{ phone | phone_fmt }}</h6>
+              <small class="d-block tx-color-04">발신 {{ caller | phone_fmt }}</small>
+              <small class="d-block tx-color-04 tx-10 mg-t-2">{{ messages | length }}개 메시지</small>
+            </div>
+          </a><!-- media -->
+        </div>
+
+        <a href="/chat" class="d-flex align-items-center justify-content-center tx-12 tx-color-03 pd-y-10 mg-t-10 bd-t">
+          <i data-feather="arrow-left" class="wd-12 ht-12 mg-r-4"></i> 대화 목록으로
+        </a>
+      </div>
+    </div><!-- chat-sidebar-body -->
+
+  </div><!-- chat-sidebar -->
+
+  {# =============== 중앙 컬럼 — 현재 대화 (원본 chat-content) =============== #}
+  <div class="chat-content">
+
     <div class="chat-content-header">
       <div class="d-flex align-items-center">
         <div class="avatar avatar-sm avatar-online mg-r-10">
@@ -22,16 +92,12 @@
           <small class="tx-11 tx-color-03">발신번호 {{ caller | phone_fmt }}</small>
         </div>
       </div>
-      <div class="d-flex align-items-center tx-12 tx-color-03">
-        {{ messages | length }}개 메시지
-        {% if session and session.recent_out_count > 0 %}
-        <span class="mg-l-10" title="24h 세션 과금 — 24시간 내 발신 {{ session.recent_out_count }}건. RCS 양방향 세션당 최대 {{ session.max_units }}건({{ session.cap_krw }}원) 상한.">
-          24h <strong class="tx-color-01">{{ session.session_billed }}원</strong>
-          <span class="tx-color-04">({{ session.recent_out_count }}/{{ session.max_units }}{% if session.capped %} · 상한{% endif %})</span>
-        </span>
-        {% endif %}
-      </div>
-    </div>
+      <nav>
+        <a href="/chat" data-bs-toggle="tooltip" title="목록으로"><i data-feather="arrow-left"></i></a>
+        <a href="#" onclick="window.location.reload();return false;" data-bs-toggle="tooltip" title="새로고침"><i data-feather="refresh-cw"></i></a>
+        <a href="#" data-bs-toggle="tooltip" title="상세 정보"><i data-feather="info"></i></a>
+      </nav>
+    </div><!-- chat-content-header -->
 
     <div class="chat-content-body" id="messages">
       <div class="chat-group">
@@ -40,15 +106,15 @@
         <div class="media reverse">
           <div class="avatar avatar-sm"><span class="avatar-initial rounded-circle bg-primary">me</span></div>
           <div class="media-body">
-            <h6 class="text-end">kotify <small class="tx-color-04 mg-l-4">{{ m.timestamp | kst_dt }}</small></h6>
+            <h6>kotify <small class="tx-color-04 mg-l-4">{{ m.timestamp | kst_dt }}</small></h6>
             <p class="chat-msg outgoing">{{ m.body or '(빈 메시지)' }}</p>
-            <small class="d-block text-end tx-color-04 tx-10">
+            <small class="d-block tx-color-04 tx-10">
               {% if m.channel %}{{ m.channel }}{% endif %}
               {% if m.cost is not none and m.cost > 0 %} · {{ m.cost }}원{% endif %}
               {% if m.status and m.status not in ('DONE',) %} · {{ m.status }}{% endif %}
             </small>
-          </div>
-        </div>
+          </div><!-- media-body -->
+        </div><!-- media -->
         {% else %}
         <div class="media">
           <div class="avatar avatar-sm avatar-online">
@@ -65,15 +131,71 @@
               {% if m.product_code %} · {{ m.product_code }}{% endif %}
             </small>
             {% endif %}
-          </div>
-        </div>
+          </div><!-- media-body -->
+        </div><!-- media -->
         {% endif %}
         {% endfor %}
       </div>
-    </div>
+    </div><!-- chat-content-body -->
 
+    {# =============== 우측 컬럼 — 프로필 요약 (원본 chat-sidebar-right) =============== #}
+    <div class="chat-sidebar-right">
+      <div class="pd-y-20 pd-x-15">
+        <div class="tx-10 tx-uppercase tx-medium tx-color-03 tx-sans tx-spacing-1 mg-b-10">대화 요약</div>
+
+        <div class="d-flex flex-column align-items-center pd-y-10 bd-b mg-b-15">
+          <div class="avatar avatar-lg avatar-online mg-b-10">
+            <span class="avatar-initial rounded-circle bg-primary tx-16">
+              {{ phone[-2:] if phone|length >= 2 else phone }}
+            </span>
+          </div>
+          <h6 class="mg-b-2 tx-semibold">{{ phone | phone_fmt }}</h6>
+          <small class="tx-11 tx-color-03">수신자</small>
+        </div>
+
+        <div class="mg-b-15">
+          <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">발신번호</h6>
+          <p class="tx-13 tx-monospace tx-color-01 mg-b-0">{{ caller | phone_fmt }}</p>
+        </div>
+
+        <div class="mg-b-15">
+          <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">메시지</h6>
+          <p class="tx-13 mg-b-0"><strong>{{ messages | length }}</strong>개</p>
+        </div>
+
+        {% if session and session.recent_out_count > 0 %}
+        <div class="mg-b-15 pd-10 bg-gray-100 rounded">
+          <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">24h 세션 과금</h6>
+          <p class="tx-16 tx-semibold mg-b-2">{{ session.session_billed }}<small class="tx-11 tx-color-03">원</small></p>
+          <small class="tx-11 tx-color-03 d-block">
+            발신 {{ session.recent_out_count }}/{{ session.max_units }}건
+            {% if session.capped %} · <span class="tx-danger">상한 도달</span>{% endif %}
+          </small>
+          <small class="tx-10 tx-color-04 d-block mg-t-4 lh-4">
+            RCS 양방향 세션당 최대 {{ session.max_units }}건({{ session.cap_krw }}원) 상한.
+          </small>
+        </div>
+        {% endif %}
+
+        <div>
+          <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">채널 요금</h6>
+          <ul class="list-unstyled tx-12 tx-color-02 mg-b-0">
+            <li class="d-flex justify-content-between pd-y-2">
+              <span>RCS 양방향 CHAT</span>
+              <span class="tx-medium">8원</span>
+            </li>
+            <li class="d-flex justify-content-between pd-y-2">
+              <span>SMS 자동 전환</span>
+              <span class="tx-medium">9원</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div><!-- chat-sidebar-right -->
+
+    {# =============== 하단 — 답장 폼 (원본 chat-content-footer 확장) =============== #}
     <div class="chat-content-footer">
-      <form method="post" action="/chat/{{ caller }}/{{ phone }}/reply" class="d-flex flex-column wd-100p">
+      <form method="post" action="/chat/{{ caller }}/{{ phone }}/reply" class="d-flex flex-column">
         <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
         {% if error %}
         <div class="alert alert-danger tx-12 mg-b-8 pd-y-6 pd-x-10">{{ error }}</div>
@@ -91,41 +213,10 @@
           </div>
         </div>
       </form>
-    </div>
-  </div>
-</div>
+    </div><!-- chat-content-footer -->
 
-<style>
-/* 채팅 말풍선 — DashForge에 없는 요소 */
-.chat-content-body .chat-msg {
-  display: inline-block;
-  max-width: 75%;
-  padding: 8px 14px;
-  border-radius: 14px 14px 14px 2px;
-  background: #f4f5f8;
-  color: #1b2e4b;
-  margin-bottom: 4px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.45;
-}
-.chat-content-body .chat-msg.outgoing {
-  background: #0168fa;
-  color: #fff;
-  border-radius: 14px 14px 2px 14px;
-  margin-left: auto;
-  display: inline-block;
-}
-.chat-content-body .media.reverse { justify-content: flex-end; }
-.chat-content-body .media.reverse .media-body { order: -1; margin-right: 10px; margin-left: 0; }
-.chat-content-body .media.reverse .avatar { margin-left: 0; }
-.chat-content-footer {
-  padding: 14px 20px;
-  border-top: 1px solid #e1e5ee;
-  background: #fff;
-}
-.chat-content-footer form { width: 100%; }
-</style>
+  </div><!-- chat-content -->
+</div><!-- chat-wrapper -->
 
 <script>
 (function() {
@@ -151,6 +242,16 @@
   update();
   var messages = document.getElementById('messages');
   if (messages) messages.scrollTop = messages.scrollHeight;
+})();
+</script>
+{% endblock %}
+
+{% block body_extra %}
+<script>
+(function() {
+  // DashForge chat-sidebar-right 기본 표시 — 데스크탑에서 프로필 사이드바 보이도록
+  document.body.classList.add('app-chat');
+  document.body.classList.add('show-sidebar-right');
 })();
 </script>
 {% endblock %}

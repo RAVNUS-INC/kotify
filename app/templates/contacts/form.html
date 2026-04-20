@@ -1,74 +1,99 @@
 {% extends "base.html" %}
 {% block title %}{% if contact %}연락처 편집{% else %}새 연락처{% endif %} — kotify{% endblock %}
-{% block page_title %}{% if contact %}연락처 편집{% else %}새 연락처 추가{% endif %}{% endblock %}
-{% block page_actions %}
-  <a href="{% if contact %}/contacts/{{ contact.id }}{% else %}/contacts{% endif %}"
-     class="btn btn-secondary btn-sm">
-    <i data-feather="arrow-left"></i> 취소
-  </a>
-{% endblock %}
 
 {% block content %}
-{% if request.query_params.get("error") == "invalid_phone" %}
-<div class="alert alert-danger" role="alert">올바르지 않은 전화번호 형식입니다.</div>
-{% elif request.query_params.get("error") == "phone_or_email_required" %}
-<div class="alert alert-danger" role="alert">전화번호 또는 이메일 중 최소 하나는 입력해야 합니다.</div>
-{% endif %}
-
-<div class="card" style="max-width:560px">
-  <p class="form-legend">* 필수 항목</p>
-  <form action="{{ action }}" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-
-    <div class="form-group">
-      <label for="name">이름 <span class="required">*</span></label>
-      <input type="text" name="name" id="name"
-        value="{{ contact.name if contact else '' }}" required>
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20 mg-lg-b-30">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item"><a href="/contacts">주소록</a></li>
+          <li class="breadcrumb-item active" aria-current="page">{% if contact %}편집{% else %}새 연락처{% endif %}</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">{% if contact %}연락처 편집{% else %}새 연락처 추가{% endif %}</h4>
     </div>
-
-    <div class="form-group">
-      <label for="phone">전화번호</label>
-      <input type="text" name="phone" id="phone"
-        value="{{ contact.phone if contact else '' }}"
-        placeholder="010-1234-5678">
-      <div class="tx-11 tx-color-03 mg-t-3">한국 휴대폰 번호 형식 (010, 011 등)</div>
-    </div>
-
-    <div class="form-group">
-      <label for="email">이메일</label>
-      <input type="text" name="email" id="email"
-        value="{{ contact.email if contact else '' }}"
-        placeholder="user@example.com">
-      <div class="tx-11 tx-color-03 mg-t-3">M3: 전화번호 또는 이메일 중 최소 하나는 입력해야 합니다.</div>
-    </div>
-
-    <div class="form-group">
-      <label for="department">부서</label>
-      <input type="text" name="department" id="department"
-        value="{{ contact.department if contact else '' }}"
-        placeholder="예: 마케팅팀">
-    </div>
-
-    <div class="form-group">
-      <label for="notes">메모</label>
-      <textarea name="notes" id="notes" rows="3">{{ contact.notes if contact else '' }}</textarea>
-    </div>
-
-    {% if contact %}
-    <div class="form-group" style="display:flex;align-items:center;gap:6px">
-      <input type="checkbox" name="active" id="active" value="1"
-        {% if contact.active %}checked{% endif %}>
-      <label for="active" style="font-weight:normal;margin-bottom:0;font-size:13px">활성</label>
-    </div>
-    {% endif %}
-
-    <div class="flex" style="margin-top:14px">
-      <button type="submit" class="btn btn-primary">
-        <i data-feather="save"></i> 저장
-      </button>
+    <div class="d-none d-md-block">
       <a href="{% if contact %}/contacts/{{ contact.id }}{% else %}/contacts{% endif %}"
-         class="btn btn-secondary">취소</a>
+         class="btn btn-sm pd-x-15 btn-white btn-uppercase">
+        <i data-feather="arrow-left" class="wd-10 mg-r-5"></i> 취소
+      </a>
     </div>
-  </form>
+  </div>
+
+  {% if request.query_params.get("error") == "invalid_phone" %}
+  <div class="alert alert-danger mg-b-20" role="alert">올바르지 않은 전화번호 형식입니다.</div>
+  {% elif request.query_params.get("error") == "phone_or_email_required" %}
+  <div class="alert alert-danger mg-b-20" role="alert">전화번호 또는 이메일 중 최소 하나는 입력해야 합니다.</div>
+  {% endif %}
+
+  <div class="row row-xs">
+    <div class="col-lg-8 col-xl-7">
+      <div class="card">
+        <div class="card-header">
+          <h6 class="mg-b-0 tx-semibold">기본 정보</h6>
+        </div>
+        <div class="card-body">
+          <p class="tx-12 tx-color-03 mg-b-20"><span class="tx-danger">*</span> 표시는 필수 항목입니다.</p>
+          <form action="{{ action }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
+            <div class="form-group">
+              <label class="d-block" for="name">이름 <span class="tx-danger">*</span></label>
+              <input type="text" class="form-control" name="name" id="name"
+                value="{{ contact.name if contact else '' }}" required>
+            </div>
+
+            <div class="form-group">
+              <label class="d-block" for="phone">전화번호</label>
+              <input type="text" class="form-control" name="phone" id="phone"
+                value="{{ contact.phone if contact else '' }}"
+                placeholder="010-1234-5678">
+              <small class="tx-11 tx-color-03 d-block mg-t-5">한국 휴대폰 번호 형식 (010, 011 등)</small>
+            </div>
+
+            <div class="form-group">
+              <label class="d-block" for="email">이메일</label>
+              <input type="text" class="form-control" name="email" id="email"
+                value="{{ contact.email if contact else '' }}"
+                placeholder="user@example.com">
+              <small class="tx-11 tx-color-03 d-block mg-t-5">전화번호 또는 이메일 중 최소 하나는 입력해야 합니다.</small>
+            </div>
+
+            <div class="form-group">
+              <label class="d-block" for="department">부서</label>
+              <input type="text" class="form-control" name="department" id="department"
+                value="{{ contact.department if contact else '' }}"
+                placeholder="예: 마케팅팀">
+            </div>
+
+            <div class="form-group">
+              <label class="d-block" for="notes">메모</label>
+              <textarea class="form-control" name="notes" id="notes" rows="3">{{ contact.notes if contact else '' }}</textarea>
+            </div>
+
+            {% if contact %}
+            <div class="form-group">
+              <div class="form-check">
+                <input type="checkbox" class="form-check-input" name="active" id="active" value="1"
+                  {% if contact.active %}checked{% endif %}>
+                <label class="form-check-label" for="active">활성 상태</label>
+              </div>
+            </div>
+            {% endif %}
+
+            <div class="d-flex mg-t-20">
+              <button type="submit" class="btn btn-primary">
+                <i data-feather="save" class="wd-12 ht-12 mg-r-4"></i> 저장
+              </button>
+              <a href="{% if contact %}/contacts/{{ contact.id }}{% else %}/contacts{% endif %}"
+                 class="btn btn-white mg-l-5">취소</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

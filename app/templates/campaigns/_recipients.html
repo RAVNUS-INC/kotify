@@ -1,131 +1,125 @@
 {% set status_filter = status_filter or "" %}
-{# C2: 상태 필터 탭 + CSV 내보내기 #}
-<div style="padding:8px 16px;border-bottom:1px solid #e1e5ee;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
-  <div style="display:flex;gap:4px;flex-wrap:wrap">
+<div class="pd-y-10 pd-x-20 bd-b d-flex flex-wrap align-items-center justify-content-between" style="gap:10px">
+  <div class="d-flex flex-wrap" style="gap:4px">
     <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1"
        hx-target="#recipients-table" hx-swap="innerHTML"
-       class="btn btn-sm {% if not status_filter %}btn-primary{% else %}btn-secondary{% endif %}">
-      전체 {{ campaign.total_count }}
+       class="btn btn-sm pd-x-12 {% if not status_filter %}btn-primary{% else %}btn-white{% endif %}">
+      전체 <span class="badge bg-white tx-color-03 mg-l-4">{{ campaign.total_count }}</span>
     </a>
     <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1&status=success"
        hx-target="#recipients-table" hx-swap="innerHTML"
-       class="btn btn-sm {% if status_filter == 'success' %}btn-primary{% else %}btn-secondary{% endif %}">
-      <span class="ok">성공</span> {{ campaign.ok_count }}
+       class="btn btn-sm pd-x-12 {% if status_filter == 'success' %}btn-primary{% else %}btn-white{% endif %}">
+      <span class="tx-success">성공</span> <span class="badge bg-white tx-color-03 mg-l-4">{{ campaign.ok_count }}</span>
     </a>
     <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1&status=fail"
        hx-target="#recipients-table" hx-swap="innerHTML"
-       class="btn btn-sm {% if status_filter == 'fail' %}btn-primary{% else %}btn-secondary{% endif %}">
-      <span class="err">실패</span> {{ campaign.fail_count }}
+       class="btn btn-sm pd-x-12 {% if status_filter == 'fail' %}btn-primary{% else %}btn-white{% endif %}">
+      <span class="tx-danger">실패</span> <span class="badge bg-white tx-color-03 mg-l-4">{{ campaign.fail_count }}</span>
     </a>
     <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page=1&status=pending"
        hx-target="#recipients-table" hx-swap="innerHTML"
-       class="btn btn-sm {% if status_filter == 'pending' %}btn-primary{% else %}btn-secondary{% endif %}">
-      대기 {{ campaign.pending_count }}
+       class="btn btn-sm pd-x-12 {% if status_filter == 'pending' %}btn-primary{% else %}btn-white{% endif %}">
+      <span class="tx-warning">대기</span> <span class="badge bg-white tx-color-03 mg-l-4">{{ campaign.pending_count }}</span>
     </a>
   </div>
-  <div style="display:flex;gap:4px">
+  <div>
     <a href="/campaigns/{{ campaign.id }}/export{% if status_filter %}?status={{ status_filter }}{% endif %}"
-       class="btn btn-secondary btn-sm">
-      <i data-feather="download"></i> CSV
+       class="btn btn-white btn-sm pd-x-12">
+      <i data-feather="download" class="wd-12 ht-12 mg-r-4"></i> CSV
     </a>
   </div>
 </div>
 
+{% if messages %}
 <div class="table-responsive">
-<table>
-  <colgroup>
-    <col style="width: 130px">    <!-- 번호 -->
-    <col style="width: 70px">     <!-- 채널 -->
-    <col style="width: 70px">     <!-- 상태 -->
-    <col>                          <!-- 결과 -->
-    <col style="width: 160px">    <!-- Fallback 사유 -->
-    <col style="width: 60px">     <!-- 비용 -->
-    <col style="width: 120px">    <!-- 완료 시각 -->
-  </colgroup>
-  <thead>
-    <tr>
-      <th>번호</th>
-      <th>채널</th>
-      <th>상태</th>
-      <th>결과</th>
-      <th>Fallback 사유</th>
-      <th class="text-right">비용</th>
-      <th>완료 시각</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for msg in messages %}
-    <tr>
-      <td class="tx-monospace">{{ msg.to_number|phone_fmt }}</td>
-      <td>
-        {% if msg.channel == "RCS" %}
-        <span class="badge" style="background:#dbeafe;color:#1d4ed8">RCS</span>
-        {% elif msg.channel == "SMS" %}
-        <span class="badge bg-success tx-white">SMS</span>
-        {% elif msg.channel == "LMS" %}
-        <span class="badge bg-info tx-white">LMS</span>
-        {% elif msg.channel == "MMS" %}
-        <span class="badge bg-warning tx-white">MMS</span>
-        {% else %}
-        <span class="text-muted">—</span>
-        {% endif %}
-      </td>
-      <td>
-        {% if msg.result_code == "10000" %}
-        <span class="badge bg-success tx-white">성공</span>
-        {% elif msg.status == "FAILED" %}
-        <span class="badge bg-danger tx-white">전송 오류</span>
-        {% elif msg.status == "FB_PENDING" %}
-        <span class="badge bg-warning tx-white" title="RCS 실패 → SMS 전환 대기">SMS 전환 중</span>
-        {% elif msg.status in ("PENDING", "REG", "ING") %}
-        <span class="badge bg-warning tx-white">대기</span>
-        {% elif msg.result_code and msg.result_code != "10000" %}
-        <span class="badge bg-danger tx-white">실패</span>
-        {% else %}
-        <span class="badge">{{ msg.status }}</span>
-        {% endif %}
-      </td>
-      <td style="line-height:1.5">
-        {% if msg.status == "FAILED" and not msg.result_code and not msg.result_desc %}
-        <span class="err" style="font-size:11px;white-space:normal">메시지 전송에 실패했습니다.</span>
-        {% else %}
-        {% set result_msg = describe_result(msg.result_code, msg.result_desc) %}
-        <span class="{% if (msg.result_code and msg.result_code != '10000') or msg.status == 'FAILED' %}err{% else %}text-muted{% endif %}" style="font-size:11px;white-space:normal">{{ result_msg }}</span>
-        {% endif %}
-      </td>
-      <td class="text-muted" style="font-size:11px">
-        {% if msg.fb_reason %}
-        {% set fb = msg.fb_reason | from_json if msg.fb_reason else [] %}
-        {% for f in fb %}{{ f.get("desc", f.get("code", "")) }}{% if not loop.last %}, {% endif %}{% endfor %}
-        {% else %}—{% endif %}
-      </td>
-      <td class="tx-monospace text-right">{{ msg.cost|string + "원" if msg.cost else "—" }}</td>
-      <td class="tx-monospace text-muted">{{ msg.complete_time|kst_dt if msg.complete_time else "—" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+  <table class="table table-hover mg-b-0 tx-13">
+    <thead class="tx-uppercase tx-11 tx-spacing-1 tx-color-03">
+      <tr>
+        <th class="pd-l-20">번호</th>
+        <th>채널</th>
+        <th>상태</th>
+        <th>결과</th>
+        <th>Fallback 사유</th>
+        <th class="text-right">비용</th>
+        <th class="pd-r-20">완료 시각</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for msg in messages %}
+      <tr>
+        <td class="pd-l-20 tx-monospace">{{ msg.to_number|phone_fmt }}</td>
+        <td>
+          {% if msg.channel == "RCS" %}
+          <span class="badge bg-primary tx-white">RCS</span>
+          {% elif msg.channel == "SMS" %}
+          <span class="badge bg-success tx-white">SMS</span>
+          {% elif msg.channel == "LMS" %}
+          <span class="badge bg-info tx-white">LMS</span>
+          {% elif msg.channel == "MMS" %}
+          <span class="badge bg-warning tx-white">MMS</span>
+          {% else %}
+          <span class="tx-color-04">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if msg.result_code == "10000" %}
+          <span class="badge bg-success tx-white">성공</span>
+          {% elif msg.status == "FAILED" %}
+          <span class="badge bg-danger tx-white">전송 오류</span>
+          {% elif msg.status == "FB_PENDING" %}
+          <span class="badge bg-warning tx-white" title="RCS 실패 → SMS 전환 대기">SMS 전환 중</span>
+          {% elif msg.status in ("PENDING", "REG", "ING") %}
+          <span class="badge bg-warning tx-white">대기</span>
+          {% elif msg.result_code and msg.result_code != "10000" %}
+          <span class="badge bg-danger tx-white">실패</span>
+          {% else %}
+          <span class="badge">{{ msg.status }}</span>
+          {% endif %}
+        </td>
+        <td class="tx-11" style="line-height:1.5">
+          {% if msg.status == "FAILED" and not msg.result_code and not msg.result_desc %}
+          <span class="tx-danger">메시지 전송에 실패했습니다.</span>
+          {% else %}
+          {% set result_msg = describe_result(msg.result_code, msg.result_desc) %}
+          <span class="{% if (msg.result_code and msg.result_code != '10000') or msg.status == 'FAILED' %}tx-danger{% else %}tx-color-03{% endif %}">{{ result_msg }}</span>
+          {% endif %}
+        </td>
+        <td class="tx-11 tx-color-03">
+          {% if msg.fb_reason %}
+          {% set fb = msg.fb_reason | from_json if msg.fb_reason else [] %}
+          {% for f in fb %}{{ f.get("desc", f.get("code", "")) }}{% if not loop.last %}, {% endif %}{% endfor %}
+          {% else %}—{% endif %}
+        </td>
+        <td class="tx-monospace text-right">{{ msg.cost|string + "원" if msg.cost else "—" }}</td>
+        <td class="pd-r-20 tx-monospace tx-color-03 tx-12">{{ msg.complete_time|kst_dt if msg.complete_time else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
-
-{% if not messages %}
-<div class="tx-center pd-40 tx-color-03" style="padding:20px">
-  <i data-feather="inbox"></i>
-  <p>해당 조건의 수신자가 없습니다.</p>
+{% else %}
+<div class="tx-center pd-40 tx-color-03">
+  <i data-feather="inbox" class="wd-32 ht-32 mg-b-10"></i>
+  <p class="mg-b-0">해당 조건의 수신자가 없습니다.</p>
 </div>
 {% endif %}
 
 {% if total_count > per_page %}
-<div style="padding:10px 16px;border-top:1px solid #e1e5ee">
-  <div class="pagination">
-    {% if page > 1 %}
-    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page - 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
-       hx-target="#recipients-table" hx-swap="innerHTML">← 이전</a>
-    {% endif %}
-    <span class="text-muted">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span>
-    {% if page * per_page < total_count %}
-    <a href="#" hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page + 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
-       hx-target="#recipients-table" hx-swap="innerHTML">다음 →</a>
-    {% endif %}
-  </div>
+<div class="card-footer d-flex justify-content-center">
+  <nav>
+    <ul class="pagination mg-b-0">
+      {% if page > 1 %}
+      <li class="page-item"><a class="page-link" href="#"
+        hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page - 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+        hx-target="#recipients-table" hx-swap="innerHTML">이전</a></li>
+      {% endif %}
+      <li class="page-item disabled"><span class="page-link">{{ page }} / {{ ((total_count - 1) // per_page + 1) }}</span></li>
+      {% if page * per_page < total_count %}
+      <li class="page-item"><a class="page-link" href="#"
+        hx-get="/campaigns/{{ campaign.id }}/recipients?page={{ page + 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+        hx-target="#recipients-table" hx-swap="innerHTML">다음</a></li>
+      {% endif %}
+    </ul>
+  </nav>
 </div>
 {% endif %}

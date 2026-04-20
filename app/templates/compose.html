@@ -1,95 +1,99 @@
 {% extends "base.html" %}
 {% block title %}새 발송 — kotify{% endblock %}
-{% block breadcrumb %}
-<nav aria-label="breadcrumb">
-  <ol class="breadcrumb breadcrumb-style1 mg-b-10">
-    <li class="breadcrumb-item"><a href="/">Home</a></li>
-    <li class="breadcrumb-item active" aria-current="page">새 발송</li>
-  </ol>
-</nav>
-{% endblock %}
-{% block page_title %}신규 공지 발송{% endblock %}
 
 {% block content %}
 <div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
-
-{% if error_slug %}
-<div class="alert alert-danger d-flex align-items-center mg-b-15" role="alert">
-  <i data-feather="alert-circle" class="wd-16 ht-16 mg-r-8"></i>
-  <div>{{ t_error(error_slug) }}</div>
-</div>
-{% endif %}
-
-{% if not callers %}
-<div class="alert alert-warning d-flex align-items-start mg-b-15" role="alert">
-  <i data-feather="alert-triangle" class="wd-16 ht-16 mg-r-8 mg-t-2 flex-shrink-0"></i>
-  <div>
-    <strong>발신번호가 등록되어 있지 않습니다.</strong><br>
-    발송을 시작하려면 먼저 발신번호를 등록해야 합니다.
-    {% if "admin" in user_roles %}
-    <a href="/admin/callers" class="alert-link mg-l-5">발신번호 관리 →</a>
-    {% else %}
-    관리자에게 <a href="/admin/callers" class="alert-link">발신번호 등록</a>을 요청하세요.
-    {% endif %}
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item active" aria-current="page">새 발송</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">신규 공지 발송</h4>
+    </div>
+    <div class="d-none d-md-block">
+      <a href="/campaigns" class="btn btn-sm pd-x-15 btn-white btn-uppercase">
+        <i data-feather="list" class="wd-10 mg-r-5"></i> 이력
+      </a>
+    </div>
   </div>
-</div>
-{% endif %}
 
-<div class="card">
-  <div class="card-header pd-y-15">
-    <h6 class="mg-b-0 tx-semibold">발송 정보</h6>
+  {% if error_slug %}
+  <div class="alert alert-danger d-flex align-items-center mg-b-20" role="alert">
+    <i data-feather="alert-circle" class="wd-16 ht-16 mg-r-10"></i>
+    <div>{{ t_error(error_slug) }}</div>
   </div>
-  <div class="card-body pd-25">
-    <form id="compose-form" action="/compose/send" method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  {% endif %}
 
-      <div class="form-group mg-b-20">
-        <label class="d-block tx-13 tx-semibold mg-b-5" for="caller_id">발신번호</label>
-        {% if not callers %}
-        <select name="caller_id" id="caller_id" class="form-control" disabled>
-          <option value="">— 발신번호 없음 —</option>
-        </select>
-        {% else %}
-        <select name="caller_id" id="caller_id" class="form-control" required>
-          {% for c in callers %}
-          <option value="{{ c.id }}"
-            {% if preserved_caller_id and c.id == preserved_caller_id %}selected
-            {% elif not preserved_caller_id and default_caller and c.id == default_caller.id %}selected{% endif %}>
-            {{ c.label }} ({{ c.number|phone_fmt }})
-          </option>
-          {% endfor %}
-        </select>
-        {% endif %}
-      </div>
+  {% if not callers %}
+  <div class="alert alert-warning d-flex align-items-start mg-b-20" role="alert">
+    <i data-feather="alert-triangle" class="wd-16 ht-16 mg-r-10 mg-t-2 flex-shrink-0"></i>
+    <div class="tx-13">
+      <strong>발신번호가 등록되어 있지 않습니다.</strong><br>
+      발송을 시작하려면 먼저 발신번호를 등록해야 합니다.
+      {% if "admin" in user_roles %}
+      <a href="/admin/callers" class="alert-link mg-l-5">발신번호 관리 →</a>
+      {% else %}
+      관리자에게 <a href="/admin/callers" class="alert-link">발신번호 등록</a>을 요청하세요.
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
-      <!-- 수신자 선택 방식 -->
-      <div class="form-group mg-b-20">
-        <label class="d-block tx-13 tx-semibold mg-b-8">수신자 선택 방식</label>
-        <div class="d-flex flex-wrap" style="gap:16px">
-          <div class="form-check">
-            <input type="radio" id="src-manual" name="source" value="manual" class="form-check-input"
-              {% if preselect_group_id == 0 %}checked{% endif %}
-              onchange="toggleSource()">
-            <label for="src-manual" class="form-check-label tx-13">직접 입력</label>
-          </div>
-          <div class="form-check">
-            <input type="radio" id="src-groups" name="source" value="groups" class="form-check-input"
-              {% if preselect_group_id != 0 %}checked{% endif %}
-              onchange="toggleSource()">
-            <label for="src-groups" class="form-check-label tx-13">그룹 선택</label>
-          </div>
-          <div class="form-check">
-            <input type="radio" id="src-contacts" name="source" value="contacts" class="form-check-input"
-              onchange="toggleSource()">
-            <label for="src-contacts" class="form-check-label tx-13">개별 연락처</label>
-          </div>
+  <div class="card">
+    <div class="card-header pd-y-15 pd-x-20">
+      <h6 class="mg-b-0 tx-semibold">발송 정보</h6>
+    </div>
+    <div class="card-body pd-20 pd-lg-25">
+      <form id="compose-form" action="/compose/send" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+
+        <div class="form-group mg-b-20">
+          <label class="d-block tx-13 tx-semibold mg-b-5" for="caller_id">발신번호</label>
+          {% if not callers %}
+          <select name="caller_id" id="caller_id" class="form-control" disabled>
+            <option value="">— 발신번호 없음 —</option>
+          </select>
+          {% else %}
+          <select name="caller_id" id="caller_id" class="form-control" required>
+            {% for c in callers %}
+            <option value="{{ c.id }}"
+              {% if preserved_caller_id and c.id == preserved_caller_id %}selected
+              {% elif not preserved_caller_id and default_caller and c.id == default_caller.id %}selected{% endif %}>
+              {{ c.label }} ({{ c.number|phone_fmt }})
+            </option>
+            {% endfor %}
+          </select>
+          {% endif %}
         </div>
-        <p class="tx-11 tx-color-03 mg-t-5 mg-b-0">다른 모드로 전환해도 입력 내용은 유지됩니다.</p>
-      </div>
 
-      <!-- 직접 입력 -->
-      <div id="source-manual" class="source-section mg-b-20" {% if preselect_group_id != 0 %}style="display:none"{% endif %}>
-        <div class="form-group mg-b-0">
+        <div class="form-group mg-b-20">
+          <label class="d-block tx-13 tx-semibold mg-b-8">수신자 선택 방식</label>
+          <div class="d-flex flex-wrap" style="gap:16px">
+            <div class="form-check">
+              <input type="radio" id="src-manual" name="source" value="manual" class="form-check-input"
+                {% if preselect_group_id == 0 %}checked{% endif %}
+                onchange="toggleSource()">
+              <label for="src-manual" class="form-check-label tx-13">직접 입력</label>
+            </div>
+            <div class="form-check">
+              <input type="radio" id="src-groups" name="source" value="groups" class="form-check-input"
+                {% if preselect_group_id != 0 %}checked{% endif %}
+                onchange="toggleSource()">
+              <label for="src-groups" class="form-check-label tx-13">그룹 선택</label>
+            </div>
+            <div class="form-check">
+              <input type="radio" id="src-contacts" name="source" value="contacts" class="form-check-input"
+                onchange="toggleSource()">
+              <label for="src-contacts" class="form-check-label tx-13">개별 연락처</label>
+            </div>
+          </div>
+          <p class="tx-11 tx-color-03 mg-t-5 mg-b-0">다른 모드로 전환해도 입력 내용은 유지됩니다.</p>
+        </div>
+
+        <div id="source-manual" class="source-section form-group mg-b-20" {% if preselect_group_id != 0 %}style="display:none"{% endif %}>
           <label class="d-block tx-13 tx-semibold mg-b-5" for="recipients_text">
             수신자 번호 <span class="tx-11 tx-color-03 tx-normal">(한 줄에 한 번호 또는 콤마 구분)</span>
           </label>
@@ -101,11 +105,8 @@
             hx-include="#compose-form"
             hx-swap="innerHTML">{{ recipients_text or "" }}</textarea>
         </div>
-      </div>
 
-      <!-- 그룹 선택 -->
-      <div id="source-groups" class="source-section mg-b-20" {% if preselect_group_id == 0 %}style="display:none"{% endif %}>
-        <div class="form-group mg-b-0">
+        <div id="source-groups" class="source-section form-group mg-b-20" {% if preselect_group_id == 0 %}style="display:none"{% endif %}>
           <label class="d-block tx-13 tx-semibold mg-b-5">그룹 선택</label>
           {% if groups %}
           <div class="bd rounded pd-10" style="max-height:240px;overflow-y:auto">
@@ -121,11 +122,8 @@
           <div class="alert alert-info mg-b-0 tx-13">등록된 그룹이 없습니다. <a href="/groups/new" class="alert-link">새 그룹 만들기</a></div>
           {% endif %}
         </div>
-      </div>
 
-      <!-- 개별 연락처 -->
-      <div id="source-contacts" class="source-section mg-b-20" style="display:none">
-        <div class="form-group mg-b-0">
+        <div id="source-contacts" class="source-section form-group mg-b-20" style="display:none">
           <label class="d-block tx-13 tx-semibold mg-b-5">개별 연락처</label>
           <input type="text" id="contact-filter" class="form-control mg-b-6" placeholder="이름/전화번호 검색..."
             onkeyup="filterContacts(this.value)">
@@ -148,88 +146,82 @@
           <div class="alert alert-info mg-b-0 tx-13">등록된 연락처가 없습니다. <a href="/contacts/new" class="alert-link">연락처 추가</a></div>
           {% endif %}
         </div>
-      </div>
 
-      <!-- 제목 (LMS/MMS 전용) -->
-      <div class="form-group mg-b-20" id="subject-group" style="opacity:0.4">
-        <label class="d-block tx-13 tx-semibold mg-b-5" for="subject-input">제목 <span class="tx-11 tx-color-03 tx-normal">(LMS/MMS 전용)</span></label>
-        <input type="text" name="subject" id="subject-input" class="form-control" maxlength="40"
-          placeholder="LMS/MMS 메시지 제목 (선택)" value="{{ subject or '' }}" disabled>
-        <p class="tx-11 tx-color-03 mg-t-3 mg-b-0">SMS(90 byte 이하)일 때는 비활성됩니다. 90 byte 초과 또는 첨부 시 자동 활성됩니다.</p>
-      </div>
+        <div class="form-group mg-b-20" id="subject-group" style="opacity:0.4">
+          <label class="d-block tx-13 tx-semibold mg-b-5" for="subject-input">제목 <span class="tx-11 tx-color-03 tx-normal">(LMS/MMS 전용)</span></label>
+          <input type="text" name="subject" id="subject-input" class="form-control" maxlength="40"
+            placeholder="LMS/MMS 메시지 제목 (선택)" value="{{ subject or '' }}" disabled>
+          <p class="tx-11 tx-color-03 mg-t-3 mg-b-0">SMS(90 byte 이하)일 때는 비활성됩니다. 90 byte 초과 또는 첨부 시 자동 활성됩니다.</p>
+        </div>
 
-      <!-- MMS 첨부 -->
-      <div class="form-group mg-b-20">
-        <label class="d-block tx-13 tx-semibold mg-b-5" for="attachment-file">
-          첨부 이미지 <span class="tx-11 tx-color-03 tx-normal">(MMS 전용 — 1장, JPG/PNG/GIF, 자동 전처리)</span>
-        </label>
-        <input type="file" id="attachment-file" class="form-control" accept="image/jpeg,image/jpg,image/png,image/gif"
-          onchange="uploadAttachment()">
-        <input type="hidden" name="attachment_id" id="attachment-id" value="0">
-        <p id="attachment-status" class="tx-11 tx-color-03 mg-t-3 mg-b-0"></p>
-        <div id="attachment-preview" class="mg-t-8" style="display:none">
-          <img id="attachment-thumb" src="" alt="첨부 미리보기" class="rounded bd" style="max-width:240px;max-height:180px">
-          <div class="mg-t-5">
-            <button type="button" class="btn btn-white btn-sm pd-x-15" onclick="clearAttachment()">
-              <i data-feather="x" class="wd-12 ht-12 mg-r-3"></i> 첨부 제거
-            </button>
+        <div class="form-group mg-b-20">
+          <label class="d-block tx-13 tx-semibold mg-b-5" for="attachment-file">
+            첨부 이미지 <span class="tx-11 tx-color-03 tx-normal">(MMS 전용 — 1장, JPG/PNG/GIF, 자동 전처리)</span>
+          </label>
+          <input type="file" id="attachment-file" class="form-control" accept="image/jpeg,image/jpg,image/png,image/gif"
+            onchange="uploadAttachment()">
+          <input type="hidden" name="attachment_id" id="attachment-id" value="0">
+          <p id="attachment-status" class="tx-11 tx-color-03 mg-t-3 mg-b-0"></p>
+          <div id="attachment-preview" class="mg-t-8" style="display:none">
+            <img id="attachment-thumb" src="" alt="첨부 미리보기" class="rounded bd" style="max-width:240px;max-height:180px">
+            <div class="mg-t-5">
+              <button type="button" class="btn btn-white btn-sm pd-x-15" onclick="clearAttachment()">
+                <i data-feather="x" class="wd-12 ht-12 mg-r-3"></i> 첨부 제거
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- 본문 -->
-      <div class="form-group mg-b-20">
-        <label class="d-block tx-13 tx-semibold mg-b-5" for="content-textarea">본문</label>
-        <textarea name="content" id="content-textarea" rows="3" class="form-control"
-          style="min-height:80px;resize:none;overflow-y:hidden"
-          placeholder="메시지를 입력하세요 (SMS: 90byte 이하, LMS: 2000byte 이하)"
-          hx-post="/compose/preview"
-          hx-trigger="keyup delay:600ms"
-          hx-target="#preview-result"
-          hx-include="#compose-form"
-          hx-swap="innerHTML">{{ content or "" }}</textarea>
-        <p id="byte-counter" class="tx-12 mg-t-4 mg-b-0 tx-success">0 byte (SMS)</p>
-      </div>
-
-      <!-- 미리보기 -->
-      <div id="preview-result" class="mg-b-15">
-        {% if preview %}
-          {% include "_compose_preview.html" %}
-        {% endif %}
-      </div>
-
-      <!-- 예약 발송 -->
-      <div class="form-group mg-b-20" id="reserve-group">
-        <div class="form-check">
-          <input type="checkbox" id="reserve-enabled" name="reserve_enabled" value="on" class="form-check-input"
-            onchange="toggleReserve()">
-          <label for="reserve-enabled" class="form-check-label tx-13 tx-semibold">예약 발송</label>
+        <div class="form-group mg-b-20">
+          <label class="d-block tx-13 tx-semibold mg-b-5" for="content-textarea">본문</label>
+          <textarea name="content" id="content-textarea" rows="3" class="form-control"
+            style="min-height:80px;resize:none;overflow-y:hidden"
+            placeholder="메시지를 입력하세요 (SMS: 90byte 이하, LMS: 2000byte 이하)"
+            hx-post="/compose/preview"
+            hx-trigger="keyup delay:600ms"
+            hx-target="#preview-result"
+            hx-include="#compose-form"
+            hx-swap="innerHTML">{{ content or "" }}</textarea>
+          <p id="byte-counter" class="tx-12 mg-t-4 mg-b-0 tx-success">0 byte (SMS)</p>
         </div>
-        <div id="reserve-input-wrap" class="mg-t-8" style="display:none">
-          <input type="datetime-local" name="reserve_time" id="reserve-time-input" class="form-control" style="max-width:240px">
-          <input type="hidden" name="reserve_timezone" value="Asia/Seoul">
-          <p class="tx-11 tx-color-03 mg-t-3 mg-b-0">
-            현재 시각 기준 최소 10분 이후로 설정하세요. 타임존은 <strong>Asia/Seoul (KST)</strong>로 고정됩니다.
-          </p>
-        </div>
-      </div>
 
-      <div class="d-flex">
-        {% if callers %}
-        <button type="button" class="btn btn-primary pd-x-20" id="send-btn" onclick="openSendModal()">
-          <i data-feather="send" class="wd-14 ht-14 mg-r-5"></i> 발송하기
-        </button>
-        {% else %}
-        <button type="button" class="btn btn-primary pd-x-20" disabled title="발신번호를 먼저 등록하세요">
-          <i data-feather="send" class="wd-14 ht-14 mg-r-5"></i> 발송하기
-        </button>
-        {% endif %}
-      </div>
-    </form>
+        <div id="preview-result" class="mg-b-20">
+          {% if preview %}
+            {% include "_compose_preview.html" %}
+          {% endif %}
+        </div>
+
+        <div class="form-group mg-b-20" id="reserve-group">
+          <div class="form-check">
+            <input type="checkbox" id="reserve-enabled" name="reserve_enabled" value="on" class="form-check-input"
+              onchange="toggleReserve()">
+            <label for="reserve-enabled" class="form-check-label tx-13 tx-semibold">예약 발송</label>
+          </div>
+          <div id="reserve-input-wrap" class="mg-t-8" style="display:none">
+            <input type="datetime-local" name="reserve_time" id="reserve-time-input" class="form-control" style="max-width:240px">
+            <input type="hidden" name="reserve_timezone" value="Asia/Seoul">
+            <p class="tx-11 tx-color-03 mg-t-3 mg-b-0">
+              현재 시각 기준 최소 10분 이후로 설정하세요. 타임존은 <strong>Asia/Seoul (KST)</strong>로 고정됩니다.
+            </p>
+          </div>
+        </div>
+
+        <div class="d-flex mg-t-10">
+          {% if callers %}
+          <button type="button" class="btn btn-primary pd-x-20" id="send-btn" onclick="openSendModal()">
+            <i data-feather="send" class="wd-14 ht-14 mg-r-5"></i> 발송하기
+          </button>
+          {% else %}
+          <button type="button" class="btn btn-primary pd-x-20" disabled title="발신번호를 먼저 등록하세요">
+            <i data-feather="send" class="wd-14 ht-14 mg-r-5"></i> 발송하기
+          </button>
+          {% endif %}
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 
-<!-- 발송 확인 모달 (Bootstrap 5) -->
 <div class="modal fade" id="send-modal" tabindex="-1" aria-labelledby="send-modal-title" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -261,13 +253,10 @@
     </div>
   </div>
 </div>
-
-</div><!-- container -->
 {% endblock %}
 
 {% block body_extra %}
 <script>
-// 아이콘 리플레이서 (safe DOM)
 function setFeatherIcon(el, iconName, cls) {
   while (el.firstChild) el.removeChild(el.firstChild);
   var i = document.createElement('i');
@@ -276,7 +265,6 @@ function setFeatherIcon(el, iconName, cls) {
   el.appendChild(i);
 }
 
-// ── MMS 첨부 이미지 업로드 ──────────────────────────────────────────────────
 function uploadAttachment() {
   var fileInput = document.getElementById('attachment-file');
   var statusEl = document.getElementById('attachment-status');
@@ -350,7 +338,6 @@ function forceMmsMode(on) {
   updateByteCounter();
 }
 
-// ── 예약 발송 토글 ────────────────────────────────────────
 function toggleReserve() {
   var enabled = document.getElementById('reserve-enabled').checked;
   var wrap = document.getElementById('reserve-input-wrap');
@@ -404,7 +391,6 @@ function filterContacts(query) {
   }
 }
 
-// ── 본문 byte 카운터 ──────────────────────────
 function measureEucKrBytes(text) {
   var bytes = 0;
   for (var i = 0; i < text.length; i++) {
@@ -446,7 +432,6 @@ if (contentTa) {
   updateByteCounter();
 }
 
-// ── 발송 확인 모달 ────────────────────────────────────────
 var _sendModalInst = null;
 function openSendModal() {
   var validEl = document.getElementById('current-valid-count');

@@ -1,16 +1,27 @@
 {% extends "base.html" %}
 {% block title %}그룹 관리 — kotify{% endblock %}
-{% block page_title %}그룹 관리{% endblock %}
-{% block page_actions %}
-  {% if "sender" in user_roles or "admin" in user_roles %}
-  <a href="/groups/new" class="btn btn-primary btn-sm">
-    <i data-feather="plus" class="wd-12 ht-12 mg-r-4"></i> 새 그룹
-  </a>
-  {% endif %}
-{% endblock %}
 
 {% block content %}
 <div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20 mg-lg-b-30">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item active" aria-current="page">그룹</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">그룹 관리</h4>
+    </div>
+    <div class="d-none d-md-block">
+      {% if "sender" in user_roles or "admin" in user_roles %}
+      <a href="/groups/new" class="btn btn-sm pd-x-15 btn-primary btn-uppercase">
+        <i data-feather="plus" class="wd-10 mg-r-5"></i> 새 그룹
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
   {% if request.query_params.get("created") %}
   <div class="alert alert-success mg-b-20" role="alert">그룹이 생성되었습니다.</div>
   {% elif request.query_params.get("deleted") %}
@@ -19,7 +30,7 @@
 
   <div class="card mg-b-20">
     <div class="card-body pd-y-15 pd-x-20">
-      <form id="groups-filter-form" method="get" action="/groups" class="d-flex flex-wrap" style="gap:10px;align-items:flex-end">
+      <form id="groups-filter-form" method="get" action="/groups" class="d-flex flex-wrap align-items-end" style="gap:10px">
         <input type="hidden" name="per_page" value="{{ per_page }}">
         <div class="flex-fill" style="min-width:200px">
           <label class="tx-11 tx-color-03 tx-uppercase tx-spacing-1 d-block mg-b-4" for="grp-search">그룹명 검색</label>
@@ -29,9 +40,9 @@
         <button type="submit" class="btn btn-primary btn-sm">
           <i data-feather="search" class="wd-12 ht-12 mg-r-4"></i> 검색
         </button>
-        <div class="per-page-form mg-l-auto">
-          <label for="groups-per-page">페이지당</label>
-          <select id="groups-per-page" name="per_page" form="groups-filter-form" onchange="this.form.submit()">
+        <div class="d-flex align-items-center mg-l-auto">
+          <label class="tx-12 tx-color-03 mg-b-0 mg-r-5" for="groups-per-page">페이지당</label>
+          <select id="groups-per-page" name="per_page" form="groups-filter-form" class="form-select form-select-sm wd-80" onchange="this.form.submit()">
             <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
             <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
             <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
@@ -63,18 +74,25 @@
         <tbody>
           {% for g in groups %}
           <tr>
-            <td class="pd-l-20 tx-medium"><a href="/groups/{{ g.id }}" class="link-02">{{ g.name }}</a></td>
+            <td class="pd-l-20 tx-medium">
+              <div class="d-flex align-items-center">
+                <div class="avatar avatar-xs mg-r-8">
+                  <span class="avatar-initial rounded-circle bg-indigo tx-10">{{ (g.name[:1] or '?') | upper }}</span>
+                </div>
+                <a href="/groups/{{ g.id }}" class="link-02">{{ g.name }}</a>
+              </div>
+            </td>
             <td class="tx-color-03">{{ g.description or "—" }}</td>
             <td class="text-right tx-monospace">{{ group_sizes.get(g.id, 0) }}명</td>
             <td class="tx-color-03 tx-monospace tx-12">{{ g.created_at[:10] }}</td>
             <td class="pd-r-20">
               <div class="d-flex" style="gap:4px">
                 {% if "sender" in user_roles or "admin" in user_roles %}
-                <a href="/groups/{{ g.id }}/edit" class="btn btn-outline-light btn-xs">편집</a>
+                <a href="/groups/{{ g.id }}/edit" class="btn btn-white btn-xs">편집</a>
                 <a href="/compose?group_id={{ g.id }}" class="btn btn-primary btn-xs">발송</a>
                 {% endif %}
                 {% if "admin" in user_roles %}
-                <form action="/groups/{{ g.id }}/delete" method="post" style="display:inline"
+                <form action="/groups/{{ g.id }}/delete" method="post" class="d-inline"
                       onsubmit="return confirm('삭제하시겠습니까?')">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
                   <button type="submit" class="btn btn-danger btn-xs">삭제</button>
@@ -111,10 +129,10 @@
     {% else %}
     <div class="card-body">
       <div class="tx-center pd-40 tx-color-03">
-        <i data-feather="users"></i>
+        <i data-feather="layers" class="wd-32 ht-32 tx-color-04 mg-b-10"></i>
         {% if search %}
         <p>검색 조건에 맞는 그룹이 없습니다.</p>
-        <a href="/groups" class="btn btn-outline-light btn-sm">검색 초기화</a>
+        <a href="/groups" class="btn btn-white btn-sm">검색 초기화</a>
         {% else %}
         <p>등록된 그룹이 없습니다.</p>
         {% if "sender" in user_roles or "admin" in user_roles %}
@@ -126,7 +144,9 @@
     {% endif %}
   </div>
 </div>
+{% endblock %}
 
+{% block body_extra %}
 <script>
 (function() {
   var inp = document.getElementById('grp-search');

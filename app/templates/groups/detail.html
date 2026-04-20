@@ -1,225 +1,258 @@
 {% extends "base.html" %}
 {% block title %}{{ group.name }} — 그룹 — kotify{% endblock %}
-{% block page_title %}{{ group.name }}{% endblock %}
-{% block page_actions %}
-  {% if "sender" in user_roles or "admin" in user_roles %}
-  <a href="/groups/{{ group.id }}/edit" class="btn btn-secondary btn-sm">
-    <i data-feather="edit-2"></i> 편집
-  </a>
-  <a href="/compose?group_id={{ group.id }}" class="btn btn-primary btn-sm">
-    <i data-feather="send"></i> 이 그룹으로 발송
-  </a>
-  {% endif %}
-  {% if "admin" in user_roles %}
-  <form action="/groups/{{ group.id }}/delete" method="post" style="display:inline"
-    onsubmit="return confirm('그룹을 삭제하시겠습니까?')">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <button type="submit" class="btn btn-danger btn-sm">
-      <i data-feather="trash-2"></i> 삭제
-    </button>
-  </form>
-  {% endif %}
-  <a href="/groups" class="btn btn-secondary btn-sm">목록으로</a>
-{% endblock %}
 
 {% block content %}
-{% if request.query_params.get("created") %}
-<div class="alert alert-success" role="alert">그룹이 생성되었습니다.</div>
-{% elif request.query_params.get("updated") %}
-<div class="alert alert-success" role="alert">그룹이 수정되었습니다.</div>
-{% elif request.query_params.get("bulk_added") is not none %}
-<div class="alert alert-success" role="alert">
-  일괄 추가 완료:
-  기존 연락처 추가 <strong>{{ request.query_params.get("bulk_added") }}명</strong>,
-  신규 생성 <strong>{{ request.query_params.get("bulk_created") }}명</strong>
-  {% if request.query_params.get("bulk_skipped_member") and request.query_params.get("bulk_skipped_member") != "0" %}
-  · 이미 멤버 {{ request.query_params.get("bulk_skipped_member") }}명 스킵
-  {% endif %}
-  {% if request.query_params.get("bulk_skipped_no_contact") and request.query_params.get("bulk_skipped_no_contact") != "0" %}
-  · 주소록에 없어 스킵 {{ request.query_params.get("bulk_skipped_no_contact") }}명
-  {% endif %}
-  {% if request.query_params.get("bulk_invalid") and request.query_params.get("bulk_invalid") != "0" %}
-  · 잘못된 번호 {{ request.query_params.get("bulk_invalid") }}개
-  {% endif %}
-</div>
-{% elif request.query_params.get("added") %}
-<div class="alert alert-success" role="alert">{{ request.query_params.get("added") }}명이 추가되었습니다.</div>
-{% elif request.query_params.get("removed") %}
-<div class="alert alert-success" role="alert">{{ request.query_params.get("removed") }}명이 제거되었습니다.</div>
-{% endif %}
-
-<!-- 그룹 정보 -->
-<div class="card">
-  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">그룹 정보</h6>
-  <div class="table-responsive">
-  <table style="width:auto;min-width:280px">
-    <colgroup>
-      <col style="width: 80px">     <!-- 라벨 -->
-      <col>                          <!-- 값 -->
-    </colgroup>
-    <tbody>
-      <tr><th style="font-weight:600;background:#f8f9fc">그룹명</th><td>{{ group.name }}</td></tr>
-      <tr><th style="font-weight:600;background:#f8f9fc">설명</th><td>{{ group.description or "—" }}</td></tr>
-      <tr><th style="font-weight:600;background:#f8f9fc">멤버 수</th><td class="tx-monospace">{{ member_total }}명</td></tr>
-      <tr><th style="font-weight:600;background:#f8f9fc">생성일</th><td class="tx-monospace text-muted" style="font-size:11px">{{ group.created_at[:10] }}</td></tr>
-    </tbody>
-  </table>
-  </div>
-</div>
-
-<!-- 현재 멤버 목록 -->
-<div class="card" style="padding:0">
-  <div style="padding:10px 16px;border-bottom:1px solid #e1e5ee">
-    <span style="font-size:13px;font-weight:700">멤버 목록 ({{ member_total }}명)</span>
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20 mg-lg-b-30">
+    <div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item"><a href="/groups">그룹</a></li>
+          <li class="breadcrumb-item active" aria-current="page">{{ group.name }}</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">{{ group.name }}</h4>
+    </div>
+    <div class="d-none d-md-block">
+      {% if "sender" in user_roles or "admin" in user_roles %}
+      <a href="/groups/{{ group.id }}/edit" class="btn btn-sm pd-x-15 btn-white btn-uppercase">
+        <i data-feather="edit-2" class="wd-10 mg-r-5"></i> 편집
+      </a>
+      <a href="/compose?group_id={{ group.id }}" class="btn btn-sm pd-x-15 btn-primary btn-uppercase mg-l-5">
+        <i data-feather="send" class="wd-10 mg-r-5"></i> 이 그룹으로 발송
+      </a>
+      {% endif %}
+      {% if "admin" in user_roles %}
+      <form action="/groups/{{ group.id }}/delete" method="post" class="d-inline mg-l-5"
+        onsubmit="return confirm('그룹을 삭제하시겠습니까?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+        <button type="submit" class="btn btn-sm pd-x-15 btn-danger btn-uppercase">
+          <i data-feather="trash-2" class="wd-10 mg-r-5"></i> 삭제
+        </button>
+      </form>
+      {% endif %}
+      <a href="/groups" class="btn btn-sm pd-x-15 btn-white btn-uppercase mg-l-5">
+        <i data-feather="arrow-left" class="wd-10 mg-r-5"></i> 목록
+      </a>
+    </div>
   </div>
 
-  {% if members %}
-  <form action="/groups/{{ group.id }}/members/remove" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div class="table-responsive">
-    <table>
-      <colgroup>
-        {% if "sender" in user_roles or "admin" in user_roles %}
-        <col style="width: 32px">   <!-- 체크박스 -->
-        {% endif %}
-        <col>                        <!-- 이름 -->
-        <col style="width: 130px">  <!-- 전화번호 -->
-        <col>                        <!-- 이메일 -->
-        <col style="width: 100px">  <!-- 부서 -->
-      </colgroup>
-      <thead>
-        <tr>
-          {% if "sender" in user_roles or "admin" in user_roles %}
-          <th style="width:32px">
-            <input type="checkbox" id="check-all" onclick="toggleAll(this)">
-          </th>
-          {% endif %}
-          <th>이름</th>
-          <th>전화번호</th>
-          <th>이메일</th>
-          <th>부서</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for m in members %}
-        <tr>
-          {% if "sender" in user_roles or "admin" in user_roles %}
-          <td><input type="checkbox" name="contact_ids" value="{{ m.id }}"></td>
-          {% endif %}
-          <td><a href="/contacts/{{ m.id }}">{{ m.name }}</a></td>
-          <td class="tx-monospace">{{ m.phone|phone_fmt or "—" }}</td>
-          <td class="text-muted">{{ m.email or "—" }}</td>
-          <td class="text-muted">{{ m.department or "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    {% if "sender" in user_roles or "admin" in user_roles %}
-    <div style="padding:10px 16px;border-top:1px solid #e1e5ee">
-      <button type="submit" class="btn btn-danger btn-sm"
-        onclick="return confirm('선택한 멤버를 제거하시겠습니까?')">
-        <i data-feather="user-minus"></i> 선택 제거
-      </button>
-    </div>
+  {% if request.query_params.get("created") %}
+  <div class="alert alert-success mg-b-20" role="alert">그룹이 생성되었습니다.</div>
+  {% elif request.query_params.get("updated") %}
+  <div class="alert alert-success mg-b-20" role="alert">그룹이 수정되었습니다.</div>
+  {% elif request.query_params.get("bulk_added") is not none %}
+  <div class="alert alert-success mg-b-20" role="alert">
+    일괄 추가 완료:
+    기존 연락처 추가 <strong>{{ request.query_params.get("bulk_added") }}명</strong>,
+    신규 생성 <strong>{{ request.query_params.get("bulk_created") }}명</strong>
+    {% if request.query_params.get("bulk_skipped_member") and request.query_params.get("bulk_skipped_member") != "0" %}
+    · 이미 멤버 {{ request.query_params.get("bulk_skipped_member") }}명 스킵
     {% endif %}
-  </form>
-
-  {% if member_total_pages > 1 %}
-  <div style="padding:10px 16px;border-top:1px solid #e1e5ee">
-    <div class="pagination">
-      {% if page > 1 %}
-      <a href="?page={{ page - 1 }}">이전</a>
-      {% endif %}
-      {% for p in range(1, member_total_pages + 1) %}
-      <a href="?page={{ p }}" {% if p == page %}class="active"{% endif %}>{{ p }}</a>
-      {% endfor %}
-      {% if page < member_total_pages %}
-      <a href="?page={{ page + 1 }}">다음</a>
-      {% endif %}
-    </div>
+    {% if request.query_params.get("bulk_skipped_no_contact") and request.query_params.get("bulk_skipped_no_contact") != "0" %}
+    · 주소록에 없어 스킵 {{ request.query_params.get("bulk_skipped_no_contact") }}명
+    {% endif %}
+    {% if request.query_params.get("bulk_invalid") and request.query_params.get("bulk_invalid") != "0" %}
+    · 잘못된 번호 {{ request.query_params.get("bulk_invalid") }}개
+    {% endif %}
   </div>
+  {% elif request.query_params.get("added") %}
+  <div class="alert alert-success mg-b-20" role="alert">{{ request.query_params.get("added") }}명이 추가되었습니다.</div>
+  {% elif request.query_params.get("removed") %}
+  <div class="alert alert-success mg-b-20" role="alert">{{ request.query_params.get("removed") }}명이 제거되었습니다.</div>
   {% endif %}
 
-  {% else %}
-  <div class="tx-center pd-40 tx-color-03" style="padding:24px">
-    <i data-feather="users"></i>
-    <p>멤버가 없습니다.</p>
-  </div>
-  {% endif %}
-</div>
+  <div class="row row-xs">
+    {# 좌: 그룹 정보 + 액션 #}
+    <div class="col-lg-4">
+      <div class="card">
+        <div class="card-body tx-13">
+          <div class="d-flex align-items-center mg-b-20">
+            <div class="avatar avatar-lg">
+              <span class="avatar-initial rounded-circle bg-indigo tx-normal">{{ (group.name[:1] or '?') | upper }}</span>
+            </div>
+            <div class="mg-l-15">
+              <h5 class="tx-18 mg-b-3">{{ group.name }}</h5>
+              <p class="tx-color-03 mg-b-0">{{ member_total }}명</p>
+            </div>
+          </div>
 
-<!-- 멤버 일괄 추가 (전화번호 paste) -->
-{% if "sender" in user_roles or "admin" in user_roles %}
-<div class="card" style="margin-top:20px">
-  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">전화번호로 일괄 추가</h6>
-  <p class="tx-11 tx-color-03 mg-t-3" style="margin-bottom:8px">
-    줄바꿈, 콤마, 세미콜론으로 구분해서 한 번에 여러 명 추가할 수 있습니다.
-    형식 자동 변환: <code>010-1234-5678</code>, <code>01012345678</code>, <code>+82-10-1234-5678</code>
-  </p>
-  <form action="/groups/{{ group.id }}/members/bulk-add" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div class="form-group">
-      <textarea name="phones_text" rows="6"
-        placeholder="010-1234-5678&#10;010-9999-8888&#10;010-1111-2222"
-        style="font-family:'JetBrains Mono','SF Mono',monospace;font-size:12px"></textarea>
-    </div>
-    <div class="form-group">
-      <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
-        <input type="checkbox" name="auto_create" value="1" checked>
-        주소록에 없는 번호는 자동으로 새 연락처 생성
-      </label>
-      <div class="tx-11 tx-color-03 mg-t-3">
-        체크 해제 시: 주소록에 없는 번호는 무시됩니다.<br>
-        체크 시: 새 연락처가 자동 생성되며 이름은 전화번호로 임시 저장됩니다 (나중에 수정 가능).
-      </div>
-    </div>
-    <button type="submit" class="btn btn-primary btn-sm">
-      <i data-feather="users"></i> 일괄 추가
-    </button>
-  </form>
-</div>
-{% endif %}
+          <hr class="mg-y-15">
 
-<!-- 멤버 추가 (H3: checkbox-list 패턴) -->
-{% if "sender" in user_roles or "admin" in user_roles %}
-<div class="card" style="margin-top:20px">
-  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">기존 연락처에서 선택</h6>
-  <div style="margin-bottom:8px">
-    <input type="text" id="contact-search" placeholder="이름/전화번호/이메일 검색..."
-      onkeyup="filterContactsAdd(this.value)"
-      class="ctrl" style="width:100%;max-width:320px">
-  </div>
-  <form action="/groups/{{ group.id }}/members/add" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-    <div class="form-group">
-      {% set addable = all_contacts | selectattr('id', 'not in', member_ids) | list %}
-      {% if addable %}
-      <div class="bd rounded pd-10" id="add-contact-list" style="max-height:280px;overflow-y:auto">
-        {% for c in addable %}
-        <div class="form-check mg-b-4 contact-add-item"
-          data-search="{{ (c.name or '')|lower }} {{ (c.phone or '')|lower }} {{ (c.department or '')|lower }}">
-          <input type="checkbox" id="add-ctc-{{ c.id }}" name="contact_ids" value="{{ c.id }}" class="form-check-input">
-          <label for="add-ctc-{{ c.id }}" class="form-check-label tx-13">{{ c.name }}
-            <span class="tx-color-03 tx-12">{{ c.phone|phone_fmt or "" }}{% if c.department %} · {{ c.department }}{% endif %}</span>
-          </label>
+          <label class="tx-10 tx-medium tx-spacing-1 tx-color-03 tx-uppercase tx-sans mg-b-10">설명</label>
+          <p class="mg-b-15">{{ group.description or "—" }}</p>
+
+          <label class="tx-10 tx-medium tx-spacing-1 tx-color-03 tx-uppercase tx-sans mg-b-10">생성일</label>
+          <p class="tx-monospace tx-color-02 mg-b-0">{{ group.created_at[:10] }}</p>
         </div>
-        {% endfor %}
       </div>
-      <div class="tx-11 tx-color-03 mg-t-3" style="margin-top:4px">검색으로 필터링 후 체크. 여러 명 선택 가능.</div>
-      {% else %}
-      <div class="alert alert-info">추가 가능한 연락처가 없습니다.</div>
+    </div>
+
+    {# 우: 멤버 관리 #}
+    <div class="col-lg-8 mg-t-10 mg-lg-t-0">
+      <div class="card">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <h6 class="mg-b-0 tx-semibold">멤버 목록</h6>
+          <span class="tx-12 tx-color-03">총 {{ member_total }}명</span>
+        </div>
+
+        {% if members %}
+        <form action="/groups/{{ group.id }}/members/remove" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+          <div class="table-responsive">
+            <table class="table table-hover mg-b-0 tx-13">
+              <thead class="tx-uppercase tx-11 tx-spacing-1 tx-color-03">
+                <tr>
+                  {% if "sender" in user_roles or "admin" in user_roles %}
+                  <th class="pd-l-20" style="width:32px">
+                    <input type="checkbox" id="check-all" class="form-check-input mg-b-0" onclick="toggleAll(this)">
+                  </th>
+                  {% endif %}
+                  <th {% if not ("sender" in user_roles or "admin" in user_roles) %}class="pd-l-20"{% endif %}>이름</th>
+                  <th>전화번호</th>
+                  <th>이메일</th>
+                  <th class="pd-r-20">부서</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in members %}
+                <tr>
+                  {% if "sender" in user_roles or "admin" in user_roles %}
+                  <td class="pd-l-20"><input type="checkbox" name="contact_ids" value="{{ m.id }}" class="form-check-input mg-b-0"></td>
+                  {% endif %}
+                  <td {% if not ("sender" in user_roles or "admin" in user_roles) %}class="pd-l-20"{% endif %}>
+                    <a href="/contacts/{{ m.id }}" class="link-02">{{ m.name }}</a>
+                  </td>
+                  <td class="tx-monospace">{{ m.phone|phone_fmt or "—" }}</td>
+                  <td class="tx-color-03">{{ m.email or "—" }}</td>
+                  <td class="pd-r-20 tx-color-03">{{ m.department or "—" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if "sender" in user_roles or "admin" in user_roles %}
+          <div class="card-footer">
+            <button type="submit" class="btn btn-danger btn-sm"
+              onclick="return confirm('선택한 멤버를 제거하시겠습니까?')">
+              <i data-feather="user-minus" class="wd-12 ht-12 mg-r-4"></i> 선택 제거
+            </button>
+          </div>
+          {% endif %}
+        </form>
+
+        {% if member_total_pages > 1 %}
+        <div class="card-footer d-flex justify-content-center">
+          <nav>
+            <ul class="pagination mg-b-0">
+              {% if page > 1 %}
+              <li class="page-item"><a class="page-link" href="?page={{ page - 1 }}">이전</a></li>
+              {% endif %}
+              {% for p in range(1, member_total_pages + 1) %}
+              <li class="page-item {% if p == page %}active{% endif %}">
+                <a class="page-link" href="?page={{ p }}">{{ p }}</a>
+              </li>
+              {% endfor %}
+              {% if page < member_total_pages %}
+              <li class="page-item"><a class="page-link" href="?page={{ page + 1 }}">다음</a></li>
+              {% endif %}
+            </ul>
+          </nav>
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="card-body">
+          <div class="tx-center pd-40 tx-color-03">
+            <i data-feather="users" class="wd-32 ht-32 tx-color-04 mg-b-10"></i>
+            <p class="mg-b-0">멤버가 없습니다.</p>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      {# 멤버 일괄 추가 #}
+      {% if "sender" in user_roles or "admin" in user_roles %}
+      <div class="card mg-t-10">
+        <div class="card-header">
+          <h6 class="mg-b-0 tx-semibold">전화번호로 일괄 추가</h6>
+        </div>
+        <div class="card-body">
+          <p class="tx-12 tx-color-03 mg-b-15">
+            줄바꿈, 콤마, 세미콜론으로 구분해서 한 번에 여러 명 추가할 수 있습니다.
+            형식 자동 변환: <code>010-1234-5678</code>, <code>01012345678</code>, <code>+82-10-1234-5678</code>
+          </p>
+          <form action="/groups/{{ group.id }}/members/bulk-add" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+            <div class="form-group">
+              <textarea class="form-control tx-monospace" name="phones_text" rows="6"
+                placeholder="010-1234-5678&#10;010-9999-8888&#10;010-1111-2222"></textarea>
+            </div>
+            <div class="form-group">
+              <div class="form-check">
+                <input type="checkbox" class="form-check-input" name="auto_create" id="auto_create" value="1" checked>
+                <label class="form-check-label" for="auto_create">
+                  주소록에 없는 번호는 자동으로 새 연락처 생성
+                </label>
+              </div>
+              <small class="tx-11 tx-color-03 d-block mg-t-5">
+                체크 해제 시: 주소록에 없는 번호는 무시됩니다.
+                체크 시: 새 연락처가 자동 생성되며 이름은 전화번호로 임시 저장됩니다 (나중에 수정 가능).
+              </small>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">
+              <i data-feather="users" class="wd-12 ht-12 mg-r-4"></i> 일괄 추가
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {# 기존 연락처에서 선택 #}
+      <div class="card mg-t-10">
+        <div class="card-header">
+          <h6 class="mg-b-0 tx-semibold">기존 연락처에서 선택</h6>
+        </div>
+        <div class="card-body">
+          {% set addable = all_contacts | selectattr('id', 'not in', member_ids) | list %}
+          <form action="/groups/{{ group.id }}/members/add" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+            <div class="form-group">
+              <input type="text" class="form-control mg-b-10" id="contact-search"
+                placeholder="이름/전화번호/부서 검색..."
+                onkeyup="filterContactsAdd(this.value)">
+              {% if addable %}
+              <div class="bd rounded pd-10" id="add-contact-list" style="max-height:280px;overflow-y:auto">
+                {% for c in addable %}
+                <div class="form-check mg-b-4 contact-add-item"
+                  data-search="{{ (c.name or '')|lower }} {{ (c.phone or '')|lower }} {{ (c.department or '')|lower }}">
+                  <input type="checkbox" id="add-ctc-{{ c.id }}" name="contact_ids" value="{{ c.id }}" class="form-check-input">
+                  <label for="add-ctc-{{ c.id }}" class="form-check-label tx-13">{{ c.name }}
+                    <span class="tx-color-03 tx-12">{{ c.phone|phone_fmt or "" }}{% if c.department %} · {{ c.department }}{% endif %}</span>
+                  </label>
+                </div>
+                {% endfor %}
+              </div>
+              <small class="tx-11 tx-color-03 d-block mg-t-5">검색으로 필터링 후 체크. 여러 명 선택 가능.</small>
+              {% else %}
+              <div class="alert alert-info mg-b-0">추가 가능한 연락처가 없습니다.</div>
+              {% endif %}
+            </div>
+            {% if addable %}
+            <button type="submit" class="btn btn-primary btn-sm">
+              <i data-feather="user-plus" class="wd-12 ht-12 mg-r-4"></i> 선택 추가
+            </button>
+            {% endif %}
+          </form>
+        </div>
+      </div>
       {% endif %}
     </div>
-    {% if addable %}
-    <button type="submit" class="btn btn-primary btn-sm">
-      <i data-feather="user-plus"></i> 선택 추가
-    </button>
-    {% endif %}
-  </form>
+  </div>
 </div>
-{% endif %}
+{% endblock %}
 
+{% block body_extra %}
 <script>
 function toggleAll(cb) {
   document.querySelectorAll('input[name="contact_ids"]').forEach(function(el) {

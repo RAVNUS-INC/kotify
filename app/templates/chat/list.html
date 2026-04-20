@@ -1,21 +1,29 @@
 {% extends "base.html" %}
 {% block title %}대화방 — kotify{% endblock %}
-{% block page_title %}대화방{% endblock %}
+
+{% block vendor_css_extra %}
+<link rel="stylesheet" href="/static/css/dashforge.chat.css">
+{% endblock %}
 
 {% block content %}
 <div class="chat-wrapper chat-wrapper-two">
-  <div class="chat-sidebar" style="width:100%;border-right:0">
+
+  <div class="chat-sidebar" style="left:0;right:0">
+
     <div class="chat-sidebar-header">
       <div class="d-flex align-items-center">
-        <i data-feather="message-square" class="wd-18 ht-18 tx-color-03 mg-r-10"></i>
-        <span class="tx-color-01 tx-semibold">총 {{ total }}개 스레드</span>
+        <div class="avatar avatar-sm mg-r-8"><span class="avatar-initial rounded-circle bg-primary"><i data-feather="message-square" class="wd-14 ht-14"></i></span></div>
+        <span class="tx-color-01 tx-semibold">RCS 대화방</span>
       </div>
-      <span class="tx-12 tx-color-03">RCS 양방향 · 미답 뱃지</span>
-    </div>
+      <span class="tx-12 tx-color-03">총 {{ total }}개 스레드</span>
+    </div><!-- chat-sidebar-header -->
 
     <div class="chat-sidebar-body">
       <div class="flex-fill pd-y-20 pd-x-10">
-        <span class="tx-10 tx-uppercase tx-medium tx-color-03 tx-sans tx-spacing-1 pd-l-10 d-block mg-b-10">Direct Messages</span>
+        <div class="d-flex align-items-center justify-content-between pd-x-10 mg-b-10">
+          <span class="tx-10 tx-uppercase tx-medium tx-color-03 tx-sans tx-spacing-1">Direct Messages</span>
+          <span class="tx-10 tx-color-04">RCS 양방향 · 미답 뱃지</span>
+        </div>
 
         {% if threads %}
         <div class="chat-msg-list">
@@ -28,7 +36,7 @@
             </div>
             <div class="media-body mg-l-10">
               <h6 class="mg-b-0">{{ t.phone | phone_fmt }}</h6>
-              <small class="d-block tx-color-04 tx-11">
+              <small class="d-block tx-color-04">
                 {% if t.last_direction == 'OUT' %}▶{% else %}◀{% endif %}
                 {{ (t.last_body or '(빈 메시지)') | truncate(32) }}
               </small>
@@ -39,9 +47,9 @@
             {% if t.unanswered %}
             <span class="badge text-bg-danger">미답</span>
             {% endif %}
-          </a>
+          </a><!-- media -->
           {% endfor %}
-        </div>
+        </div><!-- chat-msg-list -->
         {% else %}
         <div class="text-center pd-40">
           <i data-feather="message-square" class="wd-48 ht-48 tx-color-04 op-5 mg-b-10"></i>
@@ -50,7 +58,7 @@
         </div>
         {% endif %}
       </div>
-    </div>
+    </div><!-- chat-sidebar-body -->
 
     {% if total_pages > 1 %}
     <div class="chat-sidebar-footer" style="justify-content:center">
@@ -61,8 +69,10 @@
       {% if page < total_pages %}
       <a href="?page={{ page + 1 }}&per_page={{ per_page }}" class="btn btn-outline-light btn-xs">다음</a>
       {% endif %}
-    </div>
+    </div><!-- chat-sidebar-footer -->
     {% endif %}
-  </div>
-</div>
+
+  </div><!-- chat-sidebar -->
+
+</div><!-- chat-wrapper -->
 {% endblock %}

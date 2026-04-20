@@ -1,156 +1,170 @@
 {% extends "base.html" %}
 {% block title %}캠페인 #{{ campaign.id }} — kotify{% endblock %}
-{% block page_title %}캠페인 #{{ campaign.id }}{% endblock %}
-{% block page_actions %}
-  {% if campaign.state == "RESERVED" and ("sender" in user_roles or "admin" in user_roles) %}
-  <button type="button" class="btn btn-secondary btn-sm"
-    hx-post="/campaigns/{{ campaign.id }}/cancel-reservation"
-    hx-headers='{"x-csrf-token": "{{ csrf_token(request) }}"}'
-    hx-confirm="예약을 취소하시겠습니까? 취소 후에는 되돌릴 수 없습니다."
-    hx-target="#cancel-result"
-    hx-swap="innerHTML">
-    <i data-feather="x-circle"></i> 예약 취소
-  </button>
-  {% endif %}
-  {% if campaign.fail_count > 0 and ("sender" in user_roles or "admin" in user_roles) %}
-  <a href="/compose?resend_campaign={{ campaign.id }}&status=fail" class="btn btn-secondary btn-sm">
-    <i data-feather="refresh-cw"></i> 실패 수신자 재발송
-  </a>
-  {% endif %}
-  <a href="/campaigns" class="btn btn-secondary btn-sm">
-    <i data-feather="arrow-left"></i> 목록
-  </a>
-{% endblock %}
 
 {% block content %}
-<!-- 기본 정보 -->
-<div class="card">
-  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">기본 정보</h6>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+<div class="container pd-x-0 pd-lg-x-10 pd-xl-x-0">
+  <div class="d-sm-flex align-items-center justify-content-between mg-b-20">
     <div>
-      <div class="text-muted" style="margin-bottom:2px">발신번호</div>
-      <div class="tx-monospace" style="font-size:14px;font-weight:600">{{ campaign.caller_number|phone_fmt }}</div>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb breadcrumb-style1 mg-b-10">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item"><a href="/campaigns">발송 이력</a></li>
+          <li class="breadcrumb-item active" aria-current="page">#{{ campaign.id }}</li>
+        </ol>
+      </nav>
+      <h4 class="mg-b-0 tx-spacing--1">캠페인 #{{ campaign.id }}</h4>
     </div>
-    <div>
-      <div class="text-muted" style="margin-bottom:2px">유형</div>
-      <div>
-        {% if campaign.message_type == "SMS" %}<span class="badge bg-success tx-white">단문</span>
-        {% elif campaign.message_type == "MMS" %}<span class="badge bg-warning tx-white">이미지</span>
-        {% else %}<span class="badge bg-info tx-white">장문</span>{% endif %}
+    <div class="d-none d-md-block">
+      {% if campaign.state == "RESERVED" and ("sender" in user_roles or "admin" in user_roles) %}
+      <button type="button" class="btn btn-sm pd-x-15 btn-white btn-uppercase"
+        hx-post="/campaigns/{{ campaign.id }}/cancel-reservation"
+        hx-headers='{"x-csrf-token": "{{ csrf_token(request) }}"}'
+        hx-confirm="예약을 취소하시겠습니까? 취소 후에는 되돌릴 수 없습니다."
+        hx-target="#cancel-result"
+        hx-swap="innerHTML">
+        <i data-feather="x-circle" class="wd-10 mg-r-5"></i> 예약 취소
+      </button>
+      {% endif %}
+      {% if campaign.fail_count > 0 and ("sender" in user_roles or "admin" in user_roles) %}
+      <a href="/compose?resend_campaign={{ campaign.id }}&status=fail" class="btn btn-sm pd-x-15 btn-white btn-uppercase mg-l-5">
+        <i data-feather="refresh-cw" class="wd-10 mg-r-5"></i> 실패 재발송
+      </a>
+      {% endif %}
+      <a href="/campaigns" class="btn btn-sm pd-x-15 btn-white btn-uppercase mg-l-5">
+        <i data-feather="arrow-left" class="wd-10 mg-r-5"></i> 목록
+      </a>
+    </div>
+  </div>
+
+  <div class="row row-xs">
+    <div class="col-lg-8">
+      <div class="card mg-b-10">
+        <div class="card-header pd-y-15 pd-x-20">
+          <h6 class="mg-b-0 tx-semibold">기본 정보</h6>
+        </div>
+        <div class="card-body pd-20">
+          <div class="row row-xs">
+            <div class="col-sm-6 col-md-4 mg-b-15">
+              <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">발신번호</h6>
+              <p class="tx-14 tx-semibold tx-monospace mg-b-0">{{ campaign.caller_number|phone_fmt }}</p>
+            </div>
+            <div class="col-sm-6 col-md-4 mg-b-15">
+              <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">유형</h6>
+              <div>
+                {% if campaign.message_type == "SMS" %}<span class="badge bg-success tx-white">단문</span>
+                {% elif campaign.message_type == "MMS" %}<span class="badge bg-warning tx-white">이미지</span>
+                {% else %}<span class="badge bg-info tx-white">장문</span>{% endif %}
+              </div>
+            </div>
+            <div class="col-sm-6 col-md-4 mg-b-15">
+              <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">상태</h6>
+              <div>
+                {% if campaign.state == "COMPLETED" %}<span class="badge bg-success tx-white">완료</span>
+                {% elif campaign.state == "FAILED" %}<span class="badge bg-danger tx-white">실패</span>
+                {% elif campaign.state == "PARTIAL_FAILED" %}<span class="badge bg-warning tx-white">부분 실패</span>
+                {% elif campaign.state == "DISPATCHED" %}<span class="badge bg-info tx-white">발송됨</span>
+                {% elif campaign.state == "DISPATCHING" %}<span class="badge bg-warning tx-white">발송 중</span>
+                {% elif campaign.state == "RESERVED" %}<span class="badge bg-warning tx-white">예약됨</span>
+                {% elif campaign.state == "RESERVE_CANCELED" %}<span class="badge bg-secondary tx-white">예약 취소됨</span>
+                {% elif campaign.state == "RESERVE_FAILED" %}<span class="badge bg-danger tx-white">예약 실패</span>
+                {% else %}<span class="badge">{{ campaign.state }}</span>{% endif %}
+              </div>
+            </div>
+            <div class="col-sm-6 col-md-4 mg-b-15">
+              <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">발송 시각 (KST)</h6>
+              <p class="tx-13 tx-monospace mg-b-0">{{ campaign.created_at|kst_dt }}</p>
+            </div>
+            <div class="col-sm-6 col-md-4 mg-b-15">
+              <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">완료 시각 (KST)</h6>
+              <p class="tx-13 tx-monospace mg-b-0">{{ campaign.completed_at|kst_dt if campaign.completed_at else "—" }}</p>
+            </div>
+            {% if campaign.reserve_time %}
+            <div class="col-sm-6 col-md-4 mg-b-15">
+              <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">예약 시각 ({{ campaign.reserve_timezone or "Asia/Seoul" }})</h6>
+              <p class="tx-14 tx-semibold tx-monospace mg-b-0">{{ campaign.reserve_time }}</p>
+            </div>
+            {% endif %}
+          </div>
+
+          {% if campaign.total_cost > 0 %}
+          <div class="bd-t pd-t-15 mg-t-5">
+            <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">발송 비용</h6>
+            <h3 class="tx-rubik tx-spacing--1 mg-b-5">{{ "{:,}".format(campaign.total_cost) }}원</h3>
+            <div class="tx-11 tx-color-03 lh-5">
+              {% if campaign.rcs_count > 0 %}RCS {{ campaign.rcs_count }}건<br>{% endif %}
+              {% if campaign.fallback_count > 0 %}Fallback {{ campaign.fallback_count }}건 (SMS/LMS/MMS)<br>{% endif %}
+              {% if campaign.fail_count > 0 %}실패 {{ campaign.fail_count }}건 = 과금 제외{% endif %}
+            </div>
+          </div>
+          {% endif %}
+
+          <div id="cancel-result" class="mg-t-10"></div>
+        </div>
+      </div>
+
+      <div class="card mg-b-10">
+        <div class="card-header pd-y-15 pd-x-20">
+          <h6 class="mg-b-0 tx-semibold">메시지</h6>
+        </div>
+        <div class="card-body pd-20">
+          {% if campaign.subject %}
+          <div class="mg-b-10">
+            <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">제목</h6>
+            <p class="tx-13 tx-semibold mg-b-0">{{ campaign.subject }}</p>
+          </div>
+          <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-5">본문</h6>
+          {% endif %}
+          <pre class="tx-13 bg-light bd rounded pd-15 mg-b-0" style="white-space:pre-wrap;font-family:inherit">{{ campaign.content }}</pre>
+
+          {% if campaign.message_type == "MMS" and campaign.attachments %}
+          {% set att = campaign.attachments[0] %}
+          <div class="mg-t-15">
+            <h6 class="tx-uppercase tx-spacing-1 tx-semibold tx-10 tx-color-03 mg-b-8">첨부 이미지</h6>
+            <a href="/campaigns/{{ campaign.id }}/attachment/{{ att.id }}" target="_blank" class="d-inline-block">
+              <img src="/campaigns/{{ campaign.id }}/attachment/{{ att.id }}"
+                alt="{{ att.original_filename }}"
+                class="bd rounded" style="max-width:300px;max-height:240px">
+            </a>
+            <p class="tx-11 tx-color-03 mg-t-5 mg-b-0">
+              {{ att.original_filename }} · {{ att.width }}×{{ att.height }} · {{ (att.file_size_bytes / 1024) | round(0, 'floor') | int }}KB
+            </p>
+          </div>
+          {% endif %}
+        </div>
       </div>
     </div>
-    <div>
-      <div class="text-muted" style="margin-bottom:2px">발송 시각 (KST)</div>
-      <div class="tx-monospace">{{ campaign.created_at|kst_dt }}</div>
-    </div>
-    <div>
-      <div class="text-muted" style="margin-bottom:2px">완료 시각 (KST)</div>
-      <div class="tx-monospace">{{ campaign.completed_at|kst_dt if campaign.completed_at else "—" }}</div>
-    </div>
-    {% if campaign.reserve_time %}
-    <div>
-      <div class="text-muted" style="margin-bottom:2px">예약 시각 ({{ campaign.reserve_timezone or "Asia/Seoul" }})</div>
-      <div class="tx-monospace" style="font-size:14px;font-weight:600">{{ campaign.reserve_time }}</div>
-    </div>
-    {% endif %}
-    <div>
-      <div class="text-muted" style="margin-bottom:2px">상태</div>
-      <div>
-        {% if campaign.state == "COMPLETED" %}<span class="badge bg-success tx-white">완료</span>
-        {% elif campaign.state == "FAILED" %}<span class="badge bg-danger tx-white">실패</span>
-        {% elif campaign.state == "PARTIAL_FAILED" %}<span class="badge bg-warning tx-white">부분 실패</span>
-        {% elif campaign.state == "DISPATCHED" %}<span class="badge bg-info tx-white">발송됨</span>
-        {% elif campaign.state == "DISPATCHING" %}<span class="badge bg-warning tx-white">발송 중</span>
-        {% elif campaign.state == "RESERVED" %}<span class="badge bg-warning tx-white">예약됨</span>
-        {% elif campaign.state == "RESERVE_CANCELED" %}<span class="badge">예약 취소됨</span>
-        {% elif campaign.state == "RESERVE_FAILED" %}<span class="badge bg-danger tx-white">예약 실패</span>
-        {% else %}<span class="badge">{{ campaign.state }}</span>{% endif %}
-      </div>
-    </div>
-  </div>
-  {% if campaign.total_cost > 0 %}
-  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e1e5ee">
-    <div class="text-muted" style="margin-bottom:6px;font-size:12px;font-weight:600">발송 비용</div>
-    <div style="font-size:18px;font-weight:700">{{ "{:,}".format(campaign.total_cost) }}원</div>
-    <div style="margin-top:6px;font-size:11px;color:#596882;line-height:1.8">
-      {% if campaign.rcs_count > 0 %}
-      RCS {{ campaign.rcs_count }}건<br>
-      {% endif %}
-      {% if campaign.fallback_count > 0 %}
-      Fallback {{ campaign.fallback_count }}건 (SMS/LMS/MMS)<br>
-      {% endif %}
-      {% if campaign.fail_count > 0 %}
-      실패 {{ campaign.fail_count }}건 = 과금 제외
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
-  <!-- 예약 취소 결과 영역 (HTMX 응답) -->
-  <div id="cancel-result" style="margin-top:10px"></div>
-</div>
 
-<!-- 메시지 -->
-<div class="card">
-  <h6 class="tx-semibold tx-13 pd-15 pd-b-0 mg-b-10">메시지</h6>
-  {% if campaign.subject %}
-  <div style="margin-bottom:8px">
-    <div class="text-muted" style="font-size:11px;margin-bottom:2px">제목</div>
-    <div style="font-size:13px;font-weight:600">{{ campaign.subject }}</div>
-  </div>
-  {% endif %}
-  <div>
-    {% if campaign.subject %}
-    <div class="text-muted" style="font-size:11px;margin-bottom:2px">본문</div>
-    {% endif %}
-    <pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;background:#f8f9fc;padding:10px;border-radius:3px;border:1px solid #e1e5ee;margin:0">{{ campaign.content }}</pre>
-  </div>
-  {% if campaign.message_type == "MMS" and campaign.attachments %}
-  {% set att = campaign.attachments[0] %}
-  <div style="margin-top:10px">
-    <div class="text-muted" style="font-size:11px;margin-bottom:4px">첨부 이미지</div>
-    <a href="/campaigns/{{ campaign.id }}/attachment/{{ att.id }}" target="_blank">
-      <img src="/campaigns/{{ campaign.id }}/attachment/{{ att.id }}"
-        alt="{{ att.original_filename }}"
-        style="max-width:300px;max-height:240px;border:1px solid #e1e5ee;border-radius:3px">
-    </a>
-    <div class="text-muted" style="font-size:11px;margin-top:4px">
-      {{ att.original_filename }} · {{ att.width }}×{{ att.height }} · {{ (att.file_size_bytes / 1024) | round(0, 'floor') | int }}KB
+    <div class="col-lg-4 mg-t-10 mg-lg-t-0">
+      {% include "campaigns/_progress.html" %}
     </div>
   </div>
-  {% endif %}
-</div>
 
-<!-- 진행 현황 (HTMX fragment) -->
-{% include "campaigns/_progress.html" %}
-
-<!-- 수신자 결과 (H14: 첫 로드는 SSR, HTMX는 폴링에만) -->
-<div class="card" style="padding:0">
-  <div style="padding:10px 16px;border-bottom:1px solid #e1e5ee">
-    <span style="font-size:13px;font-weight:700">수신자 결과</span>
-  </div>
-  <div id="recipients-table"
-    {% if campaign.state in ('DISPATCHING', 'DISPATCHED', 'PARTIAL_FAILED', 'RESERVED') %}
-    hx-get="/campaigns/{{ campaign.id }}/recipients"
-    hx-trigger="every 5s"
-    hx-swap="innerHTML"
-    {% endif %}>
-    {% set messages = first_page_messages %}
-    {% set total_count = total_recipients %}
-    {% set page = 1 %}
-    {% set status_filter = "" %}
-    {% set user_roles = user_roles %}
-    {% include "campaigns/_recipients.html" %}
+  <div class="card mg-t-10">
+    <div class="card-header pd-y-15 pd-x-20">
+      <h6 class="mg-b-0 tx-semibold">수신자 결과</h6>
+    </div>
+    <div id="recipients-table"
+      {% if campaign.state in ('DISPATCHING', 'DISPATCHED', 'PARTIAL_FAILED', 'RESERVED') %}
+      hx-get="/campaigns/{{ campaign.id }}/recipients"
+      hx-trigger="every 5s"
+      hx-swap="innerHTML"
+      {% endif %}>
+      {% set messages = first_page_messages %}
+      {% set total_count = total_recipients %}
+      {% set page = 1 %}
+      {% set status_filter = "" %}
+      {% set user_roles = user_roles %}
+      {% include "campaigns/_recipients.html" %}
+    </div>
   </div>
 </div>
 
 <script>
-// C3: 진행 중 캠페인 — title 동적 갱신 (% 포함)
 {% if campaign.state in ('DISPATCHING', 'DISPATCHED') %}
 (function() {
   var baseTitle = document.title;
   function updateTitle() {
-    var doneEl = document.querySelector('#progress-card .stat-value, #progress-card span[style*="font-size:18px"]');
-    var pctEl = document.querySelector('#progress-card .text-muted');
+    var pctEl = document.querySelector('#progress-card .progress-pct');
     if (pctEl) {
       var pct = pctEl.textContent.trim();
       document.title = '[' + pct + '] ' + baseTitle;
