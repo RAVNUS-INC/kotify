@@ -237,6 +237,55 @@ class WebhookReport:
 
 
 @dataclass
+class MoItem:
+    """RCS 양방향 MO (고객 답장 + 자동응답 과금) 항목."""
+
+    mo_key: str
+    mo_number: str               # 고객 번호
+    mo_callback: str = ""        # 수신 챗봇(우리) 번호
+    mo_type: str = ""            # SMSMO / RCSMO 등
+    product_code: str = ""       # 과금 상품코드
+    mo_title: str | None = None
+    mo_msg: str | None = None
+    telco: str = ""
+    content_cnt: int = 0
+    content_info_lst: list[dict] | None = None
+    mo_recv_dt: str = ""
+
+    @staticmethod
+    def from_dict(d: dict) -> MoItem:
+        return MoItem(
+            mo_key=d.get("moKey", ""),
+            mo_number=d.get("moNumber", ""),
+            mo_callback=d.get("moCallback", ""),
+            mo_type=d.get("moType", ""),
+            product_code=d.get("productCode", ""),
+            mo_title=d.get("moTitle"),
+            mo_msg=d.get("moMsg"),
+            telco=d.get("telco", ""),
+            content_cnt=d.get("contentCnt", 0) or 0,
+            content_info_lst=d.get("contentInfoLst"),
+            mo_recv_dt=d.get("moRecvDt", ""),
+        )
+
+
+@dataclass
+class MoWebhookPayload:
+    """MO 웹훅 페이로드."""
+
+    mo_cnt: int
+    items: list[MoItem] = field(default_factory=list)
+
+    @staticmethod
+    def from_dict(data: dict) -> MoWebhookPayload:
+        items = [MoItem.from_dict(d) for d in data.get("moLst") or []]
+        return MoWebhookPayload(
+            mo_cnt=data.get("moCnt", 0),
+            items=items,
+        )
+
+
+@dataclass
 class SentQueryItem:
     """cliKey 기반 개별 조회 결과."""
 

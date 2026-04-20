@@ -289,3 +289,38 @@ class Attachment(Base):
         Index("idx_attachments_campaign_id", "campaign_id"),
         Index("idx_attachments_uploaded_by", "uploaded_by"),
     )
+
+
+class MoMessage(Base):
+    """RCS 양방향 수신 메시지 (MO) — 고객이 챗봇으로 보낸 답장 및 과금 데이터."""
+
+    __tablename__ = "mo_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # msghub가 발급한 MO 고유 키 (멱등성 보장)
+    mo_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # 답장을 보낸 고객 번호
+    mo_number: Mapped[str] = mapped_column(Text, nullable=False)
+    # 수신 챗봇(우리) 번호
+    mo_callback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # SMSMO / RCSMO 등
+    mo_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 과금 상품코드
+    product_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mo_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mo_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telco: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_cnt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # JSON: 첨부/부가 콘텐츠 정보
+    content_info_lst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # msghub가 기록한 수신 일시
+    mo_recv_dt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 원본 페이로드 전체 (감사/스키마 변경 대응)
+    raw_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    # 우리 서버가 수신한 일시
+    received_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("idx_mo_messages_mo_number", "mo_number"),
+        Index("idx_mo_messages_received_at", "received_at"),
+    )

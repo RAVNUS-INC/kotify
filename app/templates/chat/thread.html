@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ phone | phone_fmt }} — 대화방 — kotify{% endblock %}
+{% block page_title %}{{ phone | phone_fmt }}{% endblock %}
+{% block page_actions %}
+  <a href="/chat" class="btn btn-secondary btn-sm">
+    <i data-lucide="arrow-left"></i> 대화방 목록
+  </a>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:640px;margin:0 auto">
+
+  <div class="card" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <div style="font-weight:600">{{ phone | phone_fmt }}</div>
+      <div style="font-size:12px;color:var(--text-muted)">발신번호 {{ caller | phone_fmt }}</div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted)">{{ messages | length }}개 메시지</div>
+  </div>
+
+  <div id="messages" style="padding:16px 0;display:flex;flex-direction:column;gap:6px">
+    {% for m in messages %}
+      <div style="display:flex;{% if m.direction == 'OUT' %}justify-content:flex-end{% else %}justify-content:flex-start{% endif %}">
+        <div style="max-width:75%;padding:9px 14px;{% if m.direction == 'OUT' %}background:#3b82f6;color:white;border-radius:14px 14px 2px 14px{% else %}background:#f3f4f6;color:#111;border-radius:14px 14px 14px 2px{% endif %}">
+          <div style="white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.45">{{ m.body or '(빈 메시지)' }}</div>
+          <div style="font-size:10px;opacity:0.78;margin-top:4px;display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">
+            {% if m.direction == 'OUT' %}
+              {% if m.channel %}<span>{{ m.channel }}</span>{% endif %}
+              {% if m.cost is not none and m.cost > 0 %}<span>· {{ m.cost }}원</span>{% endif %}
+              {% if m.status and m.status not in ('DONE',) %}<span>· {{ m.status }}</span>{% endif %}
+            {% else %}
+              {% if m.telco %}<span>{{ m.telco }}</span>{% endif %}
+              {% if m.product_code %}<span>· {{ m.product_code }}</span>{% endif %}
+            {% endif %}
+            <span>{{ m.timestamp | kst_dt }}</span>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  {# 답장 폼 #}
+  <div class="card" style="padding:12px;position:sticky;bottom:0;background:var(--surface)">
+    <form method="post" action="/chat/{{ caller }}/{{ phone }}/reply">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+      {% if error %}
+      <div style="color:#b91c1c;background:#fef2f2;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:13px">
+        {{ error }}
+      </div>
+      {% endif %}
+      <textarea name="content" id="reply-content" rows="3"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box"
+                placeholder="답장 입력 (90바이트 이내 단문 — RCS 양방향 CHAT 8원, 미지원 시 SMS 자동 전환 9원)"
+                maxlength="500">{{ draft or '' }}</textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
+        <span id="reply-bytes" style="font-size:11px;color:var(--text-muted)">0 byte</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:11px;color:var(--text-muted)">Ctrl+Enter 전송</span>
+          <button type="submit" class="btn btn-primary btn-sm">
+            <i data-lucide="send"></i> 답장 전송
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function() {
+  const ta = document.getElementById('reply-content');
+  const out = document.getElementById('reply-bytes');
+  if (!ta || !out) return;
+
+  function measureBytes(s) {
+    let n = 0;
+    for (const ch of s) {
+      n += (ch.charCodeAt(0) > 0x7f) ? 2 : 1;
+    }
+    return n;
+  }
+
+  function update() {
+    const n = measureBytes(ta.value);
+    out.textContent = n + ' byte' + (n > 90 ? ' (90byte 초과 — 답장 불가)' : '');
+    out.style.color = n > 90 ? '#dc2626' : 'var(--text-muted)';
+  }
+
+  ta.addEventListener('input', update);
+  ta.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'Enter') { ta.form.submit(); }
+  });
+  update();
+  // 가장 최근 메시지가 보이도록 스크롤
+  window.scrollTo(0, document.body.scrollHeight);
+})();
+</script>
+{% endblock %}
