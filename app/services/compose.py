@@ -142,14 +142,30 @@ def _build_fallback(
     subject: str | None,
     mms_file_id: str | None,
 ) -> list[FbInfo]:
-    """RCS fallback 정보 생성."""
+    """RCS fallback 정보 생성.
+
+    msghub의 fbInfoLst.ch는 "SMS" 또는 "MMS"만 허용한다. 각 채널의
+    msg 길이 제한이 엄격하게 검증되므로 content 바이트 수에 따라 분기:
+    - 이미지: MMS (파일 포함) — title/body 허용
+    - 장문(90B 초과): MMS (파일 없음, LMS 대용으로 동작) — title 필수
+    - 단문(90B 이하): SMS — title 불가
+
+    주의: migration-spec의 "90B 초과 SMS msg는 msghub가 LMS 자동 처리"
+    가정은 실제와 다름. 실제로는 "메시지 길이 초과" 에러 발생.
+    """
     if msg_type == "image":
-        fb = FbInfo(ch="MMS", msg=content, title=subject or "")
+        fb = FbInfo(ch="MMS", msg=content, title=subject or "알림")
         if mms_file_id:
             fb.file_id_lst = [mms_file_id]
         return [fb]
-    # short/long → SMS fallback (90B 초과 시 msghub가 자동 LMS 처리)
-    return [FbInfo(ch="SMS", msg=content)]
+
+    if measure_bytes(content) <= 90:
+        return [FbInfo(ch="SMS", msg=content)]
+
+    # 장문: MMS 채널로 title+body 전송 (파일 없음 = LMS 동작)
+    # title 없으면 content 앞부분에서 추출하거나 기본값 사용
+    fallback_title = subject or (content[:20].strip() or "알림")
+    return [FbInfo(ch="MMS", msg=content, title=fallback_title)]
 
 
 def _build_merge_data(
