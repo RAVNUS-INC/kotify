@@ -1,57 +1,42 @@
-{# 사이드바 메뉴 — base.html의 <nav class="sidebar-nav"> 안에 include됨 #}
-<a href="/" class="nav-item {% if request.url.path == '/' %}active{% endif %}">
-  <i data-lucide="home"></i>
-  <span class="nav-label">대시보드</span>
-</a>
+{# 사이드바 메뉴 — base.html의 <ul class="nav nav-aside"> 안에 include됨 #}
+<li class="nav-label">주요</li>
+<li class="nav-item {% if request.url.path == '/' %}active{% endif %}">
+  <a href="/" class="nav-link"><i data-lucide="home"></i> <span>대시보드</span></a>
+</li>
 
 {% if "sender" in user_roles or "admin" in user_roles %}
-<a href="/compose" class="nav-item {% if request.url.path == '/compose' %}active{% endif %}">
-  <i data-lucide="send"></i>
-  <span class="nav-label">새 발송</span>
-</a>
+<li class="nav-item {% if request.url.path == '/compose' %}active{% endif %}">
+  <a href="/compose" class="nav-link"><i data-lucide="send"></i> <span>새 발송</span></a>
+</li>
 {% endif %}
 
-<a href="/campaigns" class="nav-item {% if request.url.path.startswith('/campaigns') %}active{% endif %}">
-  <i data-lucide="history"></i>
-  <span class="nav-label">발송 이력</span>
-</a>
+<li class="nav-item {% if request.url.path.startswith('/campaigns') %}active{% endif %}">
+  <a href="/campaigns" class="nav-link"><i data-lucide="history"></i> <span>발송 이력</span></a>
+</li>
 
 {% if "sender" in user_roles or "admin" in user_roles %}
-<a href="/chat" class="nav-item {% if request.url.path.startswith('/chat') %}active{% endif %}">
-  <i data-lucide="message-circle"></i>
-  <span class="nav-label">대화방</span>
-</a>
+<li class="nav-item {% if request.url.path.startswith('/chat') %}active{% endif %}">
+  <a href="/chat" class="nav-link"><i data-lucide="message-circle"></i> <span>대화방</span></a>
+</li>
 {% endif %}
 
-<div class="nav-separator"></div>
-<div class="nav-group-label">수신자 관리</div>
-
-<a href="/contacts" class="nav-item {% if request.url.path.startswith('/contacts') %}active{% endif %}">
-  <i data-lucide="users-round"></i>
-  <span class="nav-label">주소록</span>
-</a>
-
-<a href="/groups" class="nav-item {% if request.url.path.startswith('/groups') %}active{% endif %}">
-  <i data-lucide="users"></i>
-  <span class="nav-label">그룹</span>
-</a>
-
-<a href="/admin/callers" class="nav-item {% if request.url.path == '/admin/callers' %}active{% endif %}">
-  <i data-lucide="phone"></i>
-  <span class="nav-label">발신번호</span>
-</a>
+<li class="nav-label">수신자 관리</li>
+<li class="nav-item {% if request.url.path.startswith('/contacts') %}active{% endif %}">
+  <a href="/contacts" class="nav-link"><i data-lucide="users-round"></i> <span>주소록</span></a>
+</li>
+<li class="nav-item {% if request.url.path.startswith('/groups') %}active{% endif %}">
+  <a href="/groups" class="nav-link"><i data-lucide="users"></i> <span>그룹</span></a>
+</li>
+<li class="nav-item {% if request.url.path == '/admin/callers' %}active{% endif %}">
+  <a href="/admin/callers" class="nav-link"><i data-lucide="phone"></i> <span>발신번호</span></a>
+</li>
 
 {% if "admin" in user_roles %}
-<div class="nav-separator"></div>
-<div class="nav-group-label">시스템</div>
-
-<a href="/admin/settings" class="nav-item {% if request.url.path == '/admin/settings' %}active{% endif %}">
-  <i data-lucide="settings"></i>
-  <span class="nav-label">시스템 설정</span>
-</a>
-
-<a href="/admin/audit" class="nav-item {% if request.url.path == '/admin/audit' %}active{% endif %}">
-  <i data-lucide="shield-check"></i>
-  <span class="nav-label">감사 로그</span>
-</a>
+<li class="nav-label">시스템</li>
+<li class="nav-item {% if request.url.path == '/admin/settings' %}active{% endif %}">
+  <a href="/admin/settings" class="nav-link"><i data-lucide="settings"></i> <span>시스템 설정</span></a>
+</li>
+<li class="nav-item {% if request.url.path == '/admin/audit' %}active{% endif %}">
+  <a href="/admin/audit" class="nav-link"><i data-lucide="shield-check"></i> <span>감사 로그</span></a>
+</li>
 {% endif %}

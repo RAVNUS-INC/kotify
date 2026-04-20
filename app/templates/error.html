@@ -5,113 +5,92 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>오류 {{ status_code }} — kotify</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <link rel="stylesheet" href="/static/lib/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/static/css/skin.mono.css">
   <style>
-    :root {
-      --primary: #18181b;
-      --error:   #dc2626;
-      --border:  #e4e4e7;
-      --text:    #09090b;
-      --text-muted: #a1a1aa;
-    }
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    /* 오류 페이지 전용 중앙 정렬 레이아웃 (1280px 고정폭 off) */
     body {
-      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
-      background: #f5f5f5;
-      color: var(--text);
+      width: 100% !important;
+      min-width: 0 !important;
+      background: var(--mono-100) !important;
       display: flex;
       justify-content: center;
       align-items: flex-start;
-      min-height: 100vh;
       padding: 3rem 1rem;
     }
     .error-box {
-      background: #fff;
-      border: 1px solid var(--border);
-      border-radius: 6px;
+      background: var(--mono-0);
+      border: 1px solid var(--mono-300);
       width: 100%;
       max-width: 560px;
-      padding: 2.5rem;
+      padding: 32px;
       text-align: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,.08);
     }
-    .error-code { font-size: 3.5rem; font-weight: 700; color: var(--error); margin-bottom: 0.4rem; }
-    .error-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; }
-    .btn {
-      display: inline-block; padding: 0.45rem 1.1rem; border-radius: 4px;
-      border: 1px solid transparent; cursor: pointer; font-size: 13px;
-      text-decoration: none; font-family: inherit;
+    .error-code {
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 52px;
+      font-weight: 700;
+      color: var(--mono-950);
+      letter-spacing: -0.03em;
+      line-height: 1;
+      margin-bottom: 8px;
     }
-    .btn-primary   { background: var(--primary); color: #fff; }
-    .btn-primary:hover { background: #000; }
-    .btn-secondary { background: #fff; color: var(--text); border-color: #ccc; }
-    .btn-secondary:hover { background: #f5f5f5; }
-    .actions { display: flex; gap: 8px; justify-content: center; margin-top: 1rem; }
+    .error-code.is-error { color: var(--state-error); }
+    .error-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--mono-950);
+      margin-bottom: 10px;
+    }
+    .error-body { font-size: 12px; color: var(--mono-600); margin-bottom: 18px; }
+    .error-meta { font-size: 11px; color: var(--mono-500); margin-top: 6px; }
+    .actions { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
   </style>
 </head>
 <body>
 <div class="error-box">
-  <div class="error-code">{{ status_code }}</div>
+  <div class="error-code {% if status_code >= 500 or status_code == 403 %}is-error{% endif %}">{{ status_code }}</div>
 
   {% if status_code == 403 %}
   <div class="error-title">접근 권한이 없습니다</div>
-  <p style="color:#555;font-size:13px;margin-bottom:1rem">
-    이 페이지에 접근할 권한이 없습니다.
-  </p>
+  <p class="error-body">이 페이지에 접근할 권한이 없습니다.</p>
   {% if user_roles is defined and user_roles %}
-  <p style="color:#888;font-size:12px;margin-bottom:0.5rem">
-    현재 권한: <strong>{{ user_roles | join(", ") }}</strong>
-  </p>
+  <p class="error-meta">현재 권한: <strong>{{ user_roles | join(", ") }}</strong></p>
   {% endif %}
   {% if first_admin_email is defined and first_admin_email %}
-  <p style="color:#888;font-size:12px;margin-bottom:1.5rem">
-    권한 부여 요청: <a href="mailto:{{ first_admin_email }}" style="color:#555">{{ first_admin_email }}</a>
-  </p>
+  <p class="error-meta">권한 부여 요청: <a href="mailto:{{ first_admin_email }}">{{ first_admin_email }}</a></p>
   {% else %}
-  <p style="color:#888;font-size:12px;margin-bottom:1.5rem">
-    관리자에게 권한 부여를 요청하세요.
-  </p>
+  <p class="error-meta">관리자에게 권한 부여를 요청하세요.</p>
   {% endif %}
 
   {% elif status_code == 404 %}
   <div class="error-title">페이지를 찾을 수 없습니다</div>
-  <p style="color:#555;font-size:13px;margin-bottom:1.5rem">
-    요청하신 페이지가 존재하지 않습니다.
-  </p>
+  <p class="error-body">요청하신 페이지가 존재하지 않습니다.</p>
 
   {% elif status_code == 501 %}
   <div class="error-title">아직 구현되지 않은 기능입니다</div>
-  <p style="color:#555;font-size:13px;margin-bottom:1.5rem">
-    요청하신 기능이 아직 준비되지 않았습니다. 관리자에게 문의하세요.
-  </p>
+  <p class="error-body">요청하신 기능이 아직 준비되지 않았습니다. 관리자에게 문의하세요.</p>
 
   {% elif status_code == 503 %}
   <div class="error-title">서비스를 일시적으로 사용할 수 없습니다</div>
-  <p style="color:#555;font-size:13px;margin-bottom:1.5rem">
-    발송 서비스에 오류가 발생했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.
-  </p>
+  <p class="error-body">발송 서비스에 오류가 발생했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.</p>
 
   {% elif status_code == 422 %}
   <div class="error-title">입력 값을 확인하세요</div>
-  <p style="color:#555;font-size:13px;margin-bottom:1.5rem">
-    입력한 내용에 오류가 있습니다. 다시 확인하고 시도하세요.
-  </p>
+  <p class="error-body">입력한 내용에 오류가 있습니다. 다시 확인하고 시도하세요.</p>
 
   {% elif status_code >= 500 %}
   <div class="error-title">서버 오류가 발생했습니다</div>
-  <p style="color:#555;font-size:13px;margin-bottom:1.5rem">
-    일시적인 오류입니다. 잠시 후 다시 시도해주세요.
-  </p>
+  <p class="error-body">일시적인 오류입니다. 잠시 후 다시 시도해주세요.</p>
 
   {% else %}
   <div class="error-title">오류가 발생했습니다</div>
-  <p style="color:#555;font-size:13px;margin-bottom:1.5rem">
-    요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요.
-  </p>
+  <p class="error-body">요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요.</p>
   {% endif %}
 
   <div class="actions">
-    <a href="/" class="btn btn-primary">대시보드로</a>
-    <a href="javascript:history.back()" class="btn btn-secondary">뒤로 가기</a>
+    <a href="/" class="btn btn-primary btn-sm">대시보드로</a>
+    <a href="javascript:history.back()" class="btn btn-secondary btn-sm">뒤로 가기</a>
   </div>
 </div>
 </body>

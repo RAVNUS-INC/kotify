@@ -3,201 +3,247 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>초기 설정 — SMS 발송 시스템</title>
+  <title>초기 설정 — kotify</title>
   <meta name="csrf-token" content="{{ csrf_token(request) }}">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <link rel="stylesheet" href="/static/lib/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/static/css/skin.mono.css">
   <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #222; font-size: 14px; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 2rem 1rem; }
-    .setup-box { background: #fff; border: 1px solid #ddd; border-radius: 8px; width: 100%; max-width: 600px; padding: 2rem; }
-    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    .subtitle { color: #666; font-size: 13px; margin-bottom: 2rem; }
-    .section { margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #eee; }
-    .section:last-of-type { border-bottom: none; }
-    .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; color: #1a1a2e; }
-    .form-group { margin-bottom: 0.85rem; }
-    .form-group label { display: block; font-weight: 600; margin-bottom: 0.3rem; font-size: 13px; color: #333; }
-    .form-group input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
-    .form-group input:focus { outline: 2px solid #18181b; border-color: #18181b; }
-    .form-hint { font-size: 12px; color: #888; margin-top: 0.2rem; }
-    .token-box { background: #f8f8f8; border: 1px solid #ddd; border-radius: 4px; padding: 0.75rem; font-family: monospace; font-size: 13px; word-break: break-all; margin-bottom: 1rem; }
-    .token-note { font-size: 12px; color: #666; margin-bottom: 1rem; }
-    .btn-row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem; }
-    .btn { display: inline-block; padding: 0.5rem 1.25rem; border-radius: 4px; border: 1px solid transparent; cursor: pointer; font-size: 14px; font-family: inherit; }
-    .btn-primary { background: #18181b; color: #fff; }
-    .btn-primary:hover { background: #000; }
-    .btn-secondary { background: #fff; color: #333; border-color: #ccc; }
-    .btn-secondary:hover { background: #f0f0f0; }
-    .ok { color: #166534; font-weight: 600; }
-    .err { color: #991b1b; font-weight: 600; }
-    .warn { color: #713f12; font-weight: 600; }
-    .alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; padding: 0.75rem; border-radius: 4px; margin-bottom: 1rem; }
-    .htmx-indicator { display: none; }
-    .htmx-request .htmx-indicator { display: inline; }
+    /* setup 전용 — 1280px 고정폭 off, 중앙 정렬 */
+    body {
+      width: 100% !important;
+      min-width: 0 !important;
+      background: var(--mono-100) !important;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 40px 16px;
+    }
+    .setup-box {
+      width: 100%;
+      max-width: 640px;
+      background: var(--mono-0);
+      border: 1px solid var(--mono-300);
+    }
+    .setup-header {
+      padding: 20px 28px 16px;
+      border-bottom: 1px solid var(--mono-200);
+    }
+    .setup-title { font-size: 18px; font-weight: 700; color: var(--mono-950); letter-spacing: -0.01em; margin: 0 0 4px; }
+    .setup-subtitle { font-size: 12px; color: var(--mono-500); margin: 0; }
+    .setup-body { padding: 20px 28px 28px; }
+    .stepper {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--mono-400);
+      margin-bottom: 20px;
+      padding: 6px 10px;
+      background: var(--mono-50);
+      border: 1px solid var(--mono-200);
+    }
+    .stepper-step { padding: 2px 4px; }
+    .stepper-step.is-current { color: var(--mono-950); font-weight: 700; background: var(--mono-100); }
+    .stepper-sep { color: var(--mono-300); padding: 0 2px; }
+    .setup-section {
+      margin-bottom: 18px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--mono-200);
+    }
+    .setup-section:last-of-type { border-bottom: none; padding-bottom: 0; }
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--mono-950);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+    .section-num {
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: var(--mono-500);
+      background: var(--mono-100);
+      padding: 1px 5px;
+      border: 1px solid var(--mono-200);
+    }
+    .token-cmd-row { display: flex; gap: 6px; align-items: stretch; margin-bottom: 6px; }
+    .token-cmd-box {
+      flex: 1;
+      background: var(--mono-50);
+      border: 1px solid var(--mono-200);
+      padding: 8px 10px;
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: var(--mono-950);
+      word-break: break-all;
+    }
+    .token-note { font-size: 11px; color: var(--mono-600); margin-bottom: 10px; line-height: 1.55; }
+    .radio-row { display: flex; gap: 16px; margin-top: 4px; }
+    .radio-row label { font-weight: 400 !important; font-size: 12px !important; color: var(--mono-950) !important; display: inline-flex; align-items: center; gap: 4px; margin: 0 !important; }
+    .radio-row input[type="radio"] { accent-color: var(--mono-950); }
+    .test-result { margin-top: 8px; font-size: 12px; }
   </style>
 </head>
 <body>
 <div class="setup-box">
-  <h1>초기 설정</h1>
-  <p class="subtitle">SMS 발송 시스템 최초 설정 마법사입니다. 아래 정보를 입력하고 설정을 완료하세요.</p>
+  <div class="setup-header">
+    <h1 class="setup-title">초기 설정</h1>
+    <p class="setup-subtitle">kotify 최초 설정 마법사입니다. 아래 정보를 입력하고 설정을 완료하세요.</p>
+  </div>
+  <div class="setup-body">
 
-  {% if error %}
-  <div class="alert-error">오류: {{ error }}</div>
-  {% endif %}
+    {% if error %}
+    <div class="alert alert-danger">오류: {{ error }}</div>
+    {% endif %}
 
-  <form action="/setup/complete" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
-
-    <!-- M15: stepper -->
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:1.5rem;font-size:12px;flex-wrap:wrap">
-      <span style="font-weight:700;color:#18181b">1 토큰</span>
-      <span style="color:#ccc">→</span>
-      <span style="color:#999">2 Keycloak</span>
-      <span style="color:#ccc">→</span>
-      <span style="color:#999">3 msghub</span>
-      <span style="color:#ccc">→</span>
-      <span style="color:#999">4 RCS</span>
-      <span style="color:#ccc">→</span>
-      <span style="color:#999">5 관리자</span>
-      <span style="color:#ccc">→</span>
-      <span style="color:#999">6 완료</span>
+    <div class="stepper">
+      <span class="stepper-step is-current">1 토큰</span>
+      <span class="stepper-sep">›</span>
+      <span class="stepper-step">2 Keycloak</span>
+      <span class="stepper-sep">›</span>
+      <span class="stepper-step">3 msghub</span>
+      <span class="stepper-sep">›</span>
+      <span class="stepper-step">4 RCS</span>
+      <span class="stepper-sep">›</span>
+      <span class="stepper-step">5 관리자</span>
+      <span class="stepper-sep">›</span>
+      <span class="stepper-step">6 완료</span>
     </div>
 
-    <!-- Step 1: 토큰 확인 -->
-    <div class="section">
-      <div class="section-title">1단계: 관리자 토큰 확인</div>
-      <p class="token-note">
-        <strong>보안상 토큰은 화면에 표시되지 않습니다.</strong><br>
-        서버 콘솔(SSH 또는 서버에 직접 접속)에서 다음 명령으로 토큰을 확인한 뒤 아래에 입력하세요:
-      </p>
-      <div style="position:relative;display:flex;align-items:center;gap:8px;margin-bottom:1rem">
-        <div class="token-box" style="flex:1;margin:0"><code id="token-cmd">cat {{ setup_token_path }}</code></div>
-        <button type="button" onclick="copyTokenCmd()" style="padding:0.4rem 0.75rem;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;white-space:nowrap" title="명령어 복사">복사</button>
-      </div>
-      <p class="form-hint">서버 콘솔에서 실행 → 출력된 32자 hex 문자열을 복사 → 아래 입력란에 붙여넣기</p>
-      <div class="form-group" style="margin-top:0.75rem">
-        <label for="field-token">Setup Token</label>
-        <input type="text" id="field-token" name="token" placeholder="setup token 붙여넣기"
-               autocomplete="off" required enterkeyhint="next"
-               onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('verify-token-btn').click();}">
-      </div>
-      <div class="btn-row">
-        <button type="button" id="verify-token-btn" class="btn btn-secondary"
-                hx-post="/setup/verify-token"
-                hx-target="#token-result"
-                hx-swap="innerHTML"
-                hx-include="#field-token"
-                hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>토큰 확인
-          <span class="htmx-indicator">...</span>
-        </button>
-      </div>
-      <div id="token-result" style="margin-top:0.5rem"></div>
-    </div>
+    <form action="/setup/complete" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
 
-    <!-- Step 2: Keycloak 설정 -->
-    <div class="section">
-      <div class="section-title">2단계: Keycloak 설정</div>
-      <div class="form-group">
-        <label for="field-keycloak-issuer">Issuer URL</label>
-        <input type="text" id="field-keycloak-issuer" name="keycloak_issuer"
-               placeholder="https://keycloak.example.com/realms/sms-sys" required enterkeyhint="next">
-        <div class="form-hint">예: https://keycloak.example.com/realms/kotify</div>
+      <!-- Step 1: 토큰 확인 -->
+      <div class="setup-section">
+        <div class="section-title"><span class="section-num">01</span> 관리자 토큰 확인</div>
+        <p class="token-note">
+          <strong>보안상 토큰은 화면에 표시되지 않습니다.</strong>
+          서버 콘솔(SSH 또는 서버 직접 접속)에서 다음 명령으로 토큰을 확인한 뒤 아래에 입력하세요.
+        </p>
+        <div class="token-cmd-row">
+          <div class="token-cmd-box"><code id="token-cmd">cat {{ setup_token_path }}</code></div>
+          <button type="button" onclick="copyTokenCmd(event)" class="btn btn-secondary btn-sm" title="명령어 복사">복사</button>
+        </div>
+        <p class="form-hint">서버 콘솔에서 실행 → 출력된 32자 hex 문자열을 복사 → 아래 입력란에 붙여넣기</p>
+        <div class="form-group" style="margin-top:10px">
+          <label for="field-token">Setup Token</label>
+          <input type="text" id="field-token" name="token" placeholder="setup token 붙여넣기"
+                 autocomplete="off" required enterkeyhint="next"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('verify-token-btn').click();}">
+        </div>
+        <div class="flex" style="margin-top:6px">
+          <button type="button" id="verify-token-btn" class="btn btn-secondary btn-sm"
+                  hx-post="/setup/verify-token"
+                  hx-target="#token-result"
+                  hx-swap="innerHTML"
+                  hx-include="#field-token"
+                  hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>
+            토큰 확인 <span class="htmx-indicator">…</span>
+          </button>
+        </div>
+        <div id="token-result" class="test-result"></div>
       </div>
-      <div class="form-group">
-        <label for="field-keycloak-client-id">Client ID</label>
-        <input type="text" id="field-keycloak-client-id" name="keycloak_client_id" value="sms-sys" required enterkeyhint="next">
-      </div>
-      <div class="form-group">
-        <label for="field-keycloak-client-secret">Client Secret</label>
-        <input type="password" id="field-keycloak-client-secret" name="keycloak_client_secret" required enterkeyhint="next">
-      </div>
-      <div class="btn-row">
-        <button type="button" class="btn btn-secondary"
-                hx-post="/setup/test-keycloak"
-                hx-target="#kc-test-result"
-                hx-swap="innerHTML"
-                hx-include="#field-keycloak-issuer"
-                hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>연결 테스트
-          <span class="htmx-indicator">...</span>
-        </button>
-      </div>
-      <div id="kc-test-result" style="margin-top:0.5rem"></div>
-    </div>
 
-    <!-- Step 3: msghub 설정 -->
-    <div class="section">
-      <div class="section-title">3단계: msghub 설정</div>
-      <div class="form-group">
-        <label for="field-msghub-api-key">API Key</label>
-        <input type="text" id="field-msghub-api-key" name="msghub_api_key"
-               placeholder="msghub API Key" required>
+      <!-- Step 2: Keycloak -->
+      <div class="setup-section">
+        <div class="section-title"><span class="section-num">02</span> Keycloak 설정</div>
+        <div class="form-group">
+          <label for="field-keycloak-issuer">Issuer URL</label>
+          <input type="text" id="field-keycloak-issuer" name="keycloak_issuer"
+                 placeholder="https://keycloak.example.com/realms/sms-sys" required enterkeyhint="next">
+          <div class="form-hint">예: https://keycloak.example.com/realms/kotify</div>
+        </div>
+        <div class="form-group">
+          <label for="field-keycloak-client-id">Client ID</label>
+          <input type="text" id="field-keycloak-client-id" name="keycloak_client_id" value="sms-sys" required enterkeyhint="next">
+        </div>
+        <div class="form-group">
+          <label for="field-keycloak-client-secret">Client Secret</label>
+          <input type="password" id="field-keycloak-client-secret" name="keycloak_client_secret" required enterkeyhint="next">
+        </div>
+        <div class="flex">
+          <button type="button" class="btn btn-secondary btn-sm"
+                  hx-post="/setup/test-keycloak"
+                  hx-target="#kc-test-result"
+                  hx-swap="innerHTML"
+                  hx-include="#field-keycloak-issuer"
+                  hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>
+            연결 테스트 <span class="htmx-indicator">…</span>
+          </button>
+        </div>
+        <div id="kc-test-result" class="test-result"></div>
       </div>
-      <div class="form-group">
-        <label for="field-msghub-api-pwd">API Password</label>
-        <input type="password" id="field-msghub-api-pwd" name="msghub_api_pwd"
-               placeholder="msghub API Password" required>
+
+      <!-- Step 3: msghub -->
+      <div class="setup-section">
+        <div class="section-title"><span class="section-num">03</span> msghub 설정</div>
+        <div class="form-group">
+          <label for="field-msghub-api-key">API Key</label>
+          <input type="text" id="field-msghub-api-key" name="msghub_api_key" placeholder="msghub API Key" required>
+        </div>
+        <div class="form-group">
+          <label for="field-msghub-api-pwd">API Password</label>
+          <input type="password" id="field-msghub-api-pwd" name="msghub_api_pwd" placeholder="msghub API Password" required>
+        </div>
+        <div class="form-group">
+          <label>환경</label>
+          <div class="radio-row">
+            <label><input type="radio" name="msghub_env" value="production" checked> 상용</label>
+            <label><input type="radio" name="msghub_env" value="qa"> QA</label>
+          </div>
+        </div>
+        <div class="flex">
+          <button type="button" class="btn btn-secondary btn-sm"
+                  hx-post="/setup/test-msghub"
+                  hx-target="#msghub-test-result"
+                  hx-swap="innerHTML"
+                  hx-include="#field-msghub-api-key, #field-msghub-api-pwd"
+                  hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>
+            인증 테스트 <span class="htmx-indicator">…</span>
+          </button>
+        </div>
+        <div id="msghub-test-result" class="test-result"></div>
       </div>
-      <div class="form-group">
-        <label for="field-msghub-env">환경</label>
-        <div style="display:flex;gap:16px;margin-top:4px">
-          <label style="font-weight:400;font-size:13px">
-            <input type="radio" name="msghub_env" value="production" checked> 상용
-          </label>
-          <label style="font-weight:400;font-size:13px">
-            <input type="radio" name="msghub_env" value="qa"> QA
-          </label>
+
+      <!-- Step 4: RCS -->
+      <div class="setup-section">
+        <div class="section-title"><span class="section-num">04</span> RCS 설정</div>
+        <div class="form-group">
+          <label for="field-msghub-brand-id">브랜드 ID</label>
+          <input type="text" id="field-msghub-brand-id" name="msghub_brand_id" placeholder="RCS 브랜드 ID">
+        </div>
+        <div class="form-group">
+          <label for="field-msghub-chatbot-id">챗봇 ID</label>
+          <input type="text" id="field-msghub-chatbot-id" name="msghub_chatbot_id" placeholder="양방향 발신번호와 동일">
+          <div class="form-hint">양방향 발신번호와 동일합니다.</div>
         </div>
       </div>
-      <div class="btn-row">
-        <button type="button" class="btn btn-secondary"
-                hx-post="/setup/test-msghub"
-                hx-target="#msghub-test-result"
-                hx-swap="innerHTML"
-                hx-include="#field-msghub-api-key, #field-msghub-api-pwd"
-                hx-vals='{"csrf_token": "{{ csrf_token(request) }}"}'>인증 테스트
-          <span class="htmx-indicator">...</span>
-        </button>
-      </div>
-      <div id="msghub-test-result" style="margin-top:0.5rem"></div>
-    </div>
 
-    <!-- Step 4: RCS 설정 -->
-    <div class="section">
-      <div class="section-title">4단계: RCS 설정</div>
-      <div class="form-group">
-        <label for="field-msghub-brand-id">브랜드 ID</label>
-        <input type="text" id="field-msghub-brand-id" name="msghub_brand_id"
-               placeholder="RCS 브랜드 ID">
+      <!-- Step 5: 첫 관리자 -->
+      <div class="setup-section">
+        <div class="section-title"><span class="section-num">05</span> 첫 관리자 + 공개 URL</div>
+        <div class="form-group">
+          <label for="field-first-admin-email">첫 관리자 이메일</label>
+          <input type="email" id="field-first-admin-email" name="first_admin_email" required>
+          <div class="form-hint">Keycloak 계정 이메일과 정확히 일치해야 합니다. 이 이메일로 로그인한 사용자에게 자동으로 admin 권한이 부여됩니다.</div>
+        </div>
+        <div class="form-group">
+          <label for="field-app-public-url">공개 URL</label>
+          <input type="url" id="field-app-public-url" name="app_public_url" value="https://sms.example.com" required>
+        </div>
       </div>
-      <div class="form-group">
-        <label for="field-msghub-chatbot-id">챗봇 ID</label>
-        <input type="text" id="field-msghub-chatbot-id" name="msghub_chatbot_id"
-               placeholder="양방향 발신번호와 동일합니다">
-        <div class="form-hint">양방향 발신번호와 동일합니다.</div>
-      </div>
-    </div>
 
-    <!-- Step 5: 첫 관리자 + 공개 URL -->
-    <div class="section">
-      <div class="section-title">5단계: 첫 관리자 + 공개 URL</div>
-      <div class="form-group">
-        <label for="field-first-admin-email">첫 관리자 이메일</label>
-        <input type="email" id="field-first-admin-email" name="first_admin_email" required>
-        <div class="form-hint">Keycloak 계정 이메일과 정확히 일치해야 합니다. 이 이메일로 로그인한 사용자에게 자동으로 admin 권한이 부여됩니다.</div>
+      <!-- Step 6: 저장 -->
+      <div class="setup-section">
+        <button type="submit" class="btn btn-primary" style="width:100%">설정 완료 및 로그인</button>
       </div>
-      <div class="form-group">
-        <label for="field-app-public-url">공개 URL</label>
-        <input type="url" id="field-app-public-url" name="app_public_url"
-               value="https://sms.example.com" required>
-      </div>
-    </div>
-
-    <!-- Step 6: 최종 저장 -->
-    <div class="section">
-      <button type="submit" class="btn btn-primary" style="width:100%">설정 완료 및 로그인</button>
-    </div>
-
-  </form>
+    </form>
+  </div>
 </div>
 <script>
   document.body.addEventListener('htmx:configRequest', function(evt) {
@@ -210,23 +256,24 @@
       evt.detail.isError = false;
     }
   });
-  // M14: 토큰 명령어 복사
-  function copyTokenCmd() {
+  function copyTokenCmd(evt) {
     var cmd = document.getElementById('token-cmd');
-    if (!cmd) return;
-    navigator.clipboard.writeText(cmd.textContent.trim()).then(function() {
-      var btn = event.target;
-      btn.textContent = '복사됨!';
-      setTimeout(function() { btn.textContent = '복사'; }, 1500);
-    }).catch(function() {
-      // clipboard API 실패 시 fallback
+    var btn = evt.currentTarget;
+    if (!cmd || !btn) return;
+    var text = cmd.textContent.trim();
+    var restore = function() { btn.textContent = '복사'; };
+    var ok = function() { btn.textContent = '복사됨'; setTimeout(restore, 1500); };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(ok).catch(function() {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta); ok();
+      });
+    } else {
       var ta = document.createElement('textarea');
-      ta.value = cmd.textContent.trim();
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    });
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta); ok();
+    }
   }
 </script>
 </body>

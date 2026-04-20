@@ -140,6 +140,7 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     request.session["user_sub"] = sub
     request.session["user_email"] = user_info["email"]
     request.session["user_name"] = user_info["name"]
+    request.session["user_display"] = user_info.get("display_name") or user_info["name"]
     request.session["user_roles"] = sorted(set(roles))  # list 직접 저장
     # I8: id_token 저장 — logout 시 end_session id_token_hint로 사용
     id_token = token.get("id_token")

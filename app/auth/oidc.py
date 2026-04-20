@@ -48,6 +48,56 @@ def get_oauth_client(db: Session) -> OAuth | None:
     return oauth
 
 
+def _is_hangul(ch: str) -> bool:
+    """문자가 한글 음절/자모 범위에 속하는지 판정."""
+    if not ch:
+        return False
+    code = ord(ch)
+    # Hangul Syllables, Jamo, Compatibility Jamo
+    return (
+        0xAC00 <= code <= 0xD7A3
+        or 0x1100 <= code <= 0x11FF
+        or 0x3130 <= code <= 0x318F
+    )
+
+
+def format_display_name(claims: dict) -> str:
+    """표시용 이름을 생성한다.
+
+    우선순위:
+      1. family_name + given_name (성+이름) — 한글이면 붙여쓰기, 아니면 공백
+      2. preferred_username — LDAP 연동 시 cn이 들어옴
+      3. name — 원본 클레임
+      4. email의 @앞부분
+
+    Args:
+        claims: OIDC 클레임 dict.
+
+    Returns:
+        사람이 읽기 좋은 표시명. 클레임이 전부 비어 있으면 빈 문자열.
+    """
+    family = (claims.get("family_name") or "").strip()
+    given = (claims.get("given_name") or "").strip()
+    if family and given:
+        combined = family + given
+        if all(_is_hangul(c) for c in combined):
+            return combined
+        return f"{family} {given}"
+    if family or given:
+        return family or given
+
+    preferred = (claims.get("preferred_username") or "").strip()
+    if preferred and "@" not in preferred:
+        return preferred
+
+    name = (claims.get("name") or "").strip()
+    if name:
+        return name
+
+    email = claims.get("email") or ""
+    return email.split("@")[0] if email else ""
+
+
 def parse_user_from_claims(claims: dict) -> dict:
     """ID 토큰 클레임에서 사용자 정보를 추출한다.
 
@@ -57,11 +107,12 @@ def parse_user_from_claims(claims: dict) -> dict:
         claims: Keycloak ID 토큰 클레임 딕셔너리.
 
     Returns:
-        sub, email, name, roles 포함 딕셔너리.
+        sub, email, name, display_name, roles 포함 딕셔너리.
     """
     sub: str = claims.get("sub", "")
     email: str = claims.get("email", "")
     name: str = claims.get("name", claims.get("preferred_username", ""))
+    display_name: str = format_display_name(claims) or name or email
 
     # Keycloak realm_access.roles 에서 역할 추출
     realm_roles: list[str] = claims.get("realm_access", {}).get("roles", [])
@@ -87,5 +138,6 @@ def parse_user_from_claims(claims: dict) -> dict:
         "sub": sub,
         "email": email,
         "name": name,
+        "display_name": display_name,
         "roles": filtered_roles,
     }

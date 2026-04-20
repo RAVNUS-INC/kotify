@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select as _sa_select
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -157,6 +158,12 @@ app.include_router(chat_router)
 app.include_router(admin_router)
 app.include_router(contacts_router)
 app.include_router(groups_router)
+
+# ── 정적 파일 마운트 (DashForge 자산) ─────────────────────────────────────────
+from pathlib import Path as _Path
+_static_dir = _Path(__file__).resolve().parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 # ── 미들웨어: setup gate — 부트스트랩 미완료 시 /setup 으로 ──────────────────
 _ALLOWED_DURING_SETUP = (
