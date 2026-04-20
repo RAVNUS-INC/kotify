@@ -28,7 +28,7 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
 
     Returns:
         (처리된 메시지 건수, SMS fallback이 필요한 메시지 목록).
-        fallback 목록은 양방향 CHAT(SCL00000) 캠페인의 RCS 실패 메시지.
+        fallback 목록은 양방향 CHAT(RPCSAXX001) 캠페인의 RCS 실패 메시지.
     """
     processed = 0
     campaign_ids: set[int] = set()
@@ -53,7 +53,7 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
             db.execute(
                 select(Campaign.id).where(
                     Campaign.id.in_({m.campaign_id for m in failed_msgs}),
-                    Campaign.rcs_messagebase_id == "SCL00000",
+                    Campaign.rcs_messagebase_id == "RPCSAXX001",
                 )
             ).scalars().all()
         )

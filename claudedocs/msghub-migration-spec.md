@@ -409,13 +409,24 @@ Host: api-send.msghub.uplus.co.kr
 | **슬라이드형 (Small 2~6장)** | `CMwShS0200`~`0600` | ITMPL | 카루셀 |
 | **양방향 SMS형** | `SCL00000` | CHAT | 양방향 전용 |
 
-**우리가 사용할 messagebaseId:**
+**우리가 사용할 messagebaseId (v11 통합 RCS 전환 이후):**
 
-| 메시지 유형 | messagebaseId | API |
-|------------|---------------|-----|
-| 단문 (양방향) | `SCL00000` | `/rcs/bi/v1.1` |
-| 장문 | `SL000000` | `/rcs/v1.1` |
-| 이미지 | `OMHIMV0001` 또는 `SMwThM00` | `/rcs/v1.1` |
+> ⚠️ 아래 이전 표의 `SCL00000`, `SL000000`, `OMHIMV0001`은 **통합 RCS 이전 사양**으로
+> v11 엔드포인트에서는 `29003 404 NOT_FOUND`로 거부된다. 실제 사용값은 아래 표 참조.
+
+| 메시지 유형 | 신 messagebaseId (v11) | 구 messagebaseId (deprecated) | API |
+|------------|------------------------|-------------------------------|-----|
+| 단문 (양방향 CHAT) | **`RPCSAXX001`** | `SCL00000` | `/rcs/bi/v1.1` |
+| 단문 (단방향) | **`RPSSAXX001`** | `SS000000` | `/rcs/v1.1` |
+| 장문 | **`RPLSAXX001`** | `SL000000` | `/rcs/v1.1` |
+| 이미지 (MMS M형) | **`RPMSMMX001`** | `OMHIMV0001` / `SMwThM00` | `/rcs/v1.1` |
+| 이미지 (MMS T형) | **`RPMSMTX001`** | - | `/rcs/v1.1` |
+| 양방향 카드 T형 | **`RPCSMTX001`** | - | `/rcs/bi/v1.1` |
+| 양방향 카드 M형 | **`RPCSMMX001`** | - | `/rcs/bi/v1.1` |
+| 프리템플릿 | **`RPTFXXX001`** | - | `/rcs/v1.1` |
+
+앱 소스 반영: `app/services/compose.py` `_MESSAGEBASE_MAP` 및 `messagebase_id` 리터럴,
+`app/msghub/client.py` `send_rcs_chat` 기본값, `app/services/report.py` 캠페인 필터 조건.
 
 ### 6.4 mergeData (변수 치환)
 

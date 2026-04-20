@@ -263,16 +263,16 @@ class MsghubClient:
         header: str = "0",
         footer: str | None = None,
         fb_info_lst: list[FbInfo] | None = None,
-        copy_allowed: bool = True,
+        expiry_option: str | None = None,
         campaign_id: str | None = None,
         resv_yn: str | None = None,
         resv_req_dt: str | None = None,
     ) -> SendResponse | ReserveResponse:
-        """RCS 단방향 발송 (SMS형/LMS형/이미지템플릿, 최대 10명/요청).
+        """RCS 단방향 발송 (통합 RCS v11, 최대 10명/요청).
 
-        messagebase_id 예시:
-          SS000000 (SMS형), SL000000 (LMS형),
-          SMwThM00 (MMS형 Medium), OMHIMV0001 (이미지 강조형)
+        messagebase_id (v11):
+          RPSSAXX001 (SMS형), RPLSAXX001 (LMS형),
+          RPMSMTX001 (MMS T형), RPMSMMX001 (MMS M형)
 
         예약 발송(resv_yn="Y") 시 ReserveResponse 반환.
         """
@@ -281,17 +281,21 @@ class MsghubClient:
         if len(recv_list) > CHUNK_SIZE:
             raise ValueError(f"RCS 최대 {CHUNK_SIZE}건: {len(recv_list)}건 요청됨")
 
+        # v11 통합 RCS 스펙에는 copyAllowed 필드가 없음 (제거).
+        # 스펙 필드만 조립: messagebaseId, callback, header, recvInfoLst,
+        # fbInfoLst, expiryOption, campaignId, resvYn, resvReqDt, buttons 등.
         body: dict = {
             "messagebaseId": messagebase_id,
             "callback": callback,
             "header": header,
-            "copyAllowed": copy_allowed,
             "recvInfoLst": [r.to_dict() for r in recv_list],
         }
         if footer:
             body["footer"] = footer
         if fb_info_lst:
             body["fbInfoLst"] = [fb.to_dict() for fb in fb_info_lst]
+        if expiry_option:
+            body["expiryOption"] = expiry_option
         if campaign_id:
             body["campaignId"] = campaign_id
         if resv_yn:
@@ -317,33 +321,37 @@ class MsghubClient:
         phone: str,
         cli_key: str,
         *,
-        messagebase_id: str = "SCL00000",
+        messagebase_id: str = "RPCSAXX001",
+        reply_id: str = "",
+        telco: str = "",
         header: str = "0",
-        footer: str | None = None,
-        copy_allowed: bool = True,
         campaign_id: str | None = None,
     ) -> SendResponse:
-        """RCS 양방향 발송 (단건).
+        """RCS 양방향 발송 (v11 통합 RCS, 단건).
 
-        양방향은 recvInfoLst가 아닌 최상위 phone/cliKey 사용.
+        messagebase_id 기본값: RPCSAXX001 (양방향 텍스트형, 8원).
+        양방향은 recvInfoLst 대신 최상위 phone/cliKey 사용.
         chatbot_id는 인스턴스의 _chatbot_id 사용.
+
+        reply_id: 양방향 응답메시지 ID. 콘솔 대화방 설정의 자동응답 ID를
+            주입해야 할 수 있음. 빈 문자열이면 msghub가 기본값 처리 시도.
+        telco: 수신자 통신사 (LGU/SKT/KT). MNP 때문에 앱에서 번호만으로
+            판정 불가 → 빈 문자열이면 msghub가 자동 감지 시도.
         """
         if not self._chatbot_id:
             raise MsghubError("RCS 양방향 발송에 chatbot_id가 필요합니다", code="CONFIG_ERROR")
 
+        # v11 양방향 스펙에는 copyAllowed, footer 필드가 없음 (제거).
         body: dict = {
             "messagebaseId": messagebase_id,
             "chatbotId": self._chatbot_id,
-            "replyId": "",
+            "replyId": reply_id,
             "cliKey": cli_key,
-            "telco": "",
+            "telco": telco,
             "phone": phone,
             "body": {"description": description},
             "header": header,
-            "copyAllowed": copy_allowed,
         }
-        if footer:
-            body["footer"] = footer
         if campaign_id:
             body["campaignId"] = campaign_id
 

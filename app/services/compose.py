@@ -83,12 +83,19 @@ RESERVE_MIN_LEAD_SECONDS = 10 * 60
 # 메시지 유형 → 채널 중립 유형
 _MSG_TYPE_MAP = {"SMS": "short", "LMS": "long", "MMS": "image"}
 
-# 메시지 유형 → RCS messagebaseId
-# short: 양방향 CHAT (8원, fbInfoLst 미지원 → report.py에서 수동 SMS fallback)
-# long/image: 단방향 (fbInfoLst 자동 fallback, 동일 단가)
+# 메시지 유형 → RCS messagebaseId (v11 통합 RCS 기준)
+# 참조: claudedocs/msghub-api-guide.md §6, 공식 스펙 "2.3.2 통합 RCS 메시지"
+#
+# short (양방향 CHAT): RPCSAXX001 — 8원, fbInfoLst 미지원 → webhook에서 수동 SMS fallback
+# short (예약/단방향):  RPSSAXX001 — 9원, fbInfoLst 자동 fallback
+# long:                 RPLSAXX001 — 27원, fbInfoLst(SMS→LMS) 자동 fallback
+# image:                RPMSMMX001 — 40원 (MMS M형), fbInfoLst(MMS) 자동 fallback
+#
+# 주의: 기존 migration-spec의 SCL00000/SL000000/OMHIMV0001은 통합 RCS 이전
+# 사양이라 v11 엔드포인트에선 29003 NOT_FOUND로 거부됨.
 _MESSAGEBASE_MAP = {
-    "long": "SL000000",      # RCS LMS형 (단방향, fbInfoLst 지원)
-    "image": "OMHIMV0001",   # RCS 이미지 강조형 (단방향, fbInfoLst 지원)
+    "long": "RPLSAXX001",    # 통합 RCS LMS형 (단방향)
+    "image": "RPMSMMX001",   # 통합 RCS MMS M형 (이미지 중심)
 }
 
 # 양방향 CHAT 동시 발송 수 (API 호출 1건 = 수신자 1명)
@@ -531,7 +538,7 @@ async def dispatch_campaign(
     # 2. messagebaseId 결정
     # 단문: 양방향 CHAT (8원). 단, 예약 발송은 양방향 미지원이므로 단방향 fallback.
     is_chat = msg_type == "short" and not is_reserved
-    messagebase_id = "SCL00000" if is_chat else (_MESSAGEBASE_MAP.get(msg_type) or "SS000000")
+    messagebase_id = "RPCSAXX001" if is_chat else (_MESSAGEBASE_MAP.get(msg_type) or "RPSSAXX001")
 
     now = _now_iso()
 
