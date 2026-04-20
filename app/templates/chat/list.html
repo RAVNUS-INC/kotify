@@ -3,65 +3,149 @@
 {% block page_title %}대화방{% endblock %}
 
 {% block content %}
-<div class="card" style="padding:0">
-  <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-    <span class="text-muted">총 {{ total }}개 스레드</span>
-    <span style="font-size:12px;color:var(--text-muted)">RCS 양방향 · 미답 답장 필요</span>
-  </div>
+<style>
+  .chat-wrap { max-width: 720px; margin: 0 auto; }
+  .chat-card { padding: 0; overflow: hidden; }
+  .chat-head {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .chat-list { list-style: none; margin: 0; padding: 0; }
+  .chat-row { border-bottom: 1px solid var(--border); }
+  .chat-row:last-child { border-bottom: none; }
+  .chat-link {
+    display: flex;
+    padding: 12px 16px;
+    text-decoration: none;
+    color: var(--text);
+    align-items: center;
+    gap: 12px;
+    transition: background 0.1s;
+  }
+  .chat-link:hover { background: var(--surface-hover, rgba(0,0,0,0.03)); }
+  .chat-avatar {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #e0e7ff;
+    color: #3730a3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+  }
+  .chat-body { flex: 1; min-width: 0; }
+  .chat-row-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .chat-row-phone { font-weight: 600; font-size: 14px; }
+  .chat-row-time { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .chat-row-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .chat-row-last {
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 4px;
+  }
+  .chat-row-last.out { color: var(--text-muted); }
+  .chat-row-last.in { color: var(--text); }
+  .chat-dir {
+    font-size: 10px;
+    margin-right: 2px;
+  }
+  .chat-dir.out { color: #059669; }
+  .chat-dir.in { color: #3b82f6; }
+  .chat-unanswered {
+    flex: 0 0 auto;
+    background: #dc2626;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+  .chat-empty {
+    padding: 48px 16px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .chat-pagination {
+    margin-top: 16px;
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+    align-items: center;
+  }
+</style>
 
-  {% if threads %}
-  <ul style="list-style:none;margin:0;padding:0">
-    {% for t in threads %}
-    <li style="border-bottom:1px solid var(--border)">
-      <a href="/chat/{{ t.caller }}/{{ t.phone }}"
-         style="display:flex;padding:12px 16px;text-decoration:none;color:var(--text);align-items:center;gap:12px">
-        <div style="flex:0 0 auto">
-          <div style="width:40px;height:40px;border-radius:50%;background:#e0e7ff;display:flex;align-items:center;justify-content:center;color:#3730a3;font-weight:600;font-size:13px">
+<div class="chat-wrap">
+  <div class="card chat-card">
+    <div class="chat-head">
+      <span class="text-muted">총 {{ total }}개 스레드</span>
+      <span style="font-size:12px;color:var(--text-muted)">RCS 양방향 · 미답 빨간 뱃지</span>
+    </div>
+
+    {% if threads %}
+    <ul class="chat-list">
+      {% for t in threads %}
+      <li class="chat-row">
+        <a href="/chat/{{ t.caller }}/{{ t.phone }}" class="chat-link">
+          <div class="chat-avatar">
             {{ t.phone[-4:] if t.phone|length >= 4 else t.phone }}
           </div>
-        </div>
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
-            <strong>{{ t.phone | phone_fmt }}</strong>
-            <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">{{ t.last_timestamp | kst_dt }}</span>
+          <div class="chat-body">
+            <div class="chat-row-top">
+              <span class="chat-row-phone">{{ t.phone | phone_fmt }}</span>
+              <span class="chat-row-time">{{ t.last_timestamp | kst_dt }}</span>
+            </div>
+            <div class="chat-row-meta">
+              발신 {{ t.caller | phone_fmt }} · 메시지 {{ t.mt_count + t.mo_count }}건
+            </div>
+            <div class="chat-row-last {{ 'out' if t.last_direction == 'OUT' else 'in' }}">
+              <span class="chat-dir {{ 'out' if t.last_direction == 'OUT' else 'in' }}">
+                {% if t.last_direction == 'OUT' %}▶{% else %}◀{% endif %}
+              </span>{{ t.last_body or '(빈 메시지)' }}
+            </div>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
-            발신 {{ t.caller | phone_fmt }} · 주고받은 메시지 {{ t.mt_count + t.mo_count }}건
-          </div>
-          <div style="font-size:13px;color:{% if t.last_direction == 'OUT' %}var(--text-muted){% else %}var(--text){% endif %};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px">
-            {% if t.last_direction == 'OUT' %}
-              <span style="color:#059669;font-size:10px">▶ 발신</span>
-            {% else %}
-              <span style="color:#3b82f6;font-size:10px">◀ 수신</span>
-            {% endif %}
-            {{ t.last_body or '(빈 메시지)' }}
-          </div>
-        </div>
-        {% if t.unanswered %}
-        <span style="flex:0 0 auto;background:#dc2626;color:white;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px">미답</span>
-        {% endif %}
-      </a>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <div style="padding:40px 16px;text-align:center;color:var(--text-muted)">
-    <i data-lucide="message-square" style="width:48px;height:48px;opacity:0.4"></i>
-    <div style="margin-top:12px;font-size:15px">아직 대화 내역이 없습니다.</div>
-    <div style="font-size:13px;margin-top:4px">고객이 RCS로 답장을 보내면 여기에 표시됩니다.</div>
+          {% if t.unanswered %}
+          <span class="chat-unanswered">미답</span>
+          {% endif %}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="chat-empty">
+      <i data-lucide="message-square" style="width:48px;height:48px;opacity:0.4"></i>
+      <div style="margin-top:12px;font-size:15px">아직 대화 내역이 없습니다.</div>
+      <div style="font-size:13px;margin-top:4px">고객이 RCS로 답장을 보내면 여기에 표시됩니다.</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if total_pages > 1 %}
+  <div class="chat-pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}&per_page={{ per_page }}" class="btn btn-secondary btn-sm">이전</a>
+    {% endif %}
+    <span style="padding:6px 12px;font-size:13px;color:var(--text-muted)">{{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}&per_page={{ per_page }}" class="btn btn-secondary btn-sm">다음</a>
+    {% endif %}
   </div>
   {% endif %}
 </div>
-
-{% if total_pages > 1 %}
-<div style="margin-top:16px;display:flex;gap:4px;justify-content:center;align-items:center">
-  {% if page > 1 %}
-  <a href="?page={{ page - 1 }}&per_page={{ per_page }}" class="btn btn-secondary btn-sm">이전</a>
-  {% endif %}
-  <span style="padding:6px 12px;font-size:13px;color:var(--text-muted)">{{ page }} / {{ total_pages }}</span>
-  {% if page < total_pages %}
-  <a href="?page={{ page + 1 }}&per_page={{ per_page }}" class="btn btn-secondary btn-sm">다음</a>
-  {% endif %}
-</div>
-{% endif %}
 {% endblock %}
