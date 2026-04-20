@@ -493,11 +493,25 @@ async def check_update(
     if count > 15:
         html_parts.append(f'<div class="text-muted">... 외 {count - 15}건</div>')
     html_parts.append("</div>")
+    # 업데이트 설치 시 systemctl restart 가 업데이트 스크립트 자신을 죽이므로
+    # HTTP 응답이 완료되기 전에 연결이 끊긴다. HTMX는 이를 "실패"로 표시하는데
+    # 실제 업데이트는 성공한 상태가 대부분. 따라서 클릭 즉시 "설치 중..."
+    # 메시지로 바꾸고 30초 후 무조건 자동 새로고침하여 혼선을 방지한다.
+    html_parts.append(
+        "<script>window.kotifyApplyUpdate=function(){"
+        "var e=document.getElementById('update-result');"
+        "if(e){e.textContent="
+        "'\u23f3 \uc5c5\ub370\uc774\ud2b8 \uc124\uce58 \uc911... "
+        "\uc57d 30\ucd08 \ud6c4 \uc790\ub3d9\uc73c\ub85c \uc0c8\ub85c\uace0\uce68\ub429\ub2c8\ub2e4.';"
+        "e.className='text-muted';}"
+        "setTimeout(function(){location.reload();},30000);};</script>"
+    )
     html_parts.append(
         '<button class="btn btn-primary btn-sm" '
         'hx-post="/admin/system/apply-update" '
         'hx-target="#update-result" '
         'hx-swap="innerHTML" '
+        'hx-on:htmx:before-request="kotifyApplyUpdate()" '
         'hx-confirm="업데이트를 설치하시겠습니까? 서비스가 잠시 재시작됩니다.">'
         '<i data-lucide="download"></i> 업데이트 설치'
         '<span class="htmx-indicator spinner"></span>'
