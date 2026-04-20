@@ -31,7 +31,11 @@ StandardError=append:/var/log/kotify/stderr.log
 Environment=PYTHONUNBUFFERED=1
 
 # ── 보안 강화 (Systemd Hardening) ────────────────────────────────────────────
-NoNewPrivileges=true
+# NoNewPrivileges=false: 웹 UI 원클릭 업데이트 기능(/admin → 업데이트)이
+# sudo로 /opt/kotify/deploy/kotify-update.sh 를 호출하는데, true일 경우 커널
+# 레벨에서 setuid(sudo) 승격이 차단되어 동작 불가. 승격 범위는 kotify-sudoers
+# 로 해당 스크립트 1개에만 한정되어 있으므로 실효 공격면은 좁음.
+NoNewPrivileges=false
 ProtectSystem=strict
 ReadWritePaths=/var/lib/kotify /var/log/kotify
 ProtectHome=true
