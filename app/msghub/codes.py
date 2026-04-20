@@ -7,29 +7,28 @@ resultCodeDesc가 없는 엣지케이스에서는 raw 코드만 노출한다.
 """
 from __future__ import annotations
 
-# 재시도가 필요한 에러 코드
+# 재시도가 필요한 에러 코드 (msghub API 가이드 공통 결과 코드 기준)
+# 참조: claudedocs/msghub-error-codes.md
+#
+# - CPS 초과: 29002
+# - 내부오류: 49xxx (전체), 21400, 22004, 23004, 23005, 29017, 29019, 29032,
+#   31112, 31118, 65999
+# - RCS 발송 실패이나 단말 전달 가능성 있는 코드: 41007, 54004, 55806, 55820
+# - HTTP 5xx (client.py에서 별도 처리)
 RETRYABLE_CODES: frozenset[str] = frozenset({
-    "29002",  # CPS 초과
-    "29006",  # WRITE 소켓
-    "29007",  # READ 소켓
-    "29012",  # 서버 에러
-    "29015",  # 타임아웃
-    "29017",  # Redis
-    "29019",  # DB
-    "29031",  # 재시도 필요
-    "29032",  # 내부 에러
-    "21400",  # 내부 에러
-    "22004",  # 내부 에러
-    "23004",  # 내부 에러
-    "23005",  # 내부 에러
-    "31112",  # 통신사 내부
-    "31118",  # 내부 에러
-    "41007",  # RCS 전달 가능성
-    "54004",  # RCS 전달 가능성
-    "55806",  # RCS 전달 가능성
-    "55820",  # RCS 전달 가능성
-    "65999",  # 내부 에러
+    # CPS 초과
+    "29002",
+    # 내부 오류
+    "21400", "22004", "23004", "23005",
+    "29017", "29019", "29032",
+    "31112", "31118",
+    "65999",
+    # RCS 발송 실패이나 단말 전달 가능
+    "41007", "54004", "55806", "55820",
 })
+
+# 49xxx 전체 프리픽스는 프레임워크 내부 오류로 재시도 대상
+_RETRY_PREFIXES: tuple[str, ...] = ("49",)
 
 SUCCESS_CODE = "10000"
 
@@ -73,8 +72,16 @@ _ESTIMATE_MAP: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {
 
 
 def is_retryable(code: str) -> bool:
-    """재시도 가능한 에러 코드인지 확인."""
-    return code in RETRYABLE_CODES
+    """재시도 가능한 에러 코드인지 확인.
+
+    명시 코드 + 49xxx 프리픽스(프레임워크 내부 오류 전체) 둘 다 포함.
+    HTTP 5xx 재시도는 client.py에서 별도 처리.
+    """
+    if not code:
+        return False
+    if code in RETRYABLE_CODES:
+        return True
+    return any(code.startswith(p) for p in _RETRY_PREFIXES)
 
 
 def describe(code: str | None, raw_message: str | None = None) -> str:
