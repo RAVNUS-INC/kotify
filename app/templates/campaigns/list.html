@@ -100,7 +100,7 @@
     </thead>
     <tbody>
       {% for c in campaigns %}
-      <tr>
+      <tr class="row-link" data-href="/campaigns/{{ c.id }}" style="cursor:pointer">
         <td><a href="/campaigns/{{ c.id }}">#{{ c.id }}</a></td>
         {% if is_admin %}
         <td class="text-muted truncate" style="max-width:110px" title="{{ c.created_by }}">
@@ -159,6 +159,29 @@
     </div>
   </div>
   {% endif %}
+
+  <script>
+    // 행 전체 클릭 → 상세 이동. 내부 링크/드래그 선택 기본 동작 보존.
+    document.querySelectorAll('tr.row-link').forEach(function(tr) {
+      tr.addEventListener('click', function(e) {
+        if (e.target.closest('a')) return;
+        if (window.getSelection && window.getSelection().toString()) return;
+        var href = tr.dataset.href;
+        if (!href) return;
+        if (e.ctrlKey || e.metaKey || e.button === 1) {
+          window.open(href, '_blank');
+        } else {
+          window.location.href = href;
+        }
+      });
+      tr.addEventListener('mouseenter', function() {
+        tr.style.background = 'var(--surface-hover, rgba(0,0,0,0.03))';
+      });
+      tr.addEventListener('mouseleave', function() {
+        tr.style.background = '';
+      });
+    });
+  </script>
 
   {% else %}
   <div class="empty-state">

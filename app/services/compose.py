@@ -486,18 +486,21 @@ async def dispatch_campaign(
         chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
 
     # 5. Campaign state + counters 업데이트
+    # CHAT 경로는 failed_chunks가 항상 빈 리스트(가상 청크 1개)라서 청크 기반
+    # 판정을 쓰면 부분/전원 실패도 DISPATCHED로 잘못 들어간다. 수신자 수 기반으로 판정.
     total_chunks = len(chunks)
     failed_recipients = sum(failed_chunk_sizes)
+    total_recipients = len(recipients)
 
-    if len(failed_chunks) == 0:
+    if failed_recipients == 0:
         campaign.state = "RESERVED" if is_reserved else "DISPATCHED"
-    elif len(failed_chunks) == total_chunks:
+    elif failed_recipients == total_recipients:
         campaign.state = "RESERVE_FAILED" if is_reserved else "FAILED"
     else:
         campaign.state = "PARTIAL_FAILED"
 
     campaign.fail_count = failed_recipients
-    campaign.pending_count = max(0, len(recipients) - failed_recipients)
+    campaign.pending_count = max(0, total_recipients - failed_recipients)
 
     db.flush()
 
