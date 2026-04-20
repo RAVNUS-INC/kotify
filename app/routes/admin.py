@@ -506,11 +506,16 @@ async def check_update(
         "e.className='text-muted';}"
         "setTimeout(function(){location.reload();},30000);};</script>"
     )
+    # hx-swap="none": systemctl restart가 uvicorn을 죽이면서 HTTP 응답이
+    # 잘리거나, 재시작 완료 전에 rc != 0 에러 응답이 먼저 도착하는 레이스가
+    # 발생한다. 이 경우 HTMX가 기본 swap을 하면 "설치 중..." 메시지가
+    # "업데이트 실패:"로 덮어씌워져 사용자가 오해한다. "none"으로 swap을 막고
+    # 30초 타이머로만 상태 확인(새로고침 후 현재 버전 비교)하는 전략.
     html_parts.append(
         '<button class="btn btn-primary btn-sm" '
         'hx-post="/admin/system/apply-update" '
         'hx-target="#update-result" '
-        'hx-swap="innerHTML" '
+        'hx-swap="none" '
         'hx-on:htmx:before-request="kotifyApplyUpdate()" '
         'hx-confirm="업데이트를 설치하시겠습니까? 서비스가 잠시 재시작됩니다.">'
         '<i data-lucide="download"></i> 업데이트 설치'

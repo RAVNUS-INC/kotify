@@ -441,17 +441,61 @@ async def campaign_refresh(
     _: None = Depends(require_setup_complete),
     _csrf: None = Depends(verify_csrf),
 ) -> HTMLResponse:
-    """HTMX — 폴링 강제 트리거."""
+    """HTMX — 미완료 메시지를 msghub에서 cliKey로 재조회.
+
+    msghub는 웹훅 기반이라 대부분 자동 반영되지만, 네트워크 단절/웹훅 유실 등
+    엣지 케이스에서 수동으로 상태를 동기화할 수 있게 한다.
+    """
+    from sqlalchemy import select as sa_select  # noqa: PLC0415
+
+    from app.main import get_msghub_client  # noqa: PLC0415
+    from app.models import Message  # noqa: PLC0415
+    from app.services.report import process_sent_query  # noqa: PLC0415
+
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(status_code=404)
     if not _can_access_campaign(user, campaign):
         raise HTTPException(status_code=403)
 
-    # 폴러에 강제 새로고침 큐 추가
-    from app.main import poller
-    poller.add_force_refresh(campaign_id)
+    msghub_client = get_msghub_client()
+    if msghub_client is None:
+        return HTMLResponse(
+            '<span class="err">msghub 설정이 완료되지 않았습니다.</span>'
+        )
+
+    # 미완료 메시지 조회 (최대 10건 — msghub query_sent 제약)
+    pending_msgs = list(
+        db.execute(
+            sa_select(Message)
+            .where(
+                Message.campaign_id == campaign_id,
+                Message.status.in_(("PENDING", "REG", "ING", "FB_PENDING")),
+                Message.cli_key.is_not(None),
+            )
+            .limit(10)
+        ).scalars().all()
+    )
+
+    if not pending_msgs:
+        return HTMLResponse(
+            '<span class="text-muted">대기 중인 메시지가 없습니다.</span>'
+        )
+
+    # cliKey + 발송일(YYYY-MM-DD) 튜플로 변환
+    req_dt = (campaign.created_at or "")[:10]
+    cli_keys = [(m.cli_key, req_dt) for m in pending_msgs]
+
+    try:
+        raw_items = await msghub_client.query_sent(cli_keys)
+    except Exception as exc:
+        return HTMLResponse(
+            f'<span class="err">조회 실패: {exc}</span>'
+        )
+
+    processed = process_sent_query(db, raw_items)
+    db.commit()
 
     return HTMLResponse(
-        '<span class="ok">✓ 새로고침 요청됨 (5초 내 반영)</span>'
+        f'<span class="ok">✓ {processed}건 상태 갱신됨</span>'
     )
