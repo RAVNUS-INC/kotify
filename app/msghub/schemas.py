@@ -193,7 +193,11 @@ def _parse_fb_reason_lst(raw: list | None) -> list[FbReason]:
 
 @dataclass
 class ReportItem:
-    """리포트 (웹훅/폴링) 수신자별 결과."""
+    """리포트 (웹훅/폴링) 수신자별 결과.
+
+    v11 delivery report 웹훅 스펙 기준 전 필드 파싱. 기존 7필드 + 신규 5필드:
+    isBi, phone, rpt_reg_dt, user_custom_fields, recv_dt.
+    """
 
     msg_key: str
     cli_key: str
@@ -204,9 +208,16 @@ class ReportItem:
     telco: str = ""
     rpt_dt: str = ""         # 결과 수신 일시
     fb_reason_lst: list[FbReason] = field(default_factory=list)
+    # v11 추가 필드
+    is_bi: bool = False                         # RCS 양방향 여부
+    phone: str = ""                             # 수신번호 (cliKey 매칭 실패 시 보조)
+    rpt_reg_dt: str = ""                        # 결과 등록 일시
+    recv_dt: str = ""                           # 발송 요청 일시
+    user_custom_fields: dict | None = None      # 발송 시 심은 커스텀 필드
 
     @staticmethod
     def from_dict(d: dict) -> ReportItem:
+        raw_ucf = d.get("userCustomFields")
         return ReportItem(
             msg_key=d.get("msgKey", ""),
             cli_key=d.get("cliKey", ""),
@@ -217,6 +228,11 @@ class ReportItem:
             telco=d.get("telco", ""),
             rpt_dt=d.get("rptDt", ""),
             fb_reason_lst=_parse_fb_reason_lst(d.get("fbReasonLst")),
+            is_bi=bool(d.get("isBi", False)),
+            phone=d.get("phone", ""),
+            rpt_reg_dt=d.get("rptRegDt", ""),
+            recv_dt=d.get("recvDt", ""),
+            user_custom_fields=raw_ucf if isinstance(raw_ucf, dict) else None,
         )
 
 

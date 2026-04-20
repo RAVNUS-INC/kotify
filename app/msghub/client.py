@@ -194,7 +194,8 @@ class MsghubClient:
             body["resvReqDt"] = resv_req_dt
 
         headers = await self._auth_headers()
-        url = f"{self._send_base}/msg/v1/sms"
+        # v11 통합 RCS 기준 SMS endpoint. 구버전 /msg/v1/sms는 deprecated.
+        url = f"{self._send_base}/xms/sms/v1"
         resp = await self._http.post(url, json=body, headers=headers)
         data = _parse_json(resp)
         _raise_for_response(data, resp.status_code)
@@ -243,7 +244,10 @@ class MsghubClient:
             body["resvReqDt"] = resv_req_dt
 
         headers = await self._auth_headers()
-        url = f"{self._send_base}/msg/v1/mms"
+        # v11 기준 MMS/LMS endpoint (파일ID 사용 또는 본문만).
+        # multipart 직접 첨부는 /xms/mms/file/v1 — 이 앱은 사전등록 방식만 사용.
+        # 구버전 /msg/v1/mms는 deprecated.
+        url = f"{self._send_base}/xms/mms/v1"
         resp = await self._http.post(url, json=body, headers=headers)
         data = _parse_json(resp)
         _raise_for_response(data, resp.status_code)

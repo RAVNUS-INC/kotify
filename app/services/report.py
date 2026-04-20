@@ -35,9 +35,12 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
     failed_msgs: list[Message] = []
 
     for item in items:
-        msg = _find_message(db, item.cli_key, item.msg_key)
+        msg = _find_message(db, item.cli_key, item.msg_key, item.phone)
         if msg is None:
-            log.warning("리포트 매칭 실패: cliKey=%s, msgKey=%s", item.cli_key, item.msg_key)
+            log.warning(
+                "리포트 매칭 실패: cliKey=%s, msgKey=%s, phone=%s",
+                item.cli_key, item.msg_key, item.phone,
+            )
             continue
 
         if _update_message(msg, item):
@@ -119,8 +122,18 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
     return processed
 
 
-def _find_message(db: Session, cli_key: str, msg_key: str | None) -> Message | None:
-    """cliKey 또는 msgKey로 Message를 찾는다."""
+def _find_message(
+    db: Session,
+    cli_key: str,
+    msg_key: str | None,
+    phone: str | None = None,
+) -> Message | None:
+    """cliKey → msgKey → (phone, status=REG/ING/PENDING) 순으로 Message를 찾는다.
+
+    msghub v11 delivery report는 cliKey 외에도 phone 필드를 포함한다. cliKey
+    없이 리포트가 도달하는 엣지 케이스(콘솔 설정 누락, 대량발송 일부 유실 등)
+    에서 phone으로 최근 발송 중인 메시지를 찾아 보조 매칭한다.
+    """
     if cli_key:
         msg = db.execute(
             select(Message).where(Message.cli_key == cli_key)
@@ -131,6 +144,20 @@ def _find_message(db: Session, cli_key: str, msg_key: str | None) -> Message | N
     if msg_key:
         msg = db.execute(
             select(Message).where(Message.msg_key == msg_key)
+        ).scalar_one_or_none()
+        if msg:
+            return msg
+
+    # phone 보조 매칭 — 아직 완료되지 않은 최근 메시지만 대상 (ambiguity 최소화)
+    if phone:
+        msg = db.execute(
+            select(Message)
+            .where(
+                Message.to_number == phone,
+                Message.status.in_(("PENDING", "REG", "ING", "FB_PENDING")),
+            )
+            .order_by(Message.id.desc())
+            .limit(1)
         ).scalar_one_or_none()
         if msg:
             return msg
