@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useRef, type InputHTMLAttributes, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useRef,
+  type InputHTMLAttributes,
+  type ReactNode,
+} from 'react';
 import { cn } from '@/lib/cn';
 
 export type CheckProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> & {
@@ -12,21 +18,31 @@ export type CheckProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 's
   onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 };
 
-export function Check({
-  checked = false,
-  partial = false,
-  label,
-  sub,
-  size = 'md',
-  disabled,
-  className,
-  onChange,
-  ...rest
-}: CheckProps) {
-  const ref = useRef<HTMLInputElement>(null);
+export const Check = forwardRef<HTMLInputElement, CheckProps>(function Check(
+  {
+    checked = false,
+    partial = false,
+    label,
+    sub,
+    size = 'md',
+    disabled,
+    className,
+    onChange,
+    ...rest
+  },
+  forwardedRef,
+) {
+  const innerRef = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
-    if (ref.current) ref.current.indeterminate = partial;
+    if (innerRef.current) innerRef.current.indeterminate = partial;
   }, [partial]);
+
+  const setRef = (el: HTMLInputElement | null) => {
+    innerRef.current = el;
+    if (typeof forwardedRef === 'function') forwardedRef(el);
+    else if (forwardedRef) forwardedRef.current = el;
+  };
 
   return (
     <label
@@ -40,7 +56,7 @@ export function Check({
       style={size === 'sm' ? { fontSize: 12 } : undefined}
     >
       <input
-        ref={ref}
+        ref={setRef}
         type="checkbox"
         className="sr-only"
         checked={checked}
@@ -61,4 +77,4 @@ export function Check({
       )}
     </label>
   );
-}
+});

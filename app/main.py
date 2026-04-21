@@ -93,8 +93,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if _msghub_client is not None:
         try:
             await _msghub_client.aclose()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001
+            logger.debug("msghub client close error", exc_info=True)
         _msghub_client = None
     logger.info("메시징 시스템 종료")
 
@@ -115,8 +115,6 @@ from app.auth.session import add_session_middleware, get_session_secret
 from app.auth.session import get_fallback_secret as _get_fallback_secret
 
 try:
-    if settings.dev_mode:
-        Base.metadata.create_all(bind=engine)
     _db_init = SessionLocal()
     try:
         _session_secret = get_session_secret(_db_init)

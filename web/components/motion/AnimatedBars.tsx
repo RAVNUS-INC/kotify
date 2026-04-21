@@ -65,7 +65,7 @@ export function AnimatedBars({
                 }}
               />
             </div>
-            {labels && labels[i] !== undefined && (
+            {labels?.[i] != null && (
               <div className="font-mono text-[10px] text-ink-dim">{labels[i]}</div>
             )}
           </div>

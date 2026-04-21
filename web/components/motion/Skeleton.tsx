@@ -52,7 +52,11 @@ export function SkeletonText({
   return (
     <div className={cn('flex flex-col', className)} style={{ gap }}>
       {Array.from({ length: lines }).map((_, i) => (
-        <Skeleton key={i} width={widths[i % widths.length]} height={12} />
+        <Skeleton
+          key={i}
+          width={widths[i % widths.length] ?? '100%'}
+          height={12}
+        />
       ))}
     </div>
   );

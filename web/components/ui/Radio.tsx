@@ -1,6 +1,6 @@
 'use client';
 
-import type { InputHTMLAttributes, ReactNode } from 'react';
+import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 export type RadioProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & {
@@ -10,20 +10,16 @@ export type RadioProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & {
   onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 };
 
-export function Radio({
-  checked = false,
-  label,
-  sub,
-  disabled,
-  className,
-  onChange,
-  ...rest
-}: RadioProps) {
+export const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(
+  { checked = false, label, sub, disabled, className, onChange, ...rest },
+  ref,
+) {
   return (
     <label
       className={cn('k-radio', checked && 'on', disabled && 'disabled', className)}
     >
       <input
+        ref={ref}
         type="radio"
         className="sr-only"
         checked={checked}
@@ -40,4 +36,4 @@ export function Radio({
       )}
     </label>
   );
-}
+});

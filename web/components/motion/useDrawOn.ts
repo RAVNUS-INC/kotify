@@ -33,13 +33,17 @@ export function useDrawOn({ delay = 0, duration = 1200 }: UseDrawOnOptions = {})
     el.style.strokeDashoffset = String(len);
     el.style.transition = `stroke-dashoffset ${duration}ms cubic-bezier(.22,.9,.3,1) ${delay}ms`;
 
-    const raf1 = requestAnimationFrame(() => {
-      const raf2 = requestAnimationFrame(() => {
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
         if (ref.current) ref.current.style.strokeDashoffset = '0';
       });
-      return () => cancelAnimationFrame(raf2);
     });
-    return () => cancelAnimationFrame(raf1);
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
   }, [delay, duration, reduce]);
 
   return ref;

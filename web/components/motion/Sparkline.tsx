@@ -34,10 +34,24 @@ export function Sparkline({
 
   if (data.length === 0) return null;
 
+  if (data.length === 1) {
+    return (
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        className={className}
+        aria-hidden
+      >
+        <circle cx={width / 2} cy={height / 2} r={2} fill={color} />
+      </svg>
+    );
+  }
+
   const max = Math.max(...data);
   const min = Math.min(...data);
   const range = max - min || 1;
-  const step = data.length > 1 ? width / (data.length - 1) : 0;
+  const step = width / (data.length - 1);
   const points = data.map(
     (v, i) => [i * step, height - ((v - min) / range) * height] as const,
   );
