@@ -4,7 +4,8 @@ import { Fragment } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { usePathname } from 'next/navigation';
-import { Icon, Kbd } from '@/components/ui';
+import { Icon } from '@/components/ui';
+import { CommandPalette } from '@/components/search';
 
 const SEGMENT_LABELS: Record<string, string> = {
   send: '발송',
@@ -71,25 +72,14 @@ export function Topbar() {
       </nav>
 
       <div className="k-topbar-right">
-        <button
-          type="button"
-          className="k-btn k-btn-ghost k-btn-sm"
-          aria-label="검색 (Cmd+K)"
-        >
-          <Icon name="search" size={13} />
-          <Kbd className="ml-1">⌘K</Kbd>
-        </button>
-        <button
-          type="button"
+        <CommandPalette />
+        <Link
+          href={'/notifications' as Route}
           className="k-btn k-btn-ghost k-btn-sm relative"
-          aria-label="알림 (3개 읽지 않음)"
+          aria-label="알림센터"
         >
           <Icon name="bell" size={13} />
-          <span
-            aria-hidden
-            className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand"
-          />
-        </button>
+        </Link>
       </div>
     </div>
   );

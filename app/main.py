@@ -137,6 +137,7 @@ from app.routes.health import router as health_router
 from app.routes.notifications import router as notifications_router
 from app.routes.numbers import router as numbers_router
 from app.routes.reports import router as reports_router
+from app.routes.search import router as search_router
 from app.routes.settings import router as settings_router
 from app.routes.threads import router as threads_router
 from app.routes.webhook import router as webhook_router
@@ -154,6 +155,7 @@ app.include_router(settings_router)
 app.include_router(audit_router)
 app.include_router(notifications_router)
 app.include_router(reports_router)
+app.include_router(search_router)
 
 
 # ── 미들웨어: 사용자 컨텍스트 주입 ───────────────────────────────────────────
