@@ -3,7 +3,7 @@
 msghub가 발송 결과(리포트)와 고객 답장(MO)을 POST로 전달한다.
 - 200: 성공 처리
 - 400: 실패 → msghub가 10초 후 재시도
-- 보안: 웹훅 시크릿 토큰 헤더 검증 (미설정 시 경고 로그 + 통과)
+- 보안: 웹훅 시크릿 토큰 헤더 검증 (미설정 + 프로덕션 시 거부)
 - 양방향 CHAT RCS 실패 시 SMS 수동 fallback 자동 발송
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db import get_db
 from app.models import Campaign, Message, MoMessage
 from app.msghub.schemas import MoWebhookPayload, RecvInfo, WebhookReport
@@ -33,14 +34,19 @@ def _verify_webhook(request: Request, db: Session) -> bool:
     """웹훅 요청의 유효성을 검증한다.
 
     msghub 콘솔에서 등록한 웹훅 시크릿이 있으면 헤더로 검증.
-    없으면 경고 로그 후 통과 (콘솔에서 URL 등록 자체가 신뢰 기반).
+    시크릿 미설정 시:
+    - dev_mode=True: 경고 로그 후 통과 (로컬 개발 편의)
+    - dev_mode=False: ERROR 로그 후 거부 (프로덕션 안전)
     """
     store = SettingsStore(db)
     secret = store.get("msghub.webhook_secret")
 
     if not secret:
-        log.warning("msghub.webhook_secret 미설정 — 웹훅 인증 없이 통과")
-        return True
+        if settings.dev_mode:
+            log.warning("msghub.webhook_secret 미설정 — 개발 모드이므로 인증 없이 통과")
+            return True
+        log.error("msghub.webhook_secret 미설정 — 프로덕션 환경에서 웹훅 요청 거부")
+        return False
 
     sig = request.headers.get("X-Msghub-Signature", "")
     return hmac.compare_digest(sig, secret)
@@ -121,15 +127,16 @@ async def receive_report(
 
     try:
         processed, fallback_needed = process_report(db, report.items)
-        db.commit()
 
         # 양방향 CHAT RCS 실패 → SMS 자동 fallback
+        # process_report 결과와 fallback을 단일 트랜잭션으로 커밋.
+        # fallback 루프가 실패하면 rollback되어 msghub 재시도 시 멱등하게 재처리.
         fallback_sent = 0
         if fallback_needed:
             fallback_sent = await _send_sms_fallback(db, fallback_needed)
-            db.commit()
             log.info("SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
 
+        db.commit()
         log.info("웹훅 리포트 처리: %d/%d건", processed, report.rpt_cnt)
         return JSONResponse(
             {"status": "ok", "processed": processed, "fallback": fallback_sent},
