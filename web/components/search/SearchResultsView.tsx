@@ -33,7 +33,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
     <div className="flex flex-col gap-6">
       {show('contacts') && result.contacts.length > 0 && (
         <Section title="주소록" count={result.counts.contacts}>
-          <ul role="list" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {result.contacts.map((c) => (
               <li key={c.id}>
                 <Link
@@ -60,7 +60,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
 
       {show('threads') && result.threads.length > 0 && (
         <Section title="대화" count={result.counts.threads}>
-          <ul role="list" className="flex flex-col divide-y divide-line rounded-lg border border-line bg-surface">
+          <ul className="flex flex-col divide-y divide-line rounded-lg border border-line bg-surface">
             {result.threads.map((t) => (
               <li key={t.id}>
                 <Link
@@ -97,7 +97,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
 
       {show('campaigns') && result.campaigns.length > 0 && (
         <Section title="캠페인" count={result.counts.campaigns}>
-          <ul role="list" className="flex flex-col divide-y divide-line rounded-lg border border-line bg-surface">
+          <ul className="flex flex-col divide-y divide-line rounded-lg border border-line bg-surface">
             {result.campaigns.map((c) => (
               <li key={c.id}>
                 <Link
@@ -123,7 +123,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
 
       {show('audit') && result.auditLogs.length > 0 && (
         <Section title="감사 로그" count={result.counts.auditLogs}>
-          <ul role="list" className="flex flex-col divide-y divide-line rounded-lg border border-line bg-surface">
+          <ul className="flex flex-col divide-y divide-line rounded-lg border border-line bg-surface">
             {result.auditLogs.map((a) => (
               <li key={a.id}>
                 <Link

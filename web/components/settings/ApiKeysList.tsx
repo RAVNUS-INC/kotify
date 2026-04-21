@@ -18,7 +18,7 @@ export function ApiKeysList({ keys }: ApiKeysListProps) {
   }
 
   return (
-    <ul role="list" className="flex flex-col divide-y divide-line">
+    <ul className="flex flex-col divide-y divide-line">
       {keys.map((k) => (
         <li key={k.id} className="flex items-center gap-3 py-3">
           <div className="min-w-0 flex-1">

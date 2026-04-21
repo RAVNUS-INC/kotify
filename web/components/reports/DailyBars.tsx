@@ -32,7 +32,6 @@ export function DailyBars({ daily }: DailyBarsProps) {
             일별 회신
           </div>
           <ul
-            role="list"
             aria-label="일별 회신 수"
             className="grid grid-cols-7 gap-1 text-center"
           >

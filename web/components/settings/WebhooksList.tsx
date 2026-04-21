@@ -19,7 +19,7 @@ export function WebhooksList({ webhooks }: WebhooksListProps) {
   }
 
   return (
-    <ul role="list" className="flex flex-col divide-y divide-line">
+    <ul className="flex flex-col divide-y divide-line">
       {webhooks.map((w) => (
         <li
           key={w.id}

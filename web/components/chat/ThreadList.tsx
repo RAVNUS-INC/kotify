@@ -41,7 +41,7 @@ export function ThreadList({ threads, activeId, filter }: ThreadListProps) {
           size="sm"
         />
       ) : (
-        <ul role="list" className="flex flex-col">
+        <ul className="flex flex-col">
           {threads.map((t) => (
             <li key={t.id}>
               <ThreadRow

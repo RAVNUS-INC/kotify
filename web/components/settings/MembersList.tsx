@@ -26,7 +26,7 @@ export function MembersList({ members }: MembersListProps) {
   }
 
   return (
-    <ul role="list" className="flex flex-col divide-y divide-line">
+    <ul className="flex flex-col divide-y divide-line">
       {members.map((m) => {
         const role = ROLE_LABEL[m.role];
         return (

@@ -37,7 +37,7 @@ export function InboxCard({ threads, unread }: InboxCardProps) {
             size="md"
           />
         ) : (
-          <ul className="divide-y divide-line" role="list">
+          <ul className="divide-y divide-line">
             {threads.map((t) => (
               <InboxThreadRow key={t.id} thread={t} />
             ))}

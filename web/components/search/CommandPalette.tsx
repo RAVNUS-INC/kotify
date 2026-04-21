@@ -224,9 +224,17 @@ export function CommandPalette() {
             )}
 
             {items.length > 0 && (
-              <ul role="listbox" aria-label="검색 결과" className="flex flex-col py-1">
+              <div
+                role="listbox"
+                aria-label="검색 결과"
+                className="flex flex-col py-1"
+              >
                 {items.map((it, i) => (
-                  <li key={`${it.section}-${it.href}`} role="option" aria-selected={i === active}>
+                  <div
+                    key={`${it.section}-${it.href}`}
+                    role="option"
+                    aria-selected={i === active}
+                  >
                     <Link
                       href={it.href}
                       onClick={() => setOpen(false)}
@@ -251,9 +259,9 @@ export function CommandPalette() {
                         {it.section}
                       </span>
                     </Link>
-                  </li>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </div>
 

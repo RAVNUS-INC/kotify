@@ -85,11 +85,16 @@ export const ChipField = forwardRef<HTMLInputElement, ChipFieldProps>(
       }
     };
 
+    // 빈 영역 클릭 시 input으로 focus 전달 (큰 클릭 타겟 제공).
+    // 실제 키보드 네비는 내부 input이 이미 포커서블이므로 별도 key 핸들러
+    // 불필요. jsx-a11y/strict가 non-interactive element의 click을 경고하나
+    // 근거 있는 패턴이라 line-level disable.
     const onRootClick = (e: React.MouseEvent) => {
       if (e.target === rootRef.current) innerRef.current?.focus();
     };
 
     return (
+      // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
       <div
         ref={rootRef}
         role="group"
