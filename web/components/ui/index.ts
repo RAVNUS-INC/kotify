@@ -58,3 +58,6 @@ export type { LinkSegmentedProps, LinkSegmentedOption } from './LinkSegmented';
 
 export { ListSearchInput } from './ListSearchInput';
 export type { ListSearchInputProps } from './ListSearchInput';
+
+export { Drawer } from './Drawer';
+export type { DrawerProps, DrawerWidth } from './Drawer';

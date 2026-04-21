@@ -41,3 +41,50 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ============ Drawer (Radix Dialog 기반) ============ */
+@keyframes k-drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes k-drawer-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes k-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes k-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.k-drawer-overlay[data-state='open'] {
+  animation: k-overlay-in 200ms ease-out;
+}
+.k-drawer-overlay[data-state='closed'] {
+  animation: k-overlay-out 160ms ease-in;
+}
+.k-drawer-content[data-state='open'] {
+  animation: k-drawer-in 320ms cubic-bezier(0.22, 0.9, 0.3, 1);
+}
+.k-drawer-content[data-state='closed'] {
+  animation: k-drawer-out 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}

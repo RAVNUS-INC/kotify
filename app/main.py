@@ -129,6 +129,7 @@ except Exception:  # noqa: BLE001
 # ── 라우터 등록 (JSON API 전용) ─────────────────────────────────────────────
 from app.routes.auth import router as auth_router
 from app.routes.campaigns import router as campaigns_router
+from app.routes.contacts import router as contacts_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.health import router as health_router
 from app.routes.threads import router as threads_router
@@ -140,6 +141,7 @@ app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(campaigns_router)
 app.include_router(threads_router)
+app.include_router(contacts_router)
 
 
 # ── 미들웨어: 사용자 컨텍스트 주입 ───────────────────────────────────────────
