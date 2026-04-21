@@ -32,6 +32,15 @@
   flex-wrap: wrap;
 }
 .chat-content-footer form { width: 100%; }
+/* 메시지 그룹 타임스탬프 — 같은 보낸이 연속 시 첫 번째만 표시 */
+.chat-msg-ts-hidden h6 { display: none; }
+/* sidebar-right details 토글 */
+.chat-sidebar-right details summary {
+  cursor: pointer;
+  list-style: none;
+  outline: none;
+}
+.chat-sidebar-right details summary::-webkit-details-marker { display: none; }
 </style>
 {% endblock %}
 
@@ -102,11 +111,19 @@
     <div class="chat-content-body" id="messages">
       <div class="chat-group">
         {% for m in messages %}
+        {# ── 메시지 그룹화: 같은 방향 + 같은 분(minute)이면 타임스탬프 숨김 ── #}
+        {% if loop.index0 == 0 %}
+          {% set same_group = false %}
+        {% else %}
+          {% set prev = messages[loop.index0 - 1] %}
+          {% set same_group = (prev.direction == m.direction and prev.timestamp[:16] == m.timestamp[:16]) %}
+        {% endif %}
+
         {% if m.direction == 'OUT' %}
-        <div class="media reverse">
-          <div class="avatar avatar-sm"><span class="avatar-initial rounded-circle bg-primary">me</span></div>
+        <div class="media reverse{% if same_group %} chat-msg-ts-hidden{% endif %}">
+          <div class="avatar avatar-sm"><span class="avatar-initial rounded-circle bg-primary">{{ (user.name[0] | upper) if user and user.name else 'me' }}</span></div>
           <div class="media-body">
-            <h6>kotify <small class="tx-color-04 mg-l-4">{{ m.timestamp | kst_dt }}</small></h6>
+            <h6>{{ user.name if user and user.name else 'kotify' }} <small class="tx-color-04 mg-l-4">{{ m.timestamp | kst_dt }}</small></h6>
             <p class="chat-msg outgoing">{{ m.body or '(빈 메시지)' }}</p>
             <small class="d-block tx-color-04 tx-10">
               {% if m.channel %}{{ m.channel }}{% endif %}
@@ -116,7 +133,7 @@
           </div><!-- media-body -->
         </div><!-- media -->
         {% else %}
-        <div class="media">
+        <div class="media{% if same_group %} chat-msg-ts-hidden{% endif %}">
           <div class="avatar avatar-sm avatar-online">
             <span class="avatar-initial rounded-circle bg-gray-500">
               {{ phone[-2:] if phone|length >= 2 else phone }}
@@ -138,61 +155,6 @@
       </div>
     </div><!-- chat-content-body -->
 
-    {# =============== 우측 컬럼 — 프로필 요약 (원본 chat-sidebar-right) =============== #}
-    <div class="chat-sidebar-right">
-      <div class="pd-y-20 pd-x-15">
-        <div class="tx-10 tx-uppercase tx-medium tx-color-03 tx-sans tx-spacing-1 mg-b-10">대화 요약</div>
-
-        <div class="d-flex flex-column align-items-center pd-y-10 bd-b mg-b-15">
-          <div class="avatar avatar-lg avatar-online mg-b-10">
-            <span class="avatar-initial rounded-circle bg-primary tx-16">
-              {{ phone[-2:] if phone|length >= 2 else phone }}
-            </span>
-          </div>
-          <h6 class="mg-b-2 tx-semibold">{{ phone | phone_fmt }}</h6>
-          <small class="tx-11 tx-color-03">수신자</small>
-        </div>
-
-        <div class="mg-b-15">
-          <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">발신번호</h6>
-          <p class="tx-13 tx-monospace tx-color-01 mg-b-0">{{ caller | phone_fmt }}</p>
-        </div>
-
-        <div class="mg-b-15">
-          <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">메시지</h6>
-          <p class="tx-13 mg-b-0"><strong>{{ messages | length }}</strong>개</p>
-        </div>
-
-        {% if session and session.recent_out_count > 0 %}
-        <div class="mg-b-15 pd-10 bg-gray-100 rounded">
-          <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">24h 세션 과금</h6>
-          <p class="tx-16 tx-semibold mg-b-2">{{ session.session_billed }}<small class="tx-11 tx-color-03">원</small></p>
-          <small class="tx-11 tx-color-03 d-block">
-            발신 {{ session.recent_out_count }}/{{ session.max_units }}건
-            {% if session.capped %} · <span class="tx-danger">상한 도달</span>{% endif %}
-          </small>
-          <small class="tx-10 tx-color-04 d-block mg-t-4 lh-4">
-            RCS 양방향 세션당 최대 {{ session.max_units }}건({{ session.cap_krw }}원) 상한.
-          </small>
-        </div>
-        {% endif %}
-
-        <div>
-          <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">채널 요금</h6>
-          <ul class="list-unstyled tx-12 tx-color-02 mg-b-0">
-            <li class="d-flex justify-content-between pd-y-2">
-              <span>RCS 양방향 CHAT</span>
-              <span class="tx-medium">8원</span>
-            </li>
-            <li class="d-flex justify-content-between pd-y-2">
-              <span>SMS 자동 전환</span>
-              <span class="tx-medium">9원</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </div><!-- chat-sidebar-right -->
-
     {# =============== 하단 — 답장 폼 (원본 chat-content-footer 확장) =============== #}
     <div class="chat-content-footer">
       <form method="post" action="/chat/{{ caller }}/{{ phone }}/reply" class="d-flex flex-column">
@@ -201,12 +163,12 @@
         <div class="alert alert-danger tx-12 mg-b-8 pd-y-6 pd-x-10">{{ error }}</div>
         {% endif %}
         <textarea name="content" id="reply-content" rows="2" class="form-control mg-b-8"
-                  placeholder="답장 입력 (90바이트 이내 단문 — RCS 양방향 CHAT 8원, SMS 자동 전환 9원)"
+                  placeholder="답장 입력 (90바이트 이내 단문 — RCS 단방향 9원, SMS 자동 전환 9원)"
                   maxlength="500">{{ draft or '' }}</textarea>
         <div class="d-flex justify-content-between align-items-center">
           <small id="reply-bytes" class="tx-11 tx-color-03">0 byte</small>
           <div class="d-flex align-items-center">
-            <small class="tx-11 tx-color-04 mg-r-10">Ctrl+Enter 전송</small>
+            <small class="tx-11 tx-color-04 mg-r-10">Ctrl+Enter / Cmd+Enter 전송</small>
             <button type="submit" class="btn btn-primary btn-sm">
               <i data-feather="send" class="wd-12 ht-12 mg-r-4"></i> 답장 전송
             </button>
@@ -216,6 +178,59 @@
     </div><!-- chat-content-footer -->
 
   </div><!-- chat-content -->
+
+  {# =============== 우측 컬럼 — 프로필 요약 (chat-wrapper 직속 형제로 배치) =============== #}
+  <div class="chat-sidebar-right">
+    <div class="pd-y-20 pd-x-15">
+      <div class="tx-10 tx-uppercase tx-medium tx-color-03 tx-sans tx-spacing-1 mg-b-10">대화 요약</div>
+
+      <div class="d-flex flex-column align-items-center pd-y-10 bd-b mg-b-15">
+        <div class="avatar avatar-lg avatar-online mg-b-10">
+          <span class="avatar-initial rounded-circle bg-primary tx-16">
+            {{ phone[-2:] if phone|length >= 2 else phone }}
+          </span>
+        </div>
+        <h6 class="mg-b-2 tx-semibold">{{ phone | phone_fmt }}</h6>
+        <small class="tx-11 tx-color-03">수신자</small>
+      </div>
+
+      <div class="mg-b-15">
+        <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">발신번호</h6>
+        <p class="tx-13 tx-monospace tx-color-01 mg-b-0">{{ caller | phone_fmt }}</p>
+      </div>
+
+      <div class="mg-b-15">
+        <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">메시지</h6>
+        <p class="tx-13 mg-b-0"><strong>{{ messages | length }}</strong>개</p>
+      </div>
+
+      {# 24h 세션 과금 블록 — 양방향 CHAT 기준 로직이므로 표시만 주석 처리 #}
+      {# {% if session and session.recent_out_count > 0 %}
+      <div class="mg-b-15 pd-10 bg-gray-100 rounded">
+        <h6 class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8">24h 세션 과금</h6>
+        ...
+      </div>
+      {% endif %} #}
+
+      <details class="mg-b-0">
+        <summary class="tx-11 tx-uppercase tx-spacing-1 tx-color-03 tx-medium mg-b-8 d-flex align-items-center justify-content-between">
+          <span>채널 요금</span>
+          <i data-feather="chevron-down" class="wd-12 ht-12"></i>
+        </summary>
+        <ul class="list-unstyled tx-12 tx-color-02 mg-b-0 mg-t-8">
+          <li class="d-flex justify-content-between pd-y-2">
+            <span>RCS 단방향</span>
+            <span class="tx-medium">9원</span>
+          </li>
+          <li class="d-flex justify-content-between pd-y-2">
+            <span>SMS 자동 전환</span>
+            <span class="tx-medium">9원</span>
+          </li>
+        </ul>
+      </details>
+    </div>
+  </div><!-- chat-sidebar-right -->
+
 </div><!-- chat-wrapper -->
 
 <script>
@@ -237,11 +252,20 @@
   }
   ta.addEventListener('input', update);
   ta.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.key === 'Enter') ta.form.submit();
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') ta.form.submit();
   });
   update();
-  var messages = document.getElementById('messages');
-  if (messages) messages.scrollTop = messages.scrollHeight;
+
+  // 스크롤 — 웹폰트·feather icon 렌더 완료 후 정확한 scrollHeight 기준으로 이동 (#1, #4)
+  function scrollToBottom() {
+    var messages = document.getElementById('messages');
+    if (messages) messages.scrollTop = messages.scrollHeight;
+  }
+  window.addEventListener('load', scrollToBottom);
+  // requestAnimationFrame fallback: load 이벤트가 이미 발생한 경우 대비
+  requestAnimationFrame(function() {
+    requestAnimationFrame(scrollToBottom);
+  });
 })();
 </script>
 {% endblock %}

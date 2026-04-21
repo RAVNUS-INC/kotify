@@ -3,12 +3,28 @@
 
 {% block vendor_css_extra %}
 <link rel="stylesheet" href="/static/css/dashforge.chat.css">
+<style>
+/* list: 우측 placeholder 패널 — thread.html 3열 레이아웃과 시각적 일관성 (#10) */
+.chat-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #f4f5f8;
+  color: #8392a5;
+  min-height: 0;
+}
+@media (max-width: 767px) {
+  .chat-placeholder { display: none; }
+}
+</style>
 {% endblock %}
 
 {% block content %}
 <div class="chat-wrapper chat-wrapper-two">
 
-  <div class="chat-sidebar" style="left:0;right:0">
+  <div class="chat-sidebar">
 
     <div class="chat-sidebar-header">
       <div class="d-flex align-items-center">
@@ -22,7 +38,9 @@
       <div class="flex-fill pd-y-20 pd-x-10">
         <div class="d-flex align-items-center justify-content-between pd-x-10 mg-b-10">
           <span class="tx-10 tx-uppercase tx-medium tx-color-03 tx-sans tx-spacing-1">Direct Messages</span>
-          <span class="tx-10 tx-color-04">RCS 양방향 · 미답 뱃지</span>
+          {% if threads %}
+          <span class="tx-10 tx-color-04">{{ threads | selectattr('unanswered') | list | length }}개 미답</span>
+          {% endif %}
         </div>
 
         {% if threads %}
@@ -45,7 +63,10 @@
               </small>
             </div>
             {% if t.unanswered %}
-            <span class="badge text-bg-danger">미답</span>
+            {# 미답 뱃지: "미답" 대신 마지막 수신 이후 경과 시간으로 긴급성 전달 (#12) #}
+            <span class="badge text-bg-danger ms-1 align-self-center"
+                  data-ts="{{ t.last_timestamp }}"
+                  title="미답">미답</span>
             {% endif %}
           </a><!-- media -->
           {% endfor %}
@@ -54,7 +75,10 @@
         <div class="text-center pd-40">
           <i data-feather="message-square" class="wd-48 ht-48 tx-color-04 op-5 mg-b-10"></i>
           <p class="tx-13 tx-color-02 mg-b-4">아직 대화 내역이 없습니다.</p>
-          <p class="tx-12 tx-color-03 mg-b-0">고객이 RCS로 답장을 보내면 여기에 표시됩니다.</p>
+          <p class="tx-12 tx-color-03 mg-b-16">고객이 RCS로 답장을 보내면 여기에 표시됩니다.</p>
+          <a href="/campaign/new" class="btn btn-sm btn-primary">
+            <i data-feather="send" class="wd-12 ht-12 mg-r-4"></i> 테스트 메시지 보내기
+          </a>
         </div>
         {% endif %}
       </div>
@@ -74,5 +98,31 @@
 
   </div><!-- chat-sidebar -->
 
+  {# 우측 placeholder — thread.html과 레이아웃 일관성 유지 (#10) #}
+  <div class="chat-placeholder">
+    <i data-feather="message-square" style="width:40px;height:40px;stroke-width:1;margin-bottom:12px;opacity:.35"></i>
+    <p class="tx-13 mg-b-0" style="opacity:.5">대화방을 선택하세요</p>
+  </div>
+
 </div><!-- chat-wrapper -->
+
+<script>
+// 미답 뱃지에 경과 시간 표시 (#12)
+(function() {
+  var badges = document.querySelectorAll('[data-ts]');
+  badges.forEach(function(el) {
+    var ts = el.getAttribute('data-ts');
+    if (!ts) return;
+    var d = new Date(ts.replace(' ', 'T') + (ts.indexOf('+') === -1 && ts.indexOf('Z') === -1 ? '+00:00' : ''));
+    if (isNaN(d)) return;
+    var diff = Math.floor((Date.now() - d.getTime()) / 1000);
+    var label;
+    if (diff < 60) label = diff + '초';
+    else if (diff < 3600) label = Math.floor(diff / 60) + '분';
+    else if (diff < 86400) label = Math.floor(diff / 3600) + '시간';
+    else label = Math.floor(diff / 86400) + '일';
+    el.textContent = label + ' 전';
+  });
+})();
+</script>
 {% endblock %}
