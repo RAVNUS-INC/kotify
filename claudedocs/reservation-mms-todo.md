@@ -1,5 +1,12 @@
 # 예약 발송 + MMS 구현 — 다음 세션 TODO
 
+> **⚠️ HISTORICAL — 이 문서의 모든 작업은 완료되었고, 이후 NCP 전체가 msghub로 교체되었다.**
+> 본 문서는 NCP 시절 기획 히스토리로 보존됨. 현재 시스템 정보는 [HANDOFF.md](../HANDOFF.md) 참조.
+>
+> - 예약 발송: msghub 연동으로 구현 완료
+> - MMS + 이미지 전처리: `app/services/image.py`에 RCS/MMS 공용으로 구현 완료
+> - 본문에 나오는 `app/ncp/*`, `NCPClient`, `NcpRequest`는 현재 존재하지 않음 (msghub로 치환됨)
+>
 > 이 문서는 세션을 새로 시작할 때 컨텍스트 복원용으로 작성됐다.
 > `git log --oneline`과 함께 읽으면 이전 작업 전체가 복원된다.
 
