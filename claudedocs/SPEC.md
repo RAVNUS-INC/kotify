@@ -1,59 +1,60 @@
 # kotify — 개발 명세서
 
-> NCP SENS SMS v2 API 기반 단체 문자 공지 발송 시스템
-> 작성일: 2026-04-08 / 버전: 0.1 (초안)
+> U+ msghub 기반 RCS 우선 단체 공지 발송 시스템
+> 작성일: 2026-04-08 / 최종 갱신: 2026-04-21 / 버전: 0.2
 
 ---
 
 ## 0. 한 페이지 요약 (TL;DR)
 
-- **목적**: 운영자가 웹 UI에서 다수 인원에게 SMS/LMS 공지를 발송하고, 발송 이력과 NCP 측 결과를 영구 보관·조회한다.
+- **목적**: 운영자가 웹 UI에서 다수 인원에게 RCS/SMS/LMS/MMS 공지를 발송하고, 발송 이력과 결과를 영구 보관·조회한다.
+- **발송 전략**: **RCS 우선**. RCS 실패 시 msghub `fbInfoLst`로 SMS/LMS/MMS 자동 fallback. 단문: RCS 양방향(8원) → SMS(9원). 이미지: RCS 템플릿(40원) → MMS(85원, **53% 절감**).
 - **운영 도메인**: `sms.example.com`
-- **스택**: Python 3.12 + FastAPI + Jinja2 + HTMX + SQLite + Authlib(Keycloak OIDC).
-- **배포**: Proxmox LXC CT (Debian 12, 1GB RAM, 8GB disk). 앞단 NPM(Nginx Proxy Manager)이 TLS 종단.
-- **규모**: 1회 발송 최대 1,000명. NCP 제약상 **100명씩 10개 청크로 분할 호출**.
-- **결과 동기화**: NCP v2는 webhook 미지원 → **백그라운드 폴링 워커**가 `GET /messages?requestId=...`로 상태 갱신.
-- **이력 보관**: NCP는 90일까지만 조회 가능 → 본 시스템 SQLite가 영구 저장소.
-- **인증**: 모든 라우트는 Keycloak OIDC 보호 (realm/client = `sms-sys`). 발신은 별도 권한 그룹만.
-- **시크릿 관리**: **`.env` 파일 없음.** 마스터 키 1개만 `/var/lib/sms/master.key` (자동 생성, 600 권한)에 두고, 모든 NCP/Keycloak 설정은 DB에 **Fernet 암호화** 저장. 웹 UI에서 관리.
-- **부트스트랩**: 첫 실행 시 `/setup` wizard 자동 활성화 → Keycloak/NCP 설정 + 첫 admin 등록 → 폐쇄.
+- **스택**: Python 3.12+ FastAPI 백엔드 + Node 20+ Next.js 14 프론트엔드 + SQLite + Authlib(Keycloak OIDC).
+- **배포**: Proxmox LXC CT (Debian 12/13, 1 vCPU / 1 GB / 8 GB). FastAPI는 내부(8080), Next.js가 외부 대면(3000). NPM이 TLS 종단.
+- **규모**: 1회 발송 최대 1,000명.
+- **결과 동기화**: **msghub 웹훅** (`/webhook/msghub/report`) — 폴링 없음.
+- **이력 보관**: 본 시스템 SQLite가 영구 저장소.
+- **인증**: 모든 앱 라우트는 Keycloak OIDC 보호 (realm/client = `sms-sys`). 2-tier guard (middleware + layout session).
+- **시크릿**: **`.env` 없음.** 마스터 키 1개만 `/var/lib/kotify/master.key` (600 권한, 자동 생성)에 두고, 모든 msghub/Keycloak 설정은 DB에 **Fernet 암호화** 저장. 웹 UI에서 관리.
+- **부트스트랩**: 첫 실행 시 `/setup` wizard 자동 활성화 → Keycloak + msghub + RCS 설정 + 첫 admin 등록 → 폐쇄.
 
-### 리서치에서 드러난 핵심 사실 (반드시 반영)
-1. **`messages` 배열은 1회 호출당 최대 100건** (1000 아님). → 청크 분할 필수.
-2. **NCP SMS v2에 webhook/callback 없음.** 결과 동기화는 폴링이 유일.
-3. **Send 응답에 `messageId`가 없음.** 발송 직후 `requestId`로 list API 1회 호출해서 `messageId` 수집해야 함.
-4. **`status=COMPLETED` ≠ 성공.** `status`는 발송 서버 처리 단계, 단말 수신 결과는 `statusName`(`success`/`fail`)으로 판단.
-5. **시간 윈도우 비대칭**: requestTime 30일 / completeTime 24시간. 백필 로직 설계 시 주의.
-6. **이력 보관**: API 90일 / 콘솔 30일. 본 시스템이 영구 보존 책임.
-7. **EUC-KR 기반**: 이모지 발송 시 실패 가능. 본문 사전 정제 필요.
-8. **본문 길이는 byte**: SMS 90B (한글 ~45자), LMS/MMS 2000B (한글 ~1000자).
-9. **발신번호 사전 등록 필수** (영업일 3-4일). 미등록 시 수신결과코드 `3023`.
-10. **5분 timestamp drift**: NTP 동기화 필수.
+### 핵심 설계 원칙
+
+1. **RSC-first**: Next.js App Router의 서버 컴포넌트를 기본으로, `'use client'`는 stateful leaf에만.
+2. **URL state > client state**: 필터/선택/검색은 모두 `searchParams`로. 뒤로가기/딥링크/공유가 공짜로 동작.
+3. **CORS surface = 0**: 프론트엔드는 FastAPI URL을 모른다. `/api/*`는 Next.js `rewrites()`로 내부 프록시.
+4. **모션 1.2s 예산**: 한 페이지의 모든 연출이 1.2초 이내 종료 (`motion-timing.md` 매트릭스로 강제).
+5. **Typed routes**: `experimental.typedRoutes: true` — 컴파일 시 잘못된 링크 차단.
 
 ---
 
 ## 1. 범위와 비범위
 
 ### 1.1 범위 (In Scope)
-- 웹 UI를 통한 SMS/LMS 공지 작성·발송
-- 다양한 형식(`010-1234-5678`, `01012345678`, `+82-10-1234-5678` 등)의 전화번호 일괄 입력 및 정규화
-- 발송 전 byte 길이 검증 및 SMS↔LMS 자동 판정
-- 청크 분할(100명/호출) 자동 처리
-- NCP 발송 결과 폴링·동기화 (성공/실패/실패사유 영구 저장)
-- 발송 이력 조회·검색 (작성자/기간/상태별 필터)
+
+- 웹 UI를 통한 RCS/SMS/LMS/MMS 공지 작성·발송
+- 전화번호 다양한 형식(`010-1234-5678`, `01012345678`, `+82-10-1234-5678` 등) 일괄 입력 및 정규화
+- 발송 전 byte 길이 검증 및 채널 자동 판정 (RCS/LMS/MMS)
+- msghub 웹훅 기반 결과 수신 (`/webhook/msghub/report`) 및 이력 영구 저장
+- 발송 이력 조회·검색 (작성자/기간/상태/채널별 필터)
 - Keycloak OIDC 로그인
-- 발신자 권한 분리 (viewer / sender / admin)
+- 역할별 권한 분리 (viewer / sender / admin)
 - 발신번호 화이트리스트 관리
+- 연락처/그룹/예약 발송 (기본)
+- 실시간 채팅(SSE) — RCS 양방향 대화
+- 감사 로그 (모든 민감 작업)
+- 알림 센터, 통합 검색, 리포트(차트/KPI)
 
 ### 1.2 비범위 (Out of Scope)
-- LMS/MMS 첨부파일 발송 (1차 버전 제외, MMS는 추후)
-- 예약 발송 (1차 버전 제외, 추후 옵션)
-- 알림톡(KakaoTalk) 연동
+
+- 카카오톡 알림톡/친구톡 (msghub는 지원하나 본 시스템은 미사용)
 - 광고성(`AD`) 발송 (098 수신거부 운영 필요 — 1차 제외)
-- 사내 직원 명부 자동 연동 (수동 입력만)
+- MO(수신 메시지) 기반 자동 응답 플로우 (수신 수신 기록만)
+- 사내 직원 명부 자동 연동 (CSV/수동 입력만)
 - 다국어 번호 (국내 `01x`만 허용)
 - 고가용성/이중화 (단일 CT)
-- 외부 노출 (사내망/VPN only)
+- 외부 노출 (사내망/VPN 운영 전제)
 
 ---
 
@@ -63,9 +64,10 @@
 |---|---|
 | **viewer** | 본인이 발송한 이력만 조회 |
 | **sender** | 발송 + 본인 이력 조회 |
-| **admin** | 전체 이력 조회, 발신번호 관리, 사용자 권한 관리 |
+| **admin** | 전체 이력 조회, 발신번호/사용자/설정 관리 |
 
-권한은 Keycloak의 **realm role** 또는 **client role**로 매핑. ID 토큰 claim에서 읽어 FastAPI 의존성으로 검사.
+권한은 Keycloak의 **realm role** 또는 **client role**로 매핑. ID 토큰 claim에서 읽어
+FastAPI 의존성(`require_user`, `require_role`)과 Next.js `layout.tsx`의 session guard에서 동시 검사.
 
 ---
 
@@ -75,335 +77,198 @@
 ┌─────────────┐    HTTPS     ┌──────────────────────────────────┐
 │  사용자     │ ───────────► │  Nginx Proxy Manager (사용자 운영) │
 │  브라우저   │              │  - TLS 종단                        │
-└─────────────┘              │  - sms.internal.example.com        │
+└─────────────┘              │  - sms.example.com                 │
+                             │  - proxy_buffering off (SSE)       │
                              └────────────────┬───────────────────┘
                                               │ HTTP (사설망)
                                               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ Proxmox LXC CT (Debian 12, 1GB / 8GB / 1 vCPU)                │
+│ Proxmox LXC CT (Debian 12/13, 1GB / 8GB / 1 vCPU)            │
 │                                                               │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │ uvicorn (단일 프로세스)                                 │  │
-│  │  ┌──────────────────────────────────────────────────┐  │  │
-│  │  │ FastAPI app                                       │  │  │
-│  │  │  - Jinja2 + HTMX 라우트 (UI)                      │  │  │
-│  │  │  - REST 라우트 (HTMX fragment 응답)               │  │  │
-│  │  │  - Authlib OIDC 미들웨어 (Keycloak)               │  │  │
-│  │  │  - NCP SENS 클라이언트                            │  │  │
-│  │  │  - asyncio 폴링 워커 (lifespan task)              │  │  │
-│  │  └──────────────────────────────────────────────────┘  │  │
+│  │ kotify-web.service — Next.js 14 (0.0.0.0:3000)          │  │
+│  │  - App Router (RSC + Client Components)                 │  │
+│  │  - typedRoutes, middleware (Keycloak guard)             │  │
+│  │  - rewrites: /api/* → http://127.0.0.1:8080/*           │  │
+│  │  - SSE 프록시 (chat)                                    │  │
+│  └───────────────────┬─────────────────────────────────────┘  │
+│                      │ HTTP (loopback)                          │
+│                      ▼                                           │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ kotify.service — FastAPI (127.0.0.1:8080)               │  │
+│  │  - REST 라우트 (/api/* 로 노출, 원본은 /*)               │  │
+│  │  - Authlib OIDC (Keycloak)                              │  │
+│  │  - msghub 클라이언트 (JWT, SHA512 이중 해싱)            │  │
+│  │  - /webhook/msghub/report — 결과 수신                   │  │
+│  │  - /webhook/msghub/mo — 수신 메시지 (기록만)            │  │
+│  │  - SSE 엔드포인트 (chat stream)                         │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                               │
-│  /var/lib/sms/sms.db   (SQLite, WAL 모드)                     │
-│  /etc/sms/.env         (시크릿)                                │
-│  systemd: sms.service                                         │
+│  /var/lib/kotify/sms.db      (SQLite, WAL 모드)               │
+│  /var/lib/kotify/master.key  (600, 자동 생성)                 │
+│  systemd: kotify.service + kotify-web.service                 │
 └──────────────────────────────────────────────────────────────┘
                                    │ HTTPS outbound
                                    ▼
                   ┌──────────────────────────────┐
-                  │ NCP SENS API                 │
-                  │ sens.apigw.ntruss.com        │
-                  │ ┌──────────────────────────┐ │
-                  │ │ Keycloak (별도 서버)      │ │
-                  │ │ /realms/internal         │ │
-                  │ └──────────────────────────┘ │
+                  │ U+ msghub API                │
+                  │ api.msghub.uplus.co.kr       │
+                  │   (또는 전용선 1.209.4.60/75) │
+                  │                              │
+                  │ Keycloak (별도 서버)          │
+                  │ /realms/sms-sys              │
                   └──────────────────────────────┘
 ```
 
 ### 3.1 프로세스 모델
-- **단일 uvicorn 프로세스, 단일 워커**. SQLite + 단일 인메모리 폴링 큐 일관성 보장을 위해.
-- 폴링 워커는 `FastAPI lifespan`에서 `asyncio.create_task`로 띄움.
-- WAL 모드로 SQLite 동시 read/write 안정성 확보.
+
+- FastAPI: **단일 uvicorn 프로세스, 단일 워커** (SQLite 일관성).
+- Next.js: **node standalone server** (`output: 'standalone'`). Next.js 내부는 다중 리퀘스트 병렬 처리.
+- SQLite: WAL 모드로 동시 read/write 안정성 확보.
+- 웹훅 엔드포인트는 단순 upsert라 동시성 이슈 없음 (UNIQUE index + `ON CONFLICT DO UPDATE`).
 
 ---
 
 ## 4. 데이터 모델 (SQLite)
 
+핵심 테이블 요약 (신규 배포 시 `alembic upgrade head`로 초기 구축):
+
 ```sql
 -- 사용자 (Keycloak에서 처음 로그인 시 upsert)
 CREATE TABLE users (
-  sub          TEXT PRIMARY KEY,        -- Keycloak sub
-  email        TEXT NOT NULL,
-  name         TEXT NOT NULL,
-  roles        TEXT NOT NULL,           -- JSON array
-  created_at   TEXT NOT NULL,
-  last_login_at TEXT NOT NULL
+  sub TEXT PRIMARY KEY, email TEXT, name TEXT, roles TEXT,
+  created_at TEXT, last_login_at TEXT
 );
 
--- 등록된 발신번호 (admin이 관리)
+-- 발신번호 화이트리스트
 CREATE TABLE callers (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  number       TEXT NOT NULL UNIQUE,    -- 숫자만 (NCP 등록 형식과 동일)
-  label        TEXT NOT NULL,
-  active       INTEGER NOT NULL DEFAULT 1,
-  is_default   INTEGER NOT NULL DEFAULT 0,  -- compose 화면 기본 선택 (1개만 1)
-  created_at   TEXT NOT NULL
+  id INTEGER PRIMARY KEY, number TEXT UNIQUE, label TEXT,
+  active INTEGER, is_default INTEGER, created_at TEXT
 );
--- 초기 시드 없음 — 발신번호는 admin UI에서 직접 추가
 
--- 시스템 설정 (env 대체) — 시크릿은 Fernet 암호화 후 저장
+-- 시스템 설정 (env 대체) — 시크릿은 Fernet ciphertext
 CREATE TABLE settings (
-  key          TEXT PRIMARY KEY,         -- ncp.access_key, ncp.secret_key, ncp.service_id,
-                                         -- keycloak.issuer, keycloak.client_id, keycloak.client_secret,
-                                         -- session.secret, app.public_url 등
-  value        TEXT NOT NULL,            -- 시크릿이면 Fernet ciphertext, 아니면 평문
-  is_secret    INTEGER NOT NULL DEFAULT 0,
-  updated_by   TEXT,                     -- users.sub
-  updated_at   TEXT NOT NULL
+  key TEXT PRIMARY KEY,       -- msghub.api_key, msghub.api_password, msghub.brand_id,
+  value TEXT,                  -- keycloak.issuer, keycloak.client_id, ...
+  is_secret INTEGER, updated_by TEXT, updated_at TEXT
 );
 
--- 발송 캠페인 (사용자가 한 번 "보내기" 누른 단위)
+-- 연락처 / 그룹 (Phase 7c 추가)
+CREATE TABLE contacts (...);
+CREATE TABLE contact_groups (...);
+
+-- 발송 캠페인
 CREATE TABLE campaigns (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  created_by    TEXT NOT NULL,                -- users.sub
-  caller_number TEXT NOT NULL,
-  message_type  TEXT NOT NULL,                -- SMS | LMS
-  subject       TEXT,                         -- LMS 전용
-  content       TEXT NOT NULL,
-  total_count   INTEGER NOT NULL,
-  ok_count      INTEGER NOT NULL DEFAULT 0,
-  fail_count    INTEGER NOT NULL DEFAULT 0,
-  pending_count INTEGER NOT NULL DEFAULT 0,
-  state         TEXT NOT NULL,                -- DRAFT | DISPATCHING | DISPATCHED | COMPLETED | PARTIAL_FAILED | FAILED
-  created_at    TEXT NOT NULL,
-  completed_at  TEXT,
-  FOREIGN KEY (created_by) REFERENCES users(sub)
+  id INTEGER PRIMARY KEY, created_by TEXT, caller_number TEXT,
+  message_type TEXT,    -- RCS | RCS_LMS | RCS_IMAGE (각각 SMS/LMS/MMS fallback)
+  subject TEXT, content TEXT,
+  total_count INTEGER, ok_count INTEGER, fail_count INTEGER, pending_count INTEGER,
+  state TEXT,           -- DRAFT | DISPATCHING | DISPATCHED | COMPLETED | PARTIAL_FAILED | FAILED | RESERVED
+  reserve_at TEXT,      -- 예약 발송 시각 (UTC)
+  created_at TEXT, completed_at TEXT
 );
-CREATE INDEX idx_campaigns_created_by ON campaigns(created_by);
-CREATE INDEX idx_campaigns_created_at ON campaigns(created_at);
 
--- NCP 청크 (campaign 1개 = ncp_request N개)
-CREATE TABLE ncp_requests (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  campaign_id     INTEGER NOT NULL,
-  chunk_index     INTEGER NOT NULL,             -- 0..N-1
-  request_id      TEXT,                         -- NCP requestId
-  request_time    TEXT,                         -- NCP requestTime
-  http_status     INTEGER,
-  status_code     TEXT,                         -- NCP statusCode (e.g. "202")
-  status_name     TEXT,                         -- success | fail
-  error_body      TEXT,                         -- 실패 시 응답 raw
-  sent_at         TEXT NOT NULL,
-  FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
-  UNIQUE (campaign_id, chunk_index)
+-- msghub 요청 단위
+CREATE TABLE msghub_requests (
+  id INTEGER PRIMARY KEY, campaign_id INTEGER, chunk_index INTEGER,
+  msg_key TEXT,         -- msghub의 발송 요청 고유 키
+  http_status INTEGER, status_code TEXT, error_body TEXT,
+  sent_at TEXT
 );
-CREATE INDEX idx_ncp_requests_request_id ON ncp_requests(request_id);
 
 -- 개별 메시지 (수신자 단위)
 CREATE TABLE messages (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  campaign_id     INTEGER NOT NULL,
-  ncp_request_id  INTEGER NOT NULL,             -- ncp_requests.id (FK, NOT request_id 문자열)
-  to_number       TEXT NOT NULL,                -- 정규화 후 (숫자만)
-  to_number_raw   TEXT NOT NULL,                -- 사용자 원본 입력
-  message_id      TEXT,                         -- NCP messageId (list API에서 수집)
-  status          TEXT NOT NULL DEFAULT 'PENDING',
-                  -- PENDING | READY | PROCESSING | COMPLETED | TIMEOUT | UNKNOWN
-  result_status   TEXT,                         -- success | fail (NCP statusName)
-  result_code     TEXT,                         -- NCP statusCode (e.g. "0", "3001", "3023")
-  result_message  TEXT,                         -- NCP statusMessage
-  telco_code      TEXT,
-  complete_time   TEXT,
-  last_polled_at  TEXT,
-  poll_count      INTEGER NOT NULL DEFAULT 0,
-  FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
-  FOREIGN KEY (ncp_request_id) REFERENCES ncp_requests(id)
+  id INTEGER PRIMARY KEY, campaign_id INTEGER, msghub_request_id INTEGER,
+  to_number TEXT, to_number_raw TEXT,
+  cli_key TEXT,         -- client-side key: c{campaign}-{chunk}-{idx} — webhook 매칭용
+  msg_key TEXT,         -- msghub-side key: 발송 응답에서 받음
+  status TEXT,          -- PENDING | SENT | DELIVERED | FAILED | TIMEOUT
+  result_channel TEXT,  -- RCS | SMS | LMS | MMS (실제 도달된 채널)
+  result_code TEXT, result_message TEXT,
+  complete_time TEXT, received_at TEXT  -- webhook 수신 시각
 );
-CREATE INDEX idx_messages_campaign_id ON messages(campaign_id);
-CREATE INDEX idx_messages_status ON messages(status);
-CREATE INDEX idx_messages_message_id ON messages(message_id);
 
 -- 감사 로그
 CREATE TABLE audit_logs (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  actor_sub   TEXT,
-  action      TEXT NOT NULL,            -- LOGIN | SEND | CALLER_CREATE | CALLER_DELETE | ...
-  target      TEXT,
-  detail      TEXT,                     -- JSON
-  ip          TEXT,
-  created_at  TEXT NOT NULL
+  id INTEGER PRIMARY KEY, actor_sub TEXT, action TEXT, target TEXT,
+  detail TEXT,          -- JSON (단, 시크릿 값 자체는 저장 안 함)
+  ip TEXT, created_at TEXT
 );
 ```
 
-### 4.1 상태 머신
+### 4.1 Campaign.state 상태 머신
 
-#### Campaign.state
 ```
-       ┌──────────┐
-       │  DRAFT   │ (UI 미리보기 단계, 실제 INSERT는 발송 직전이라 보통 안 거침)
-       └────┬─────┘
-            ▼ (사용자 확정 → 발송 시작)
-       ┌──────────────┐
-       │ DISPATCHING  │ (청크들을 NCP에 전송 중)
-       └────┬─────────┘
-            ▼ (모든 청크 전송 완료)
-       ┌──────────────┐
-       │ DISPATCHED   │ (NCP는 받았음, 결과 폴링 대기)
-       └────┬─────────┘
-            ▼ (모든 messages가 final state 도달)
-   ┌───────────────────────┐
-   │ COMPLETED (전부 success) │
-   │ PARTIAL_FAILED (일부 실패) │
-   │ FAILED (전부 실패 / 청크 자체 실패) │
-   └───────────────────────┘
+  DRAFT ──(확정)──► DISPATCHING ──(모든 청크 전송 완료)──► DISPATCHED
+                                                                │
+                         예약 발송:                             ▼
+                         DRAFT ──► RESERVED ──(예약 시각)──► DISPATCHING
+                                                                │
+                                                                ▼
+                                         (모든 messages가 final state)
+                                 ┌──────────────┬───────────────┐
+                                 ▼              ▼               ▼
+                            COMPLETED    PARTIAL_FAILED      FAILED
+                         (전부 success)   (일부 실패)      (전부 실패/청크 실패)
 ```
 
-#### Message.status
-```
-PENDING ──(NCP send 응답 200/202)──► READY/PROCESSING ──(폴링)──► COMPLETED
-   │                                                                  │
-   │                                                                  └─► result_status: success | fail
-   └─(NCP send 응답 실패)─► (record 자체가 ncp_request 실패에 묶임 → status='UNKNOWN')
+### 4.2 Message.status 상태 머신
 
-* 1시간 폴링해도 COMPLETED 안 되면 → status='TIMEOUT'
-* result_status가 미설정 → status='UNKNOWN'
+```
+PENDING ──(msghub send 200)──► SENT ──(webhook)──► DELIVERED | FAILED
+   │                              │
+   │                              └─ 1시간 내 webhook 없음 → TIMEOUT
+   └─(msghub send 실패)──────────────────────────────► FAILED
 ```
 
 ---
 
-## 5. NCP SENS 연동 상세
+## 5. U+ msghub 연동 상세
 
-### 5.1 인증 (HMAC-SHA256)
+> 전체 API 레퍼런스: [`msghub-api-guide.md`](./msghub-api-guide.md)
+> 에러 코드 전체: [`msghub-error-codes.md`](./msghub-error-codes.md)
+> 구현 기획서: [`msghub-migration-spec.md`](./msghub-migration-spec.md)
 
-**필수 헤더 4종**:
-- `x-ncp-apigw-timestamp`: epoch milliseconds (string)
-- `x-ncp-iam-access-key`
-- `x-ncp-apigw-signature-v2`
-- `Content-Type: application/json`
+### 5.1 인증 (JWT)
 
-**Signing string** (정확한 포맷):
-```
-{METHOD} {URI_WITH_QUERY}\n{TIMESTAMP}\n{ACCESS_KEY}
-```
-- METHOD/URI 사이는 공백 1개, 그 외는 LF.
-- URI는 host 제외, querystring 포함.
-- HMAC-SHA256 with secret_key, then Base64.
-
-**파이썬 참조 구현** (`app/ncp/signature.py` — 사용자가 직접 작성하실 영역):
-```python
-def make_headers(method: str, uri: str, access_key: str, secret_key: str) -> dict:
-    """
-    NCP API Gateway 시그니처 헤더 4종을 만든다.
-
-    중요:
-    - timestamp는 단 한 번만 생성해서 헤더와 signing string 둘 다에 사용
-    - NTP 동기화 필수 (5분 drift 시 401)
-    - URI에 querystring 포함 (예약 발송 등에서 발생)
-    """
-    # TODO: 직접 구현
-```
-
-**함정 (반드시 회피)**:
-- timestamp를 두 번 생성하면 401 (드물게라도)
-- 시스템 시계 drift > 5분 → 401
-- URI에 host 포함 시 401
+- msghub는 **JWT Bearer 인증** 사용.
+- API Key / API Password 로 `/auth/token` 호출 → JWT 발급 (만료 시간 있음).
+- 구현: `app/msghub/auth.py`의 `TokenManager` 가 자동 갱신 관리.
+  - **SHA512 이중 해싱**: API Password를 두 번 SHA512 — 공식 가이드대로.
+  - **asyncio.Lock stampede 방지**: 여러 요청이 동시에 만료 토큰을 발견해도 단 하나만 갱신 요청.
+  - **Pre-expiry 갱신**: 만료 60초 전에 선제 갱신.
 
 ### 5.2 발송 API
 
-```
-POST https://sens.apigw.ntruss.com/sms/v2/services/{serviceId}/messages
-```
+- `POST /send/rcs` — RCS (양방향 CHAT / LMS / 이미지 템플릿)
+- `fbInfoLst` 파라미터에 fallback 체인 지정 (SMS/LMS/MMS).
+- 응답에 `msgKey` 즉시 반환 → messages 테이블에 저장.
+- **청크 크기: 10명** (msghub 권장). `cliKey` 패턴: `c{campaign_id}-{chunk}-{idx}`.
 
-**Request Body**:
-```json
-{
-  "type": "SMS",
-  "contentType": "COMM",
-  "countryCode": "82",
-  "from": "0212345678",
-  "content": "공지: 4월 9일 사옥 정전 점검이 있습니다.",
-  "messages": [
-    { "to": "01012345678" },
-    { "to": "01087654321" }
-  ]
-}
-```
+### 5.3 웹훅 결과 수신
 
-**Response (성공, HTTP 202)**:
-```json
-{
-  "requestId": "RSLA-...",
-  "requestTime": "2026-04-08T14:23:11.535",
-  "statusCode": "202",
-  "statusName": "success"
-}
-```
+- **Report**: `POST /api/webhook/msghub/report` — 발송 결과 (DELIVERED / FAILED + 실제 도달 채널).
+- **MO**: `POST /api/webhook/msghub/mo` — 수신 메시지 (기록만, 자동 응답 없음).
+- **서명 검증**: msghub가 전송하는 서명 헤더를 HMAC으로 검증. 실패 시 403.
+- 페이로드의 `cliKey` 또는 `msgKey`로 messages 테이블 매칭 → UPDATE.
 
-**중요**: `messageId`가 응답에 없음. 직후 5.3 list 호출로 수집.
-
-### 5.3 messageId 수집 (발송 직후 1회)
-
-```
-GET https://sens.apigw.ntruss.com/sms/v2/services/{serviceId}/messages?requestId={requestId}
-```
-
-`pageSize`가 `requestId` 입력 시 자동 1000이라 한 번에 100건 다 들어옴.
-
-응답의 `messages[]` 각 항목에서 `messageId`, `to`, `status` 추출 → `messages` 테이블에 매칭 UPDATE (`to_number` 기준).
-
-### 5.4 결과 폴링 (백그라운드 워커)
-
-**알고리즘**:
-```
-loop every TICK seconds (예: 5초):
-  미완료 메시지가 있는 ncp_requests 목록 조회
-  for each ncp_request:
-    if last_polled_at < now - backoff_interval(poll_count):
-      GET /messages?requestId={request_id}
-      for each message in response:
-        UPDATE messages SET
-          status = ?, result_status = ?, result_code = ?,
-          result_message = ?, complete_time = ?, telco_code = ?,
-          last_polled_at = now, poll_count = poll_count + 1
-        WHERE message_id = ?
-      campaign 카운터 재계산 + state 업데이트
-
-  타임아웃: send 후 1시간 경과 시 status='TIMEOUT' 처리
-```
-
-**Backoff 스케줄** (poll_count 기준):
-| poll_count | 다음 폴링까지 |
-|---|---|
-| 0 | 5초 |
-| 1 | 10초 |
-| 2 | 30초 |
-| 3 | 1분 |
-| 4-9 | 5분 |
-| 10+ | 15분 |
-
-**중지 조건**: 모든 messages가 `COMPLETED` 또는 발송 후 1시간 경과 (`TIMEOUT`).
-
-### 5.5 에러 처리
+### 5.4 에러 처리
 
 | HTTP | 처리 |
 |---|---|
-| 202 | 정상 (Send 성공) |
-| 200 | 정상 (List/Get 성공) |
-| 400 | 본문/스키마 오류. 사용자에게 400 fail 표시. 재시도 불가. |
-| 401 | 시그니처/시간 오류. 알람 + 관리자 점검 필요. |
-| 403 | 권한 없음. serviceId 점검. |
-| 404 | 리소스 없음. |
-| 429 | Rate limit. Exponential backoff (1초→2초→4초→...) 후 재시도, 최대 5회. |
+| 200 | 정상 |
+| 400 | 본문/스키마 오류. 사용자에게 fail 표시. 재시도 불가. |
+| 401 | JWT 만료 또는 서명 오류. TokenManager가 1회 재발급 후 재시도. |
+| 403 | 권한 없음. API Key / IP 화이트리스트 점검. |
+| 429 | Rate limit. Exponential backoff (1초→2초→4초→…), 최대 5회. |
 | 5xx | 일시 오류. 30초 후 재시도, 최대 3회. |
-
-### 5.6 수신결과 코드 매핑 (주요)
-
-| code | 분류 | 설명 |
-|---|---|---|
-| `0` | success | 성공 |
-| `2000-2007` | 통신망 실패 | 일시적 (전원 OFF, 음영지역, 버퍼 풀 등) |
-| `3001` | invalid | 결번 |
-| `3003` | invalid | 수신번호 형식 오류 |
-| `3018` | invalid | 발신번호 스푸핑 방지 가입 번호 |
-| `3023` | **invalid** | **사전 등록 안 된 발신번호** ← 발신번호 화이트리스트로 차단 |
-
-DB의 `result_code`는 raw 값으로 저장하고, UI에서 위 매핑 테이블로 한글 사유 표시.
 
 ---
 
 ## 6. 전화번호 정규화
 
 ### 6.1 입력 형식 (전부 허용)
+
 ```
 01012345678
 010-1234-5678
@@ -415,492 +280,417 @@ DB의 `result_code`는 raw 값으로 저장하고, UI에서 위 매핑 테이블
 ```
 
 ### 6.2 정규화 규칙
+
 1. 모든 공백/`-`/`.`/`(`/`)` 제거
 2. 선두 `+82` → `0` 치환
 3. 선두 `82` (10자리 이상) → `0` 치환
 4. 결과가 한국 휴대폰 패턴 `^01[016789]\d{7,8}$` 매치 확인
 5. 미매치 시 invalid
 
-### 6.3 정책 (확정)
+### 6.3 정책
+
 **잘못된 번호가 섞였을 때**: **(a) 차단** — 전체 발송 거부.
-- 미리보기 단계에서 잘못된 번호 목록을 표시하고, 하나라도 invalid가 있으면 "발송하기" 버튼 비활성화.
-- 사용자는 잘못된 번호를 수정/삭제한 뒤에야 발송 가능.
-- 발송 직전 서버 측에서 한 번 더 검증 (UI 우회 방지).
+- 미리보기 단계에서 invalid 번호 목록 표시, 하나라도 있으면 "발송하기" 버튼 비활성.
+- 서버 측에서 한 번 더 검증 (UI 우회 방지).
 
-### 6.4 명세 (`app/util/phone.py` — 사용자가 직접 작성하실 영역)
-```python
-def normalize_phone(raw: str) -> str | None:
-    """
-    한국 휴대폰 번호를 정규화한다.
-    성공: '01012345678' 형태 반환
-    실패: None
-    """
-    # TODO: 직접 구현
-
-def parse_phone_list(text: str) -> tuple[list[str], list[str]]:
-    """
-    멀티라인/콤마 구분 텍스트에서 번호를 추출하고 정규화한다.
-    반환: (valid_normalized, invalid_originals)
-    """
-    # TODO: 직접 구현
-```
+구현: `app/util/phone.py` (`normalize_phone`, `parse_phone_list`).
 
 ---
 
 ## 7. 메시지 본문 검증
 
-### 7.1 SMS/LMS 자동 판정
-- byte 길이 ≤ 90 → SMS
-- byte 길이 ≤ 2000 → LMS
-- byte 길이 > 2000 → 거부
+### 7.1 채널 자동 판정
+
+msghub는 **UTF-8 기반**. RCS/SMS/LMS/MMS 판정 기준:
+
+| 채널 | 조건 | 요금 |
+|---|---|---|
+| RCS 양방향 (CHAT) | 본문 ≤ 90 byte, 이미지 없음 | 8원 (fallback SMS 9원) |
+| RCS LMS | 본문 > 90 byte, 이미지 없음 | 27원 (fallback LMS 27원) |
+| RCS 이미지 템플릿 | 이미지 첨부 | 40원 (fallback MMS 85원) |
+
+본문 > 2000 byte → 거부.
 
 ### 7.2 byte 계산
-- **EUC-KR 인코딩 기준**으로 길이 측정 (NCP가 EUC-KR 기반).
-- 한글 1자 = 2 byte, ASCII 1자 = 1 byte.
-- 이모지/EUC-KR 미지원 문자 포함 시 **사전 차단** (NCP 발송 실패 방지).
 
-### 7.3 명세 (`app/util/text.py`)
-```python
-def measure_bytes(text: str) -> int:
-    return len(text.encode("euc-kr"))
+- UTF-8 인코딩 기준으로 측정: `len(text.encode("utf-8"))`.
+- 한글 1자 = 3 byte, ASCII 1자 = 1 byte.
+- 이모지는 4 byte 이상 — 사용자에게 실제 byte 수 + 채널 변화를 실시간 표시.
 
-def has_unsupported_chars(text: str) -> bool:
-    try:
-        text.encode("euc-kr")
-        return False
-    except UnicodeEncodeError:
-        return True
-```
+구현: `app/util/text.py`.
 
 ---
 
-## 8. 화면(UI) 명세
+## 8. 프론트엔드 (Next.js 14)
 
-모든 화면은 Jinja2 + HTMX. SPA 아님. 부분 갱신만 HTMX 사용.
+### 8.1 라우트 구조
 
-### 8.1 라우트 목록
-| Method | Path | 권한 | 설명 |
-|---|---|---|---|
-| GET | `/setup` | setup-mode only | 부트스트랩 wizard (Keycloak/NCP 미설정 시만 활성) |
-| POST | `/setup` | setup-mode only | wizard 저장 + 첫 admin 등록 + setup 폐쇄 |
-| GET | `/` | viewer+ | 대시보드 (최근 캠페인 10건 + 통계) |
-| GET | `/auth/login` | - | Keycloak 리다이렉트 |
-| GET | `/auth/callback` | - | OIDC 콜백 |
-| POST | `/auth/logout` | viewer+ | 로그아웃 |
-| GET | `/compose` | sender+ | 신규 발송 작성 화면 |
-| POST | `/compose/preview` | sender+ | 미리보기 (전화번호 검증, byte 길이, SMS/LMS 판정) |
-| POST | `/compose/send` | sender+ | 실제 발송 (campaign INSERT + dispatch) |
-| GET | `/campaigns` | viewer+ | 이력 목록 (필터: 기간, 상태, 작성자[admin만]) |
-| GET | `/campaigns/{id}` | viewer+(본인) / admin | 상세 (수신자별 결과) |
-| GET | `/campaigns/{id}/recipients` | viewer+(본인) / admin | 수신자 테이블 (HTMX, 페이지네이션) |
-| GET | `/campaigns/{id}/refresh` | viewer+(본인) / admin | 폴링 강제 트리거 (HTMX 부분 갱신) |
-| GET | `/admin/settings` | admin | 시스템 설정 (NCP 키, Keycloak, 도메인 등) |
-| POST | `/admin/settings` | admin | 설정 저장 (시크릿은 Fernet 암호화 후 DB) |
-| POST | `/admin/settings/test-ncp` | admin | NCP 인증 테스트 (현재 키로 발신번호 조회 등) |
-| GET | `/admin/callers` | admin | 발신번호 관리 |
-| POST | `/admin/callers` | admin | 발신번호 추가 |
-| POST | `/admin/callers/{id}/toggle` | admin | 활성/비활성 |
-| POST | `/admin/callers/{id}/default` | admin | 기본 발신번호 지정 |
-| GET | `/admin/audit` | admin | 감사 로그 |
-| GET | `/healthz` | - | 헬스체크 (인증 없음, NPM용) |
+Route groups로 인증 경계를 나눔:
 
-### 8.2 핵심 화면 와이어프레임 (텍스트)
-
-**`/compose`**:
 ```
-┌──────────────────────────────────────────────────────┐
-│ 신규 공지 발송                                        │
-├──────────────────────────────────────────────────────┤
-│ 발신번호: [02-1234-5678 ▼]                           │
-│                                                       │
-│ 수신자 (한 줄에 한 번호 또는 콤마 구분):              │
-│ ┌────────────────────────────────────────────────┐  │
-│ │ 010-1234-5678                                   │  │
-│ │ 01087654321                                     │  │
-│ │ +82-10-9999-8888                                │  │
-│ │ ...                                             │  │
-│ └────────────────────────────────────────────────┘  │
-│ → [번호 검증]                                         │
-│                                                       │
-│ ✓ 유효: 998명  ✗ 잘못된 번호: 2개 [보기]              │
-│                                                       │
-│ 본문:                                                 │
-│ ┌────────────────────────────────────────────────┐  │
-│ │ 4월 9일 22:00~24:00 사옥 정전 점검이 있습니다. │  │
-│ └────────────────────────────────────────────────┘  │
-│ 길이: 64 byte / 90 byte (SMS)                         │
-│                                                       │
-│         [미리보기]   [발송하기]                       │
-└──────────────────────────────────────────────────────┘
+web/app/
+├── (auth)/
+│   └── login/page.tsx         — Keycloak 리다이렉트
+├── (app)/                      — 모든 앱 라우트 (middleware가 인증 검사)
+│   ├── layout.tsx              — getSession 2-tier guard
+│   ├── page.tsx                — S1 Dashboard
+│   ├── send/new/page.tsx       — S2 발송 작성
+│   ├── chat/[id]/page.tsx      — S3 채팅 (SSE)
+│   ├── campaigns/page.tsx      — S5 이력 목록
+│   ├── campaigns/[id]/page.tsx — S4 캠페인 상세
+│   ├── contacts/page.tsx       — S7 주소록 (Drawer 편집)
+│   ├── groups/page.tsx         — S9 그룹 목록
+│   ├── groups/[id]/page.tsx    — S10 그룹 상세
+│   ├── numbers/page.tsx        — S11 발신번호
+│   ├── settings/[[...tab]]/    — S12 설정 (catch-all)
+│   ├── audit/page.tsx          — S13 감사 로그 + CSV export
+│   ├── notifications/page.tsx  — S15 알림 센터
+│   ├── reports/page.tsx        — S16 리포트/통계
+│   ├── search/page.tsx         — S17 통합 검색
+│   └── error/                  — S18 에러 3종 (not-found/error/global-error)
+├── offline/page.tsx            — PWA 폴백
+├── setup/                      — Setup Wizard (bootstrap 모드만)
+└── middleware.ts               — Keycloak 세션 검사 + /setup/login 예외
 ```
 
-**`/campaigns/{id}`**:
-```
-┌──────────────────────────────────────────────────────┐
-│ 캠페인 #1234                                          │
-├──────────────────────────────────────────────────────┤
-│ 작성자: 홍길동 / 2026-04-08 14:23                    │
-│ 발신번호: 02-1234-5678                                │
-│ 상태: DISPATCHED → 폴링 중 (5초마다 갱신)             │
-│                                                       │
-│ ┌─────────────────────────────────────────────────┐ │
-│ │ 본문                                             │ │
-│ │ 4월 9일 22:00~24:00 사옥 정전 점검이 있습니다.  │ │
-│ └─────────────────────────────────────────────────┘ │
-│                                                       │
-│ 진행: 850 / 1000   ✓ 820  ✗ 30  ⏳ 150               │
-│ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 85%                              │
-│                                                       │
-│ 수신자 결과 (HTMX 자동 갱신)                          │
-│ ┌──────────────┬──────────┬───────────────────────┐ │
-│ │ 번호          │ 상태     │ 사유                  │ │
-│ ├──────────────┼──────────┼───────────────────────┤ │
-│ │ 010-1234-5678│ ✓ 성공   │                       │ │
-│ │ 010-9999-8888│ ✗ 실패   │ 결번 (3001)           │ │
-│ │ ...          │ ⏳ 대기  │                       │ │
-│ └──────────────┴──────────┴───────────────────────┘ │
-└──────────────────────────────────────────────────────┘
-```
+### 8.2 설계 원칙
+
+- **Server Components가 기본**. 데이터 페치는 RSC에서 `fetch(...)` 직접 호출.
+- **`'use client'`는 stateful leaf에만**: 폼, 필터 UI, 모션 컴포넌트.
+- **URL state**: 필터(`?status=COMPLETED&q=홍길동`), 선택(`?selected=42`), 탭(`?tab=advanced`)은 모두 `searchParams`로.
+- **Typed routes**: `experimental.typedRoutes: true`. 동적 조합은 `as Route` 캐스트.
+- **`/api/*` rewrite**: `next.config.mjs`에서 FastAPI로 프록시. CORS 설정 불필요.
+
+### 8.3 주요 컴포넌트 프리미티브
+
+| 컴포넌트 | 용도 |
+|---|---|
+| `Card`, `Field`, `Input`, `Button` | 기본 UI |
+| `Drawer` (Radix Dialog) | 편집 오버레이 (contact 등) |
+| `CommandPalette` (Radix Dialog) | ⌘K 통합 검색 |
+| `ChipField` | 태그 입력 |
+| `DataTable` | 정렬/페이지네이션 테이블 |
+
+### 8.4 SSE (chat)
+
+- `/chat/[id]`는 서버 컴포넌트로 초기 히스토리 로드 + 클라이언트 컴포넌트로 `EventSource` 연결.
+- FastAPI `/chat/{id}/stream` 엔드포인트가 SSE로 메시지 푸시.
+- 네트워크 단절 시 exponential backoff 재연결 (1s → 2s → 4s → max 30s).
+- Korean IME 처리: `isComposing` 상태에서는 Enter 무시.
 
 ---
 
-## 9. 보안
+## 9. 모션 디자인 시스템
 
-### 9.1 인증
+> 상세: [`motion-timing.md`](./motion-timing.md)
+
+### 9.1 1.2초 예산
+
+**"한 페이지 전체 연출은 1.2초 이내"** — 사용자 기다림의 상한.
+각 요소의 정지 시각 = `delay + duration`. 페이지 예산 = 가장 늦게 정지하는 요소.
+
+### 9.2 Primitive
+
+| 요소 | default duration | 용도 |
+|---|---|---|
+| `Counter` | 900 | 숫자 tweening (tabular-nums로 CLS 0) |
+| `Sparkline` (useDrawOn) | 1200 | 스트로크 draw-on |
+| `AnimatedBars` | 700 (stagger 40 × N) | 세로 바 차트 |
+| `Progress` | 900 | 가로 진행률 바 |
+| `Rise` / `Stagger` | 400 (baseDelay + step × i) | 리스트 항목 순차 등장 |
+| `PulseDot` | 1400 (infinite) | 상태 인디케이터 (reduced-motion 시 CSS로 자동 정지) |
+
+### 9.3 Reduced Motion
+
+`useReducedMotion()` 훅이 `prefers-reduced-motion: reduce` 감지 시 모든 primitive를 즉시 최종값으로 점프시킴.
+`PulseDot`은 globals.css 미디어 쿼리로 keyframes 자동 정지.
+
+---
+
+## 10. 보안
+
+### 10.1 인증
+
 - Keycloak OIDC Authorization Code Flow + PKCE
 - 세션 쿠키: `HttpOnly`, `Secure`, `SameSite=Lax`
-- ID 토큰 검증 (서명, exp, iss, aud)
-- 액세스 토큰은 서버 세션에 보관, 클라이언트에 노출 X
+- 2-tier guard: Next.js middleware + `layout.tsx`의 `getSession`. 하나가 뚫려도 다른 층이 차단.
 
-### 9.2 시크릿 관리 (`.env` 없음)
+### 10.2 시크릿 관리 (`.env` 없음)
 
-**원칙**: env 파일 없이 모든 설정은 웹 UI에서 관리. 시크릿은 DB에 Fernet 암호화 저장.
-
-**계층 구조**:
 ```
-[ Master Key ]  ──── 파일 1개만 존재
-  /var/lib/sms/master.key  (32 byte, 600, sms:sms)
-  ├─ 첫 실행 시 자동 생성 (cryptography.Fernet.generate_key())
-  ├─ 백업 대상에서 제외 (DB와 분리 보관)
-  └─ 절대 로그/응답에 노출 금지
-        │
+[ Master Key ] /var/lib/kotify/master.key (32 byte, 600, kotify:kotify)
+               ├─ 첫 실행 시 자동 생성 (cryptography.Fernet.generate_key())
+               ├─ 백업 대상에서 제외 (DB와 분리 보관)
+               └─ 절대 로그/응답에 노출 금지
         ▼ Fernet (AES-128-CBC + HMAC-SHA256)
 [ DB settings 테이블 ]
-  ncp.access_key       (encrypted)
-  ncp.secret_key       (encrypted)
-  ncp.service_id       (encrypted, ID지만 권한 식별자라 보호)
+  msghub.api_key       (encrypted)
+  msghub.api_password  (encrypted)
+  msghub.brand_id      (encrypted)
+  msghub.chatbot_id    (encrypted)
+  msghub.webhook_secret (encrypted)
   keycloak.client_secret (encrypted)
-  keycloak.issuer       (plain)
-  keycloak.client_id    (plain, = "sms-sys")
-  session.secret        (encrypted, 자동 생성)
-  app.public_url        (plain, = "https://sms.example.com")
+  keycloak.issuer      (plain)
+  keycloak.client_id   (plain, = "sms-sys")
+  session.secret       (encrypted, 자동 생성)
+  app.public_url       (plain)
 ```
 
-**키 회전**:
-- master.key는 회전하지 않는 것을 기본으로 함 (회전 시 모든 settings 재암호화 필요)
-- 회전이 필요하면 admin UI에서 트리거 → 모든 시크릿 복호화 → 새 키 생성 → 재암호화 → 원자적 교체
+### 10.3 CSRF
 
-**보안 트레이드오프 (명시)**:
-- DB 백업 파일이 외부 유출되어도 master.key 없이는 시크릿 복호화 불가 → DB와 master.key를 **반드시 다른 위치에 백업**
-- master.key 유출 + DB 유출 동시 발생 시 시크릿 노출됨 → 두 자산 모두 600 권한, root만 접근
+- Next.js server actions: SameSite 쿠키 + 명시적 토큰 (필요 시).
+- FastAPI POST 라우트: Starlette `SessionMiddleware` + 자체 토큰.
+- 웹훅: msghub의 서명 헤더 HMAC 검증.
 
-**금지 사항**:
-- 시크릿을 로그에 출력 금지 (NCP 응답 디버그 로그도 마스킹)
-- 시크릿을 HTML 응답에 표시 금지 (UI에서는 `***` 마스킹, 마지막 4자리만 노출)
-- 시크릿 컬럼 변경 시 audit log 기록 (단 새/구 값은 저장 안 함, "변경됨" 표기만)
+### 10.4 기타
 
-### 9.3 CSRF
-- 모든 POST 요청에 CSRF 토큰 (Starlette `SessionMiddleware` + 자체 토큰 또는 `fastapi-csrf-protect`)
-
-### 9.4 Rate limit (사용자 측)
-- 동일 사용자가 1분 내 5회 이상 발송 시 차단 (메모리 카운터로 충분)
-
-### 9.5 감사
-- 모든 발송, 발신번호 변경, 권한 변경, 설정 변경 → `audit_logs` 테이블
-- 시크릿 변경 시 새/구 값 저장 금지, "변경됨" 사실만 기록
-
-### 9.6 부트스트랩 (Setup 모드)
-
-**문제**: Keycloak 설정이 DB에 있는데, 첫 실행 시 비어있으면 admin이 어떻게 로그인하나?
-
-**해법**: setup 모드 — `settings` 테이블에 `bootstrap.completed=true`가 없으면 활성화.
-
-**setup 모드 동작**:
-1. **모든 일반 라우트가 `/setup`으로 강제 리다이렉트** (인증 우회 차단)
-2. `/setup`은 인증 없이 접근 가능 (대신 `127.0.0.1` 또는 사내망 IP만 허용 — NPM 측 ACL로 1차 차단 권장)
-3. **Setup 토큰**: 서비스 첫 시작 시 `master.key`와 함께 `/var/lib/sms/setup.token` 자동 생성 (16 byte hex). 사용자가 CT 콘솔/SSH로 이 파일을 읽어 wizard 화면에 입력해야 진행 가능 (네트워크만 뚫린 공격자 차단).
-4. Wizard 단계:
-   - Step 1: setup 토큰 입력
-   - Step 2: Keycloak 정보 입력 (issuer, client_id=sms-sys, client_secret) + 연결 테스트
-   - Step 3: NCP 정보 입력 (access_key, secret_key, service_id) + 발신번호 조회 테스트
-   - Step 4: 발신번호 추가 (NCP에 등록된 번호를 admin UI에서 직접 입력)
-   - Step 5: Keycloak으로 본인 로그인 → 첫 사용자가 자동 admin으로 등록
-5. 완료 시 `bootstrap.completed=true` 저장 + `setup.token` 파일 삭제 + `/setup` 라우트 영구 비활성
-
-**재설정 필요 시**: admin이 `/admin/settings`에서 변경 (setup 다시 안 띄움). master.key 분실 시에만 DB 초기화 후 setup 재실행.
+- **CSV formula injection 방어** (CWE-1236): `app/util/csv_safe.py::safe_csv_cell` — `=`, `+`, `-`, `@`, `\t`, `\r` 선두 시 앞에 `'` prefix.
+- **Rate limit**: 동일 사용자 1분 내 5회 이상 발송 시 차단 (메모리 카운터).
+- **감사**: 모든 발송/설정 변경/권한 변경 → `audit_logs`. 시크릿 값 저장 금지("변경됨" 표기만).
+- **Setup 모드**: `bootstrap.completed=true`가 없으면 `/setup`으로 강제 리다이렉트 + 사내망 IP ACL + setup.token 확인.
 
 ---
 
-## 10. 배포 (Proxmox CT)
+## 11. 배포 (Proxmox CT)
 
-### 10.1 CT 사양
-- **OS**: Debian 12
+### 11.1 CT 사양
+
+- **OS**: Debian 12 (Bookworm) 또는 13 (Trixie)
 - **Resources**: 1 vCPU / 1 GB RAM / 8 GB disk
 - **Network**: 사내망 only, 외부 인바운드 차단 (NPM이 프록시)
-- **Outbound**: `sens.apigw.ntruss.com:443`, Keycloak 서버, NTP
+- **Outbound**: msghub API, Keycloak, NTP, GitHub
 
-### 10.2 디렉토리 구조
+### 11.2 디렉토리 구조
+
 ```
-/opt/sms/                       # 애플리케이션 (코드, 600 root:root)
-  ├── app/                      # Python 패키지
+/opt/kotify/                    # 애플리케이션 (root:root 755)
+  ├── app/                      # FastAPI Python 패키지
+  ├── web/                      # Next.js 프로젝트 + 빌드 산출물 (.next/)
   ├── pyproject.toml
-  ├── .venv/                    # uv가 만든 가상환경
+  ├── .venv/                    # Python 가상환경
   └── alembic/                  # 마이그레이션
-/var/lib/sms/                   # 데이터 (700 sms:sms)
-  ├── sms.db                    # SQLite (600 sms:sms)
-  ├── master.key                # 시크릿 마스터 키 (600 sms:sms, 자동 생성)
-  └── setup.token               # 부트스트랩 토큰 (600, 완료 후 삭제)
-/var/log/sms/                   # 로그 (700 sms:sms)
-/etc/systemd/system/sms.service # systemd unit
+/var/lib/kotify/                # 데이터 (kotify:kotify 700)
+  ├── sms.db                    # SQLite (600)
+  ├── master.key                # 마스터 키 (600, 자동 생성)
+  └── setup.token               # 부트스트랩 토큰 (완료 후 삭제)
+/var/log/kotify/                # 로그 (700)
+/var/backups/kotify/            # 백업 (700)
+/etc/systemd/system/kotify.service       # FastAPI
+/etc/systemd/system/kotify-web.service   # Next.js
 ```
 
-**`.env` 파일 없음.** 모든 설정은 `/var/lib/sms/sms.db`의 `settings` 테이블 + `master.key`로 관리.
+### 11.3 systemd 유닛
 
-### 10.3 systemd unit
+**`kotify.service`** — FastAPI (127.0.0.1:8080, 내부만):
+
 ```ini
-[Unit]
-Description=Internal SMS Service
-After=network-online.target
-Wants=network-online.target
-
 [Service]
 Type=simple
-User=sms
-Group=sms
-WorkingDirectory=/opt/sms
-ExecStart=/opt/sms/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --workers 1
+User=kotify
+Group=kotify
+WorkingDirectory=/opt/kotify
+ExecStartPre=/opt/kotify/.venv/bin/alembic -c /opt/kotify/alembic.ini upgrade head
+ExecStart=/opt/kotify/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --workers 1 --proxy-headers --forwarded-allow-ips=*
 Restart=on-failure
-RestartSec=5
-
-# 보안 강화
-NoNewPrivileges=true
+NoNewPrivileges=false  # 웹 UI 원클릭 업데이트용 sudo
 ProtectSystem=strict
-ReadWritePaths=/var/lib/sms /var/log/sms
-ProtectHome=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
+ReadWritePaths=/var/lib/kotify /var/log/kotify /opt/kotify
 ```
 
-### 10.4 백업
+**`kotify-web.service`** — Next.js (0.0.0.0:3000, 외부 대면):
 
-**중요: master.key와 sms.db는 반드시 분리 보관**.
+```ini
+[Service]
+Type=simple
+User=kotify
+Group=kotify
+WorkingDirectory=/opt/kotify/web
+Environment=NODE_ENV=production
+Environment=FASTAPI_URL=http://127.0.0.1:8080
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=3000
+ExecStart=/usr/bin/node /opt/kotify/web/.next/standalone/server.js
+Restart=on-failure
+```
 
-- **DB 백업**: 매일 0시 SQLite `.backup` → `/var/backups/sms/sms-YYYYMMDD.db` (30일 retention)
-- **master.key 백업**: 별도 안전한 위치(예: 1Password, 사내 비밀 저장소)에 1회 수동 백업. 자동 백업 위치에 함께 두지 않음.
-- **CT 스냅샷**: Proxmox에서 주 1회. 스냅샷은 master.key와 DB가 함께 들어가지만 이는 디스크 복구용 — 외부 유출 시나리오와 분리.
-- **복구 테스트**: 분기 1회 별도 CT에 스냅샷 복구 → 로그인 → 발송 가능 여부 검증.
+### 11.4 NPM
 
-### 10.5 NPM 설정 (사용자 영역)
-- Domain: `sms.internal.example.com`
-- Forward to: `<CT IP>:8080`
-- SSL: Let's Encrypt 또는 사내 CA
-- Custom location `/healthz`로 헬스체크
+외부에서 Next.js(3000)만 보임. FastAPI(8080)는 Next.js `rewrites()`를 통해서만 호출.
+`deploy/npm-config.md` 참조.
+
+### 11.5 백업
+
+- **DB**: 매일 0시 SQLite `.backup` → `/var/backups/kotify/kotify-YYYYMMDD.db` (30일 retention)
+- **master.key**: 1회 수동, 1Password 등 외부 저장소
+- **Next.js 빌드 산출물**은 백업 대상 아님 — 재배포 시 `pnpm build`로 복원
 
 ---
 
-## 11. 의존성
+## 12. 의존성
 
 ```toml
 # pyproject.toml
 [project]
-name = "ncp-sms-system"
-version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
-  "jinja2>=3.1",
-  "python-multipart>=0.0.20",
   "sqlalchemy>=2.0",
   "alembic>=1.14",
   "authlib>=1.4",
   "httpx>=0.28",
-  "itsdangerous>=2.2",
   "cryptography>=44.0",
   "pydantic-settings>=2.6",
 ]
 
 [dependency-groups]
-dev = [
-  "pytest>=8.3",
-  "pytest-asyncio>=0.24",
-  "respx>=0.22",
-  "ruff>=0.8",
-]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.22", "ruff>=0.8"]
 ```
 
-추론: 단일 패키지 매니저로 `uv` 사용 권장 (Debian CT에서 단일 바이너리, 빠름).
+```json
+// web/package.json
+{
+  "engines": { "node": ">=20.0.0" },
+  "dependencies": {
+    "next": "^14.2.18",
+    "react": "^18.3.1",
+    "@radix-ui/react-dialog": "^1.1.15"
+  },
+  "devDependencies": {
+    "@next/bundle-analyzer": "^16.2.4",
+    "typescript": "^5.6.3",
+    "tailwindcss": "^3.4.14",
+    "eslint-config-next": "^14.2.18",
+    "prettier-plugin-tailwindcss": "^0.6.8"
+  }
+}
+```
 
 ---
 
-## 12. 프로젝트 구조
+## 13. 프로젝트 구조
 
 ```
-ncp-sms-system/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                  # FastAPI 엔트리, lifespan, 라우터 등록
-│   ├── config.py                # pydantic-settings
-│   ├── db.py                    # SQLAlchemy engine/session
-│   ├── models.py                # ORM 모델
+kotify/
+├── app/                        # FastAPI 백엔드
+│   ├── main.py                 # FastAPI 엔트리, lifespan, 라우터
+│   ├── config.py               # pydantic-settings (SMS_* prefix)
+│   ├── db.py                   # SQLAlchemy engine/session (WAL)
+│   ├── models.py               # ORM 모델
 │   ├── auth/
-│   │   ├── __init__.py
-│   │   ├── oidc.py              # Authlib OIDC client
-│   │   ├── deps.py              # require_user, require_role
-│   │   └── session.py
-│   ├── ncp/
-│   │   ├── __init__.py
-│   │   ├── signature.py         # ★ 사용자가 직접 작성
-│   │   ├── client.py            # send / list_by_request_id
-│   │   └── codes.py             # 수신결과 코드 → 한글 매핑
+│   ├── msghub/                 # U+ msghub 클라이언트
+│   │   ├── auth.py             # TokenManager (JWT)
+│   │   ├── client.py           # MsghubClient
+│   │   ├── schemas.py          # 요청/응답 데이터클래스
+│   │   └── codes.py            # 에러 코드 + 비용 계산
 │   ├── services/
-│   │   ├── compose.py           # 발송 비즈니스 로직 (검증/청크/dispatch)
-│   │   ├── poller.py            # 백그라운드 폴링 워커
+│   │   ├── compose.py          # 발송 비즈니스 로직
+│   │   ├── report.py           # 웹훅 결과 처리
+│   │   ├── chat.py             # SSE 스트림
 │   │   └── audit.py
 │   ├── util/
-│   │   ├── phone.py             # ★ 사용자가 직접 작성
-│   │   └── text.py              # byte 길이, EUC-KR 검증
-│   ├── routes/
-│   │   ├── __init__.py
-│   │   ├── dashboard.py
-│   │   ├── compose.py
-│   │   ├── campaigns.py
-│   │   ├── admin.py
-│   │   └── health.py
-│   └── templates/
-│       ├── base.html
-│       ├── dashboard.html
-│       ├── compose.html
-│       ├── campaigns/
-│       │   ├── list.html
-│       │   ├── detail.html
-│       │   └── _recipients.html  # HTMX fragment
-│       └── admin/
-│           ├── callers.html
-│           └── audit.html
-├── alembic/
-│   └── versions/
-├── tests/
-│   ├── test_phone.py
-│   ├── test_signature.py
-│   ├── test_text.py
-│   ├── test_ncp_client.py       # respx로 mock
-│   └── test_compose_flow.py
-├── deploy/
-│   ├── ct-bootstrap.sh           # Debian CT 초기 셋업
-│   ├── sms.service               # systemd unit
-│   └── npm-config.md             # NPM 설정 가이드
-├── claudedocs/
-│   ├── SPEC.md                   # 본 문서
-│   └── ncp-research.md           # 리서치 결과 (분리 저장)
-├── .env.example
-├── .gitignore
+│   │   ├── phone.py            # 전화번호 정규화
+│   │   ├── text.py             # byte 길이, UTF-8 검증
+│   │   └── csv_safe.py         # CSV formula injection 방어
+│   └── routes/
+│       ├── webhook.py          # msghub 웹훅 수신
+│       ├── campaigns.py, ...
+├── alembic/                    # 마이그레이션
+├── web/                        # Next.js 14 프론트엔드
+│   ├── app/                    # App Router
+│   ├── components/             # UI + motion primitives
+│   ├── lib/                    # fetch helper, cn, etc.
+│   ├── types/                  # 공유 타입 (campaign, report, ...)
+│   ├── middleware.ts           # Keycloak guard
+│   ├── next.config.mjs         # rewrites + bundle analyzer
+│   └── package.json
+├── tests/                      # pytest (backend)
+├── deploy/                     # 배포 자산
+│   ├── ct-bootstrap.sh
+│   ├── kotify.service, kotify-web.service
+│   ├── kotify-sudoers, kotify-update.sh
+│   ├── sms-backup.sh, sms-backup.cron
+│   └── npm-config.md
+├── claudedocs/                 # 본 문서 및 msghub 가이드, 감사 문서
 ├── pyproject.toml
-└── README.md
+├── README.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, HANDOFF.md
+└── LICENSE
 ```
-
----
-
-## 13. 사용자가 직접 작성하실 영역 (Learning 포인트)
-
-각 함수 위치/시그니처/명세는 위에 명시. 직접 작성하시면 좋은 이유:
-
-| 파일 | 함수 | 왜 직접? |
-|---|---|---|
-| `app/ncp/signature.py` | `make_headers()` | NCP HMAC 시그니처 규칙(헤더 순서, timestamp 일관성, URI 포맷)을 한 번 직접 구현하면 401 디버깅이 훨씬 빨라짐 |
-| `app/util/phone.py` | `normalize_phone()`, `parse_phone_list()` | 정규화 규칙은 비즈니스 정책. 어떤 형식까지 허용할지가 운영 결정 |
-| `app/services/compose.py` (일부) | "잘못된 번호 발견 시 정책" | 6.3에서 결정한 (a)/(b)/(c) 정책을 코드에 반영 |
-
-나머지는 제가 작성합니다.
 
 ---
 
 ## 14. 테스트 전략
 
-### 14.1 단위 테스트
-- `phone.py`: 다양한 입력 형식 (정상/비정상) 골고루
-- `signature.py`: NCP 공식 문서 예시 그대로 입력 → 알려진 정답과 일치
-- `text.py`: byte 길이, 이모지 검출
+### 14.1 백엔드 (pytest)
 
-### 14.2 통합 테스트
-- `respx`로 NCP API mock
-  - 발송 성공/실패/429/타임아웃
-  - 폴링 응답 (READY → PROCESSING → COMPLETED)
-- SQLite in-memory로 DB 통합
+- `app/util/phone.py` — 입력 형식 다양하게
+- `app/util/csv_safe.py` — formula injection 방어 케이스
+- `app/msghub/auth.py` — TokenManager (JWT 만료/갱신/stampede)
+- `app/msghub/client.py` — respx로 msghub API mock (발송 성공/실패/429/웹훅 매칭)
+- `app/routes/webhook.py` — 서명 검증 통과/실패
 
-### 14.3 수동 검증 (NCP 실호출)
-- 본인 번호 1개로 SMS 1회 발송 → DB에 결과까지 정상 기록되는지 end-to-end 확인
-- 발송번호 미등록 케이스 의도적 발생 → `3023` 처리 검증
+### 14.2 프론트엔드
+
+- `pnpm typecheck` — TS 컴파일
+- `pnpm lint` — ESLint + jsx-a11y/strict
+- `pnpm build` — Next.js 프로덕션 빌드 (가장 넓은 에러 탐지)
+
+### 14.3 E2E 수동
+
+- [`E2E-CHECKLIST.md`](./E2E-CHECKLIST.md) 참조
 
 ---
 
-## 15. 운영 체크리스트
+## 15. 운영 체크리스트 (요약)
 
 ### 출시 전
-- [ ] NCP 콘솔에서 Project 생성, `serviceId` 확보
-- [ ] 발신번호 등록 (NCP 콘솔에서 신청 — 영업일 3-4일 소요, 가장 먼저!)
-- [ ] Access Key / Secret Key 발급 (Sub Account 권장)
-- [ ] Keycloak에 realm/client `sms-sys` 생성 + 권한 그룹(viewer/sender/admin) 생성
-- [ ] Keycloak Redirect URI: `https://sms.example.com/auth/callback`
-- [ ] CT 생성 + 네트워크 설정
-- [ ] NTP 동기화 확인 (`timedatectl`)
-- [ ] NPM에 `sms.example.com` 호스트 등록 + TLS 발급
-- [ ] systemd 서비스 등록 + 첫 시작 (master.key 자동 생성됨)
-- [ ] CT 콘솔에서 `cat /var/lib/sms/setup.token` 확인
-- [ ] `https://sms.example.com/setup` 접속 → wizard 진행
-- [ ] master.key 별도 안전 위치에 백업 (1Password 등)
-- [ ] 본인 번호로 end-to-end 테스트
+
+- [ ] msghub 계정 + API Key/Password + RCS 브랜드/챗봇 등록 확인
+- [ ] Keycloak realm `sms-sys` + client + 역할 + Redirect URI
+- [ ] CT 생성 + NTP 동기화
+- [ ] NPM에 `sms.example.com` 호스트 등록 + SSL + SSE 설정
+- [ ] ct-bootstrap.sh 실행 → 두 systemd 서비스 기동 확인
+- [ ] Setup Wizard 진행 → master.key 백업
+- [ ] 본인 번호로 RCS→SMS fallback E2E 테스트
 - [ ] 백업 cron 설정
 
 ### 정기 운영
-- [ ] 주 1회 SQLite 백업 검증 (복구 테스트)
-- [ ] 월 1회 발신번호 만료 확인
-- [ ] 분기 1회 NCP 사용량 점검 (월 한도 10,000건)
+
+- [ ] 주 1회 백업 파일 존재 확인
+- [ ] 월 1회 msghub 발신번호/브랜드 유효기간 확인
+- [ ] 분기 1회 백업 복구 테스트
 
 ---
 
-## 16. 결정사항 (확정)
+## 16. 결정사항
 
 | # | 항목 | 결정 |
 |---|---|---|
-| 1 | 잘못된 번호 정책 | **(a) 차단** — 하나라도 invalid면 발송 불가 |
+| 1 | 잘못된 번호 정책 | **차단** — 하나라도 invalid면 발송 불가 |
 | 2 | Keycloak realm/client | `sms-sys` |
 | 3 | 운영 도메인 | `sms.example.com` |
-| 4 | 발신번호 | NCP에 등록된 번호를 admin UI에서 직접 추가 |
+| 4 | 발신번호 관리 | msghub 포털 등록 번호를 admin UI에서 직접 추가 |
 | 5 | 광고성(`AD`) 발송 | 1차 제외 |
-| 6 | 폴링 타임아웃 | **1시간** (5/10/30/60/300/900초 backoff). 근거: NCP SMS는 통상 수 초~수십 초 내 COMPLETED. 1시간이면 통신망 일시 장애도 흡수. 더 길게 가면 폴링 큐에 좀비 row가 쌓임. |
-| 7 | 직접 작성 함수 3개 | OK (signature, normalize_phone, parse_phone_list) |
-| 8 | **`.env` 폐기, 웹 설정** | **마스터 키(파일 1개) + DB Fernet 암호화 + Setup wizard** 방식 채택 (§9.2, §9.6) |
+| 6 | 결과 동기화 | **msghub 웹훅** (폴링 제거) |
+| 7 | 시크릿 관리 | 마스터 키(파일 1개) + DB Fernet 암호화 + Setup wizard |
+| 8 | 프론트엔드 스택 | Next.js 14 App Router (RSC-first) |
+| 9 | 외부 대면 포트 | Next.js 3000만 — FastAPI 8080은 내부 전용 |
+| 10 | 모션 예산 | 페이지당 1.2초 이내 (Phase 10c) |
 
 ---
 
-## 17. 다음 단계
+## 17. 진행 기록 (Phase)
 
-본 명세서 승인 후:
-
-1. `pyproject.toml`, 디렉토리 스켈레톤, `.env.example`, alembic init
-2. DB 모델 + 첫 마이그레이션
-3. NCP 클라이언트 (단, `signature.py`는 함수 시그니처만 두고 비움)
-4. 전화번호/텍스트 유틸 (단, `phone.py`는 함수 시그니처만 두고 비움)
-5. → **사용자가 두 파일 작성**
-6. Keycloak OIDC 미들웨어
-7. 라우트 + 템플릿
-8. 폴링 워커
-9. 단위/통합 테스트
-10. CT 부트스트랩 스크립트 + systemd
-11. 본인 번호로 E2E 테스트
+| Phase | 내용 | 완료 |
+|---|---|---|
+| NCP→msghub 마이그레이션 | `app/ncp/` 전량 제거, `app/msghub/` 신설 | ✅ |
+| 1~4 | Next.js 스캐폴드 + 컴포넌트 프리미티브 + 모션 + 레이아웃/auth | ✅ |
+| 5~9 | 18개 화면 포팅 (Dashboard부터 Error 3종까지) | ✅ |
+| 10a | jsx-a11y/strict — 14 이슈 해결 | ✅ |
+| 10b | `@next/bundle-analyzer` + 번들 스냅샷 문서화 | ✅ |
+| 10c | 모션 1.2s 예산 감사 + 6곳 압축, `motion-timing.md` 매트릭스 | ✅ |
+| 10d | 실 브라우저 런타임 감사 (Lighthouse/CLS/60fps/axe/reduced-motion) | ⏳ 배포 후 |
+| 11 | Proxmox CT 배포 + Keycloak/msghub 실연결 + Setup Wizard E2E | ⏳ 다음 |
 
 ---
 
@@ -908,12 +698,20 @@ ncp-sms-system/
 
 | 주제 | URL |
 |---|---|
-| SENS overview | https://api.ncloud-docs.com/docs/en/sens-overview |
-| Send message | https://api.ncloud-docs.com/docs/en/sens-sms-send |
-| Get message list | https://api.ncloud-docs.com/docs/en/sens-sms-list |
-| Get message result | https://api.ncloud-docs.com/docs/en/sens-sms-get |
-| Reservation status | https://api.ncloud-docs.com/docs/en/sens-sms-reservation-status-get |
-| Cancel reservation | https://api.ncloud-docs.com/docs/en/sens-sms-reservation-delete |
-| 공통 API (시그니처) | https://api.ncloud-docs.com/docs/en/common-ncpapi |
-| 발신번호 가이드 | https://guide.ncloud-docs.com/docs/sens-callingno |
-| SMS 사용 가이드 | https://guide.ncloud-docs.com/docs/sens-smsmessage |
+| msghub 개요 | https://docs2.msghub.uplus.co.kr/api/intro |
+| Keycloak OIDC | https://www.keycloak.org/docs/latest/securing_apps/ |
+| Next.js App Router | https://nextjs.org/docs/app |
+| Radix UI Primitives | https://www.radix-ui.com/primitives/docs |
+| WCAG 2.1 AA | https://www.w3.org/TR/WCAG21/ |
+| CWE-1236 (CSV Injection) | https://cwe.mitre.org/data/definitions/1236.html |
+
+## 부록 B. 관련 문서
+
+- [`HANDOFF.md`](../HANDOFF.md) — 현재 진행 상황 요약
+- [`E2E-CHECKLIST.md`](./E2E-CHECKLIST.md) — 배포/운영 검증
+- [`msghub-api-guide.md`](./msghub-api-guide.md) — msghub API 전체
+- [`msghub-migration-spec.md`](./msghub-migration-spec.md) — 마이그레이션 기획
+- [`msghub-error-codes.md`](./msghub-error-codes.md) — 에러 코드 매핑
+- [`motion-timing.md`](./motion-timing.md) — 모션 타이밍 매트릭스
+- [`web-bundle-snapshot.md`](./web-bundle-snapshot.md) — 번들 스냅샷
+- [`phase-10d-runtime-audit.md`](./phase-10d-runtime-audit.md) — 런타임 감사 체크리스트

@@ -624,8 +624,9 @@ DELETE FROM setting WHERE key LIKE 'ncp.%';
 
 - 코드 내 `# NCP`, `SENS`, `ntruss` 등 주석 모두 삭제
 - README.md 내 NCP 관련 설명 교체
-- `claudedocs/ncp-research.md` — 보관 (히스토리)
-- `claudedocs/ncp-mailer-research.md` — 보관
+- `claudedocs/ncp-research.md` — 삭제 (git history로 보존)
+- `claudedocs/ncp-mailer-research.md` — 삭제
+- `claudedocs/reservation-mms-todo.md` — 삭제 (NCP 시절 TODO, msghub로 재설계됨)
 
 ---
 
