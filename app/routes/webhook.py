@@ -203,13 +203,21 @@ async def receive_mo(
             {"code": "20002", "message": "invalid json"}, status_code=400
         )
 
+    # 진단: raw body + 파싱 결과 추적. 운영 안정화 후 제거/INFO로 강등 가능.
+    log.warning("MO 웹훅 수신 raw body: %s", body)
+
     try:
         payload = MoWebhookPayload.from_dict(body)
     except Exception:
-        log.warning("MO 페이로드 파싱 실패: %s", body)
+        log.exception("MO 페이로드 파싱 실패 (exception): body=%s", body)
         return JSONResponse(
             {"code": "20003", "message": "invalid mo format"}, status_code=400
         )
+
+    log.warning(
+        "MO 파싱 결과: items=%d, mo_cnt=%d, body_keys=%s",
+        len(payload.items), payload.mo_cnt, list(body.keys()),
+    )
 
     if not payload.items:
         # rcsBiaLst/rcsBirLst만 있는 heartbeat/ack 등에서 정상 경로 — success 반환
