@@ -87,10 +87,10 @@ mv /opt/sms /opt/kotify
 
 ### Documentation
 
-- [Architecture & Specification](claudedocs/SPEC.md)
-- [E2E Deployment Checklist](claudedocs/E2E-CHECKLIST.md)
-- [msghub API Guide](claudedocs/msghub-api-guide.md)
 - [Deployment Guide](deploy/README.md)
+- [msghub API Guide](claudedocs/msghub-api-guide.md)
+- [msghub Migration Spec](claudedocs/msghub-migration-spec.md) — migration design history
+- [HANDOFF.md](HANDOFF.md) — current architecture snapshot
 
 ### Contributing
 

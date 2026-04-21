@@ -112,16 +112,6 @@ cat /var/lib/kotify/master.key
 
 ---
 
-## E2E 검증
-
-상세한 단계별 검증 절차:
-
-```
-claudedocs/E2E-CHECKLIST.md
-```
-
----
-
 ## 파일 설명
 
 | 파일 | 설명 |

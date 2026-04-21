@@ -41,9 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - English + Korean README
-- Architecture & specification (`claudedocs/SPEC.md`)
 - msghub API 가이드 및 에러 코드 레퍼런스
-- E2E 배포 체크리스트
+- 배포 가이드 (`deploy/README.md`)
 - Contributing 가이드
 - Security policy
 - MIT License (Copyright 2026 RAVNUS Inc.)

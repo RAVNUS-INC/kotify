@@ -48,7 +48,8 @@
 
 ## 관련 문서
 
-- [SPEC.md](claudedocs/SPEC.md) — 아키텍처/스펙
-- [E2E-CHECKLIST.md](claudedocs/E2E-CHECKLIST.md) — 배포 체크리스트
+- [deploy/README.md](deploy/README.md) — 현행 배포 절차 (msghub 기반)
 - [msghub-api-guide.md](claudedocs/msghub-api-guide.md) — msghub 순수 API 레퍼런스
-- [msghub-migration-spec.md](claudedocs/msghub-migration-spec.md) — 마이그레이션 원본 기획서 (히스토리용)
+- [msghub-migration-spec.md](claudedocs/msghub-migration-spec.md) — 마이그레이션 원본 기획서 (히스토리)
+- [SPEC.md](claudedocs/SPEC.md) — NCP 시절 초안 명세서 (HISTORICAL, 설계 의사결정 참고용)
+- [E2E-CHECKLIST.md](claudedocs/E2E-CHECKLIST.md) — NCP 시절 검증 절차 (HISTORICAL)

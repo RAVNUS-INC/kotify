@@ -1,7 +1,15 @@
-# kotify — 개발 명세서
+# kotify — 개발 명세서 (HISTORICAL)
 
-> NCP SENS SMS v2 API 기반 단체 문자 공지 발송 시스템
-> 작성일: 2026-04-08 / 버전: 0.1 (초안)
+> **⚠️ HISTORICAL — NCP SENS 시절 초안 명세서.**
+> 현재 시스템은 U+ msghub 기반으로 전면 교체됐고 DashForge UI로 재구성됨.
+> 최신 아키텍처/운영 개요는 [README.md](../README.md) 와 [HANDOFF.md](../HANDOFF.md) 를,
+> 배포 절차는 [deploy/README.md](../deploy/README.md) 를 참조하세요.
+>
+> 본 문서는 초기 설계 의사결정(SQLite 선택, Fernet 암호화, setup wizard 구조,
+> systemd hardening 등)을 보존하기 위한 히스토리 자료이며, 실제 구현 상세
+> (테이블명 `ncp_requests`, 폴링 워커, 100명 청크 등)는 현행과 다릅니다.
+>
+> 작성일: 2026-04-08 / 버전: 0.1 (초안, NCP 기준)
 
 ---
 
