@@ -1,0 +1,112 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import type { Route } from 'next';
+import { Icon, type IconName } from '@/components/ui';
+import { cn } from '@/lib/cn';
+
+type NavItem = {
+  href: Route;
+  label: string;
+  icon: IconName;
+  count?: number;
+  alert?: boolean;
+};
+
+type NavGroup = {
+  label: string;
+  items: ReadonlyArray<NavItem>;
+};
+
+const GROUPS: ReadonlyArray<NavGroup> = [
+  {
+    label: 'Send',
+    items: [
+      { href: '/', label: '홈', icon: 'home' },
+      { href: '/send/new', label: '새 발송', icon: 'send' },
+      { href: '/campaigns', label: '발송 이력', icon: 'clock' },
+      { href: '/chat', label: '대화방', icon: 'chat', count: 3, alert: true },
+    ],
+  },
+  {
+    label: 'People',
+    items: [
+      { href: '/contacts', label: '주소록', icon: 'users' },
+      { href: '/groups', label: '그룹', icon: 'user2' },
+    ],
+  },
+  {
+    label: 'Analytics',
+    items: [
+      { href: '/reports', label: '리포트', icon: 'barChart' },
+      { href: '/notifications', label: '알림', icon: 'bell', count: 3, alert: true },
+    ],
+  },
+  {
+    label: 'Admin',
+    items: [
+      { href: '/numbers', label: '발신번호', icon: 'phone' },
+      { href: '/settings', label: '설정', icon: 'settings' },
+      { href: '/audit', label: '감사 로그', icon: 'fileText' },
+    ],
+  },
+];
+
+function isActive(pathname: string, href: string) {
+  if (href === '/') return pathname === '/';
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+export function Sidebar() {
+  const pathname = usePathname();
+
+  return (
+    <aside className="k-side" aria-label="주 메뉴">
+      <div className="k-brand">
+        <div className="k-brand-dot">K</div>
+        Kotify
+      </div>
+
+      <nav aria-label="네비게이션" className="flex flex-col">
+        {GROUPS.map((g) => (
+          <div key={g.label}>
+            <div className="k-nav-group">{g.label}</div>
+            {g.items.map((item) => {
+              const active = isActive(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn('k-nav-item', active && 'on')}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon name={item.icon} size={14} strokeWidth={1.7} />
+                    {item.label}
+                  </span>
+                  {item.count != null && (
+                    <span
+                      className={cn('count', item.alert && 'alert')}
+                      aria-label={`읽지 않음 ${item.count}개`}
+                    >
+                      {item.count}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+
+      <div className="k-user">
+        <div className="k-user-avatar">K</div>
+        <div>
+          <div className="k-user-name">김운영</div>
+          <div className="k-user-org">RAVNUS</div>
+        </div>
+      </div>
+    </aside>
+  );
+}

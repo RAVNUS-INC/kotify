@@ -1,19 +1,25 @@
-import { Badge, Button, Card, CardBody, CardFooter, CardHeader, Icon, Kbd, Pill } from '@/components/ui';
 import { FormsSample } from '@/components/demo/FormsSample';
 import { MotionSample } from '@/components/demo/MotionSample';
+import { PageHeader } from '@/components/shell';
+import {
+  Badge,
+  Button,
+  Card,
+  CardBody,
+  CardFooter,
+  CardHeader,
+  Icon,
+  Kbd,
+  Pill,
+} from '@/components/ui';
 
-export default function Home() {
+export default function Kitchen() {
   return (
-    <main className="mx-auto max-w-5xl px-8 py-12">
-      <header>
-        <div className="font-mono text-xs uppercase tracking-[0.08em] text-ink-dim">
-          Phase 2 · UI primitives
-        </div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Kitchen Sink</h1>
-        <p className="mt-2 text-md text-ink-muted">
-          Icon · Button · Badge · Pill · Kbd · Card 렌더 확인용. 실제 앱 레이아웃은 Phase 4에서.
-        </p>
-      </header>
+    <div className="k-page">
+      <PageHeader
+        title="Kitchen Sink"
+        sub="UI 프리미티브 · 폼 · 모션 검증용. 프로덕션 라우트 아님."
+      />
 
       <Section title="Buttons">
         <div className="flex flex-wrap items-center gap-2">
@@ -105,7 +111,7 @@ export default function Home() {
           </CardFooter>
         </Card>
       </Section>
-    </main>
+    </div>
   );
 }
 
