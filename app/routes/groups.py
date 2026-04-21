@@ -6,12 +6,15 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from app.auth.deps import require_setup_complete, require_user
 from app.routes.contacts import _MOCK_CONTACTS
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(require_user), Depends(require_setup_complete)],
+)
 
 
 _MOCK_GROUPS: List[dict] = [

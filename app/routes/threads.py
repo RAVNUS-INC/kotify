@@ -10,11 +10,16 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-router = APIRouter()
+from app.auth.deps import require_setup_complete, require_user
+from app.security.csrf import verify_csrf
+
+router = APIRouter(
+    dependencies=[Depends(require_user), Depends(require_setup_complete)],
+)
 
 # in-memory mock 데이터 동시성 보호 (Phase 10 실제 DB 도입 시 제거)
 _mock_lock = asyncio.Lock()
@@ -161,7 +166,7 @@ def _find_thread(tid: str) -> Optional[dict]:
     return None
 
 
-@router.post("/threads/{tid}/messages")
+@router.post("/threads/{tid}/messages", dependencies=[Depends(verify_csrf)])
 async def post_message(tid: str, body: MessageCreateBody):
     """새 메시지 전송 (mock).
 
@@ -191,7 +196,7 @@ async def post_message(tid: str, body: MessageCreateBody):
     return {"data": {"message": message}}
 
 
-@router.post("/threads/{tid}/read")
+@router.post("/threads/{tid}/read", dependencies=[Depends(verify_csrf)])
 async def mark_read(tid: str):
     """스레드 읽음 표시."""
     async with _mock_lock:

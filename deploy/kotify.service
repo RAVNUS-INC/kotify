@@ -1,5 +1,5 @@
 [Unit]
-Description=kotify — Korean broadcast notification system powered by NCP
+Description=kotify — Korean broadcast notification system (U+ msghub)
 Documentation=https://github.com/RAVNUS-INC/kotify
 After=network-online.target
 Wants=network-online.target
@@ -10,12 +10,14 @@ User=kotify
 Group=kotify
 WorkingDirectory=/opt/kotify
 ExecStartPre=/opt/kotify/.venv/bin/alembic -c /opt/kotify/alembic.ini upgrade head
-# --proxy-headers + --forwarded-allow-ips: NPM 같은 리버스 프록시의
-# X-Forwarded-Proto/For 헤더를 신뢰. 이게 없으면 SessionMiddleware가 https를
-# 인식하지 못해 Secure 쿠키를 못 만들고, 결과적으로 CSRF 검증이 모두 403으로
-# 차단된다. forwarded-allow-ips=* 는 모든 출처를 허용하는데, NPM 앞단에서 외부
-# 인바운드를 차단하는 환경에서는 안전.
-ExecStart=/opt/kotify/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1 --proxy-headers --forwarded-allow-ips=*
+# --host 127.0.0.1: FastAPI 는 내부 전용. 외부 노출은 Next.js(kotify-web.service)
+# 가 담당하고, /api/* 는 next.config.mjs 의 rewrites() 로 내부 프록시된다.
+# 0.0.0.0 바인딩은 같은 VLAN 의 다른 호스트가 API 를 직접 호출할 수 있어 위험.
+#
+# --proxy-headers + --forwarded-allow-ips=127.0.0.1: 같은 CT 안에 있는 Next.js
+# 에서만 X-Forwarded-Proto/For 헤더를 신뢰한다. `*` 로 두면 위조된 헤더가
+# 받아들여져 Secure 쿠키/감사 IP 가 스푸핑될 수 있다.
+ExecStart=/opt/kotify/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
 
 # 재시작 정책
 Restart=on-failure

@@ -317,7 +317,12 @@ async def _dispatch_chat_messages(
             db.add(msg)
 
         db.flush()
-        db.commit()
+
+    # CRITICAL 수정: 루프 내부 commit 을 루프 밖 단일 commit 으로 통합.
+    # 이전 구현은 청크마다 commit 해서 중간 크래시 시 campaign counter/messages
+    # 가 부분 커밋되어 `DISPATCHING` 상태에 멈춘 레코드들이 남았다. 이제 전체가
+    # 성공해야 커밋되고, 예외 발생 시 호출 측에서 rollback 가능.
+    db.commit()
 
     return failed_count
 

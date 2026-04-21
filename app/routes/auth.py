@@ -177,6 +177,11 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     )
     db.commit()
 
+    # 세션 고정 공격 방어: 로그인 전 세션 id 를 무효화하고 새로 발급.
+    # Starlette SessionMiddleware 는 서명된 쿠키 기반이라 서버 측 세션 id 교체는
+    # 없지만, 로그인 이전에 주입된 임의 값(csrf_token 포함)을 전부 폐기한다.
+    request.session.clear()
+
     # 세션 저장 — #29: user_roles를 list로 직접 저장
     request.session["user_sub"] = sub
     request.session["user_email"] = user_info["email"]

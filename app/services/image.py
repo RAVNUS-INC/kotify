@@ -23,6 +23,17 @@ import io
 
 from PIL import Image, UnidentifiedImageError
 
+# Decompression bomb 방어 (CWE-409):
+# 공격자가 100000 x 100000 픽셀 같은 극단적 해상도 이미지를 업로드하면
+# Pillow 가 `width * height * 3` byte 메모리를 요구해 서버가 죽는다.
+# `Image.MAX_IMAGE_PIXELS` 초과 시 Pillow 가 DecompressionBombError 발생.
+# MMS/RCS 의 실제 상한(1500x1440 ≈ 2.16M px) 의 약 12배로 넉넉하게 잡고,
+# 예기치 못한 대형 이미지도 차단 가능하도록 한다.
+Image.MAX_IMAGE_PIXELS = 25_000_000  # 25M px (≈ 5000 x 5000)
+
+# 업로드 바이트 하드 리미트 — 디코딩 전 차단용
+_HARD_BYTE_LIMIT = 10 * 1024 * 1024  # 10MB
+
 # MMS 제약
 MMS_MAX_BYTES = 300 * 1024  # 300KB
 MMS_MAX_WIDTH = 1500
@@ -44,10 +55,24 @@ class ImageProcessingError(ValueError):
 
 
 def _open_image(raw: bytes) -> Image.Image:
-    """바이트에서 이미지를 열고 RGB로 변환한다."""
+    """바이트에서 이미지를 열고 RGB로 변환한다.
+
+    Raises:
+        ImageProcessingError: 파일이 너무 크거나 decompression bomb 감지 시.
+    """
+    # 하드 바이트 리미트 — 디코딩 시도 전에 차단
+    if len(raw) > _HARD_BYTE_LIMIT:
+        raise ImageProcessingError(
+            f"파일이 너무 큽니다 (최대 {_HARD_BYTE_LIMIT // (1024 * 1024)}MB)."
+        )
+
     try:
         img = Image.open(io.BytesIO(raw))
         img.load()
+    except Image.DecompressionBombError as exc:
+        raise ImageProcessingError(
+            "이미지 해상도가 너무 큽니다. 5000x5000 이내로 줄여주세요."
+        ) from exc
     except (UnidentifiedImageError, OSError) as exc:
         raise ImageProcessingError(
             "이미지를 읽을 수 없습니다. JPG, PNG, GIF, WebP 형식만 지원합니다."

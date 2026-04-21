@@ -47,9 +47,17 @@ async def verify_csrf(request: Request) -> None:
     Raises:
         HTTPException: 403 — CSRF 토큰 불일치.
     """
-    # 테스트 전용 우회 — 운영 환경에서 절대 설정 금지
+    # 테스트 전용 우회 — 운영 환경에서는 효과 없도록 가드.
+    # SMS_DEV_MODE=true 가 아닌 상태에서 SMS_DISABLE_CSRF 가 설정돼 있으면
+    # 실수 또는 공격 시도로 간주하고 에러 로그 후 일반 경로로 진행한다.
     if os.getenv("SMS_DISABLE_CSRF") == "1":
-        return
+        from app.config import settings as _settings
+        if _settings.dev_mode:
+            return
+        import logging
+        logging.getLogger(__name__).error(
+            "SMS_DISABLE_CSRF=1 is set but dev_mode=false — ignoring (production safety)"
+        )
 
     if request.method != "POST":
         return

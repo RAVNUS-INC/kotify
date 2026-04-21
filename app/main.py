@@ -1,6 +1,7 @@
 """FastAPI 애플리케이션 엔트리포인트 — 순수 JSON API."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -19,7 +20,11 @@ from app.security.crypto import load_or_create_master_key
 logger = logging.getLogger(__name__)
 
 # ── msghub 클라이언트 싱글턴 ────────────────────────────────────────────────
+# asyncio.Lock: 여러 동시 요청이 동시에 None 을 발견하고 모두 생성하는
+# thundering-herd 를 방지. lock 은 event loop 가 있을 때만 획득 가능하므로
+# lifespan 시작 시점에 지연 초기화한다.
 _msghub_client = None
+_msghub_lock: asyncio.Lock | None = None
 
 
 def _make_msghub_client():
@@ -49,17 +54,43 @@ def _make_msghub_client():
 
 
 def get_msghub_client():
-    """싱글턴 msghub 클라이언트를 반환한다. 없으면 생성한다."""
+    """싱글턴 msghub 클라이언트를 반환한다. 없으면 생성한다.
+
+    첫 호출은 lifespan 에서 이루어지며 그 이후엔 이미 초기화된 인스턴스를 반환.
+    동시 요청 경합은 async 래퍼(`aget_msghub_client`) 또는 lifespan 사전 생성으로 처리.
+    """
     global _msghub_client
     if _msghub_client is None:
         _msghub_client = _make_msghub_client()
     return _msghub_client
 
 
-def reset_msghub_client():
-    """msghub 설정 변경 시 클라이언트를 재생성한다."""
+async def aget_msghub_client():
+    """async 컨텍스트에서 안전한 msghub 싱글턴 접근 (thundering-herd 방지)."""
+    global _msghub_client, _msghub_lock
+    if _msghub_client is not None:
+        return _msghub_client
+    if _msghub_lock is None:
+        _msghub_lock = asyncio.Lock()
+    async with _msghub_lock:
+        if _msghub_client is None:
+            _msghub_client = _make_msghub_client()
+    return _msghub_client
+
+
+async def reset_msghub_client():
+    """msghub 설정 변경 시 클라이언트를 재생성한다.
+
+    기존 클라이언트의 HTTP 연결 풀을 닫아 FD 누수를 방지한다.
+    """
     global _msghub_client
+    old = _msghub_client
     _msghub_client = None
+    if old is not None:
+        try:
+            await old.aclose()
+        except Exception:  # noqa: BLE001
+            logger.debug("reset_msghub_client: old client close error", exc_info=True)
 
 
 @asynccontextmanager
@@ -208,13 +239,17 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @app.exception_handler(MsghubAuthError)
 async def msghub_auth_error_handler(request: Request, exc: MsghubAuthError):
-    """msghub 인증 오류 — 503 + 관리자 점검 안내."""
+    """msghub 인증 오류 — 503 + 관리자 점검 안내.
+
+    내부 예외 detail(에러 코드/엔드포인트 등)은 로그에만 남기고 응답에는 노출하지 않는다.
+    이전 버전은 `str(exc)` 를 응답에 포함해 공격자에게 인프라 정보를 흘렸음.
+    """
+    logger.error("msghub auth error: %s", exc)
     return JSONResponse(
         {
             "error": {
                 "code": "msghub_auth_error",
                 "message": "msghub 인증 오류가 발생했습니다. 관리자에게 설정 점검을 요청하세요.",
-                "detail": str(exc),
             }
         },
         status_code=503,

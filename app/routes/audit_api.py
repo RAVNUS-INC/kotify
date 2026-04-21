@@ -9,10 +9,15 @@ import csv
 import io
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 
-router = APIRouter()
+from app.auth.deps import require_role, require_setup_complete
+
+# 감사 로그는 admin 전용
+router = APIRouter(
+    dependencies=[Depends(require_role("admin")), Depends(require_setup_complete)],
+)
 
 
 _MOCK_AUDIT: List[dict] = [

@@ -8,11 +8,17 @@ from __future__ import annotations
 import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-router = APIRouter()
+from app.auth.deps import require_role, require_setup_complete
+from app.security.csrf import verify_csrf
+
+# 조직 설정은 admin 전용
+router = APIRouter(
+    dependencies=[Depends(require_role("admin")), Depends(require_setup_complete)],
+)
 
 # 동시성 보호
 _settings_lock = asyncio.Lock()
@@ -66,7 +72,7 @@ async def get_org() -> dict:
     return {"data": _MOCK_ORG}
 
 
-@router.patch("/org")
+@router.patch("/org", dependencies=[Depends(verify_csrf)])
 async def patch_org(body: OrgPatchBody) -> dict:
     async with _settings_lock:
         updates = body.model_dump(exclude_none=True)

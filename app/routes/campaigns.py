@@ -9,11 +9,16 @@ from __future__ import annotations
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-router = APIRouter()
+from app.auth.deps import require_setup_complete, require_user
+from app.security.csrf import verify_csrf
+
+router = APIRouter(
+    dependencies=[Depends(require_user), Depends(require_setup_complete)],
+)
 
 
 _MOCK_CAMPAIGNS: List[dict] = [
@@ -324,7 +329,7 @@ async def list_campaigns(
     }
 
 
-@router.post("/campaigns")
+@router.post("/campaigns", dependencies=[Depends(verify_csrf)])
 async def create_campaign(body: CampaignCreateBody) -> JSONResponse:
     """새 캠페인 생성 (mock).
 

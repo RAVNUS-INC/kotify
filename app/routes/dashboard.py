@@ -5,9 +5,14 @@ api-contract.md의 GET /api/dashboard 계약을 따른다.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-router = APIRouter()
+from app.auth.deps import require_setup_complete, require_user
+
+# 인증 필수 — 모든 앱 라우트 공통 가드
+router = APIRouter(
+    dependencies=[Depends(require_user), Depends(require_setup_complete)],
+)
 
 
 _MOCK_DASHBOARD = {

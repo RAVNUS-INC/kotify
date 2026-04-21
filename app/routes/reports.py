@@ -9,10 +9,14 @@ import csv
 import io
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 
-router = APIRouter()
+from app.auth.deps import require_setup_complete, require_user
+
+router = APIRouter(
+    dependencies=[Depends(require_user), Depends(require_setup_complete)],
+)
 
 
 from app.util.csv_safe import safe_csv_cell as _safe

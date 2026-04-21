@@ -188,6 +188,10 @@ def export_contacts(
 
     contacts = list(db.execute(q).scalars().all())
 
+    # CWE-1236 CSV formula injection 방어. notes/name 같은 사용자 입력 필드에
+    # `=CMD(...)` 같은 payload 가 들어오면 Excel 에서 원격 명령을 트리거할 수 있다.
+    from app.util.csv_safe import safe_csv_cell
+
     output = io.StringIO()
     writer = csv.DictWriter(
         output,
@@ -197,11 +201,11 @@ def export_contacts(
     writer.writeheader()
     for c in contacts:
         writer.writerow({
-            "name": c.name,
-            "phone": c.phone or "",
-            "email": c.email or "",
-            "department": c.department or "",
-            "notes": c.notes or "",
+            "name": safe_csv_cell(c.name or ""),
+            "phone": safe_csv_cell(c.phone or ""),
+            "email": safe_csv_cell(c.email or ""),
+            "department": safe_csv_cell(c.department or ""),
+            "notes": safe_csv_cell(c.notes or ""),
         })
 
     return output.getvalue()

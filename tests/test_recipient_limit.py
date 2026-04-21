@@ -19,7 +19,7 @@ async def test_dispatch_campaign_raises_on_too_many_recipients(monkeypatch):
     with pytest.raises(ValueError, match=str(MAX_RECIPIENTS_PER_CAMPAIGN)):
         await dispatch_campaign(
             db=None,  # type: ignore[arg-type]
-            ncp_client=None,  # type: ignore[arg-type]
+            msghub_client=None,  # type: ignore[arg-type]
             created_by="test-sub",
             caller_number="0212345678",
             content="테스트",
@@ -48,7 +48,7 @@ def test_exactly_at_limit_does_not_raise_immediately():
         try:
             await dispatch_campaign(
                 db=None,  # type: ignore[arg-type]
-                ncp_client=None,  # type: ignore[arg-type]
+                msghub_client=None,  # type: ignore[arg-type]
                 created_by="test-sub",
                 caller_number="0212345678",
                 content="테스트",

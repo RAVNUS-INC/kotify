@@ -7,10 +7,15 @@ from __future__ import annotations
 import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-router = APIRouter()
+from app.auth.deps import require_setup_complete, require_user
+from app.security.csrf import verify_csrf
+
+router = APIRouter(
+    dependencies=[Depends(require_user), Depends(require_setup_complete)],
+)
 
 
 _notif_lock = asyncio.Lock()
@@ -63,7 +68,7 @@ async def list_notifications(
     }
 
 
-@router.post("/notifications/{nid}/read")
+@router.post("/notifications/{nid}/read", dependencies=[Depends(verify_csrf)])
 async def mark_read(nid: str):
     async with _notif_lock:
         for n in _MOCK_NOTIFICATIONS:
@@ -76,7 +81,7 @@ async def mark_read(nid: str):
     )
 
 
-@router.post("/notifications/read-all")
+@router.post("/notifications/read-all", dependencies=[Depends(verify_csrf)])
 async def mark_all_read():
     async with _notif_lock:
         count = 0

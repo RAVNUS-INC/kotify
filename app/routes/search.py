@@ -5,14 +5,17 @@ _MOCK_THREADS / _MOCK_AUDIT)를 cross-cutting 검색.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from app.auth.deps import require_setup_complete, require_user
 from app.routes.audit_api import _MOCK_AUDIT
 from app.routes.campaigns import _MOCK_CAMPAIGNS
 from app.routes.contacts import _MOCK_CONTACTS
 from app.routes.threads import _MOCK_THREADS
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(require_user), Depends(require_setup_complete)],
+)
 
 
 _SECTION_LIMIT = 10
