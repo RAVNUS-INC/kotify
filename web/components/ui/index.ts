@@ -43,3 +43,6 @@ export type { ToggleProps } from './Toggle';
 
 export { Segmented } from './Segmented';
 export type { SegmentedProps, SegmentedItem } from './Segmented';
+
+export { EmptyState } from './EmptyState';
+export type { EmptyStateProps, EmptyStateSize } from './EmptyState';

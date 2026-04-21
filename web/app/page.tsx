@@ -1,5 +1,6 @@
 import { Badge, Button, Card, CardBody, CardFooter, CardHeader, Icon, Kbd, Pill } from '@/components/ui';
 import { FormsSample } from '@/components/demo/FormsSample';
+import { MotionSample } from '@/components/demo/MotionSample';
 
 export default function Home() {
   return (
@@ -71,6 +72,10 @@ export default function Home() {
 
       <Section title="Forms (client)">
         <FormsSample />
+      </Section>
+
+      <Section title="Motion (client)">
+        <MotionSample />
       </Section>
 
       <Section title="Card">
