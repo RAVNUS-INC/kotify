@@ -204,6 +204,108 @@ def _estimate_cost(message: str, count: int) -> tuple[int, int, str]:
     return bytes_, per * count, channel
 
 
+def _mock_recipients(campaign: dict) -> list[dict]:
+    """캠페인 상태에 따라 20명 샘플 수신자 생성."""
+    status = campaign.get("status")
+    if status in ("draft", "cancelled", "scheduled"):
+        return []
+
+    sample_names = [
+        ("박지훈", "010-1234-5678"),
+        ("이수진", "010-9876-5432"),
+        ("김민재", "010-3333-4444"),
+        ("정태영", "010-5555-6666"),
+        ("최서연", "010-7777-8888"),
+        ("김영호", "010-9999-0000"),
+        ("문지우", "010-2222-3333"),
+        ("강민지", "010-4444-5555"),
+        ("양현수", "010-6666-7777"),
+        ("한예린", "010-8888-9999"),
+        ("백지훈", "010-0000-1111"),
+        ("조승현", "010-1111-2222"),
+        ("권나연", "010-3333-5555"),
+        ("윤태호", "010-4444-6666"),
+        ("신아영", "010-5555-7777"),
+        ("배성우", "010-6666-8888"),
+        ("안지민", "010-7777-9999"),
+        ("홍은정", "010-8888-0000"),
+        ("류재원", "010-9999-1111"),
+        ("임소영", "010-0000-2222"),
+    ]
+
+    # 상태 분포 (대략적 mock)
+    if status == "sent":
+        distribution = (
+            ["replied"] * 2
+            + ["read"] * 6
+            + ["delivered"] * 8
+            + ["fallback_sms"] * 2
+            + ["failed"] * 2
+        )
+    elif status == "sending":
+        distribution = (
+            ["delivered"] * 8
+            + ["queued"] * 8
+            + ["failed"] * 2
+            + ["fallback_sms"] * 2
+        )
+    elif status == "failed":
+        distribution = ["failed"] * 18 + ["fallback_sms"] * 2
+    else:
+        distribution = ["delivered"] * 20
+
+    result = []
+    for (name, phone), rstatus in zip(sample_names, distribution, strict=False):
+        row: dict = {
+            "id": f"r-{campaign['id']}-{phone[-4:]}",
+            "name": name,
+            "phone": phone,
+            "status": rstatus,
+        }
+        sent_at = campaign.get("createdAt", "").split(" ")[-1] or "00:00"
+        row["sentAt"] = sent_at if rstatus != "queued" else None
+        if rstatus in ("read", "replied"):
+            row["readAt"] = sent_at
+        if rstatus == "replied":
+            row["repliedAt"] = sent_at
+        if rstatus == "failed":
+            row["failureReason"] = "수신 거부"
+        result.append(row)
+
+    return result
+
+
+@router.get("/campaigns/{cid}")
+async def get_campaign(cid: str):
+    """캠페인 상세 (수신자 샘플 포함)."""
+    for c in _MOCK_CAMPAIGNS:
+        if c["id"] == cid:
+            recipients = _mock_recipients(c)
+            total = c.get("recipients") or 0
+            reach = c.get("reach") or 0
+            replies = c.get("replies") or 0
+            failed = total - reach if c.get("status") in ("sent", "failed") else 0
+            fallback_count = max(1, int(total * 0.027)) if c.get("status") == "sent" else 0
+
+            return {
+                "data": {
+                    **c,
+                    "recipientsSample": recipients,
+                    "breakdown": {
+                        "total": total,
+                        "rcsDelivered": max(0, reach - fallback_count),
+                        "smsFallback": fallback_count,
+                        "failed": failed - fallback_count if failed > fallback_count else 0,
+                        "replies": replies,
+                    },
+                }
+            }
+    return JSONResponse(
+        {"error": {"code": "not_found", "message": "캠페인을 찾을 수 없습니다"}},
+        status_code=404,
+    )
+
+
 @router.get("/campaigns")
 async def list_campaigns(
     q: Optional[str] = None,

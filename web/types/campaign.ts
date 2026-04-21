@@ -28,3 +28,35 @@ export type CampaignListMeta = {
   total: number;
   cursor?: string;
 };
+
+export type RecipientStatus =
+  | 'queued'
+  | 'delivered'
+  | 'read'
+  | 'replied'
+  | 'failed'
+  | 'fallback_sms';
+
+export type Recipient = {
+  id: string;
+  name: string;
+  phone: string;
+  status: RecipientStatus;
+  sentAt?: string | null;
+  readAt?: string;
+  repliedAt?: string;
+  failureReason?: string;
+};
+
+export type CampaignBreakdown = {
+  total: number;
+  rcsDelivered: number;
+  smsFallback: number;
+  failed: number;
+  replies: number;
+};
+
+export type CampaignDetail = Campaign & {
+  recipientsSample: Recipient[];
+  breakdown: CampaignBreakdown;
+};

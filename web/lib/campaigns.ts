@@ -1,5 +1,5 @@
 import { apiFetch } from './api';
-import type { Campaign } from '@/types/campaign';
+import type { Campaign, CampaignDetail } from '@/types/campaign';
 
 export type FetchCampaignsParams = {
   q?: string;
@@ -14,4 +14,8 @@ export async function fetchCampaigns(
   if (params.status && params.status !== 'all') qs.set('status', params.status);
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return apiFetch<Campaign[]>(`/campaigns${suffix}`);
+}
+
+export async function fetchCampaign(id: string): Promise<CampaignDetail> {
+  return apiFetch<CampaignDetail>(`/campaigns/${encodeURIComponent(id)}`);
 }
