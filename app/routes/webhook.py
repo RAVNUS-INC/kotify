@@ -196,6 +196,9 @@ async def receive_mo(
         log.warning("MO 웹훅 JSON 파싱 실패")
         return JSONResponse({"error": "invalid json"}, status_code=400)
 
+    # 진단: msghub가 보내는 실제 페이로드 구조 확인 (moLst vs dataLst 등)
+    log.info("MO 웹훅 수신 raw body: %s", body)
+
     try:
         payload = MoWebhookPayload.from_dict(body)
     except Exception:
@@ -203,6 +206,10 @@ async def receive_mo(
         return JSONResponse({"error": "invalid mo format"}, status_code=400)
 
     if not payload.items:
+        log.info(
+            "MO 웹훅 — 파싱된 items 0건 (raw moCnt=%s, keys=%s)",
+            body.get("moCnt"), list(body.keys()),
+        )
         return JSONResponse({"status": "no items"}, status_code=200)
 
     raw = json.dumps(body, ensure_ascii=False)
