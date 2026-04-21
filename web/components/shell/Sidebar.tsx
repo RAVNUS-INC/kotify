@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import type { Route } from 'next';
 import { Icon, type IconName } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import type { SessionUser } from '@/lib/auth';
 
 type NavItem = {
   href: Route;
@@ -17,6 +18,10 @@ type NavItem = {
 type NavGroup = {
   label: string;
   items: ReadonlyArray<NavItem>;
+};
+
+export type SidebarProps = {
+  user: SessionUser;
 };
 
 const GROUPS: ReadonlyArray<NavGroup> = [
@@ -58,8 +63,13 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function Sidebar() {
+export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
+  const initial = (user.display || user.name || user.email || 'U')
+    .trim()
+    .charAt(0)
+    .toUpperCase();
+  const org = user.roles.includes('admin') ? 'RAVNUS · admin' : 'RAVNUS';
 
   return (
     <aside className="k-side" aria-label="주 메뉴">
@@ -101,10 +111,10 @@ export function Sidebar() {
       </nav>
 
       <div className="k-user">
-        <div className="k-user-avatar">K</div>
-        <div>
-          <div className="k-user-name">김운영</div>
-          <div className="k-user-org">RAVNUS</div>
+        <div className="k-user-avatar">{initial}</div>
+        <div className="min-w-0">
+          <div className="k-user-name truncate">{user.display || user.name}</div>
+          <div className="k-user-org truncate">{org}</div>
         </div>
       </div>
     </aside>

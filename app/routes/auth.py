@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth.oidc import get_oauth_client, parse_user_from_claims
@@ -20,6 +20,47 @@ router = APIRouter(prefix="/auth")
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+@router.get("/me")
+async def me(request: Request) -> JSONResponse:
+    """현재 로그인한 사용자 정보를 envelope 형식으로 반환한다."""
+    sub = request.session.get("user_sub") if "session" in request.scope else None
+    if not sub:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": "unauthenticated",
+                    "message": "로그인이 필요합니다.",
+                }
+            },
+            status_code=401,
+        )
+
+    roles_raw = request.session.get("user_roles", [])
+    if isinstance(roles_raw, list):
+        roles = [str(r) for r in roles_raw]
+    else:
+        try:
+            parsed = json.loads(roles_raw)
+            roles = [str(r) for r in parsed] if isinstance(parsed, list) else []
+        except (TypeError, ValueError, json.JSONDecodeError):
+            roles = []
+
+    return JSONResponse(
+        {
+            "data": {
+                "user": {
+                    "sub": sub,
+                    "email": request.session.get("user_email", ""),
+                    "name": request.session.get("user_name", ""),
+                    "display": request.session.get("user_display", "")
+                    or request.session.get("user_name", ""),
+                    "roles": roles,
+                }
+            }
+        }
+    )
 
 
 @router.get("/login")

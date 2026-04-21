@@ -1,9 +1,18 @@
+import { redirect } from 'next/navigation';
+import { getSession } from '@/lib/auth';
 import { Sidebar, Topbar } from '@/components/shell';
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const user = await getSession();
+  if (!user) redirect('/login');
+
   return (
     <div className="k-shell min-h-screen">
-      <Sidebar />
+      <Sidebar user={user} />
       <main className="k-main" id="main">
         <a
           href="#main"

@@ -1,19 +1,43 @@
-import { Card, CardBody } from '@/components/ui';
+import { Button, Card, CardBody, Icon } from '@/components/ui';
 
-export default function Login() {
+type SearchParams = { from?: string };
+
+export default function Login({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
+  const from = searchParams?.from ?? '/';
+  const loginHref = `/api/auth/login?from=${encodeURIComponent(from)}`;
+
   return (
     <Card>
       <CardBody>
-        <div className="text-center">
-          <div className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-brand">
-            Phase 4b · S14 Login
+        <div className="py-2 text-center">
+          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gray-11 font-mono text-white">
+            K
           </div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Kotify</h1>
-          <p className="mt-2 text-sm text-ink-muted">
-            Keycloak OIDC 로그인은 Phase 4b에서 연결됩니다.
+          <h1 className="text-2xl font-semibold tracking-tight">Kotify</h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            조직 계정으로 로그인하세요.
           </p>
+        </div>
+
+        <a
+          href={loginHref}
+          className="mt-6 inline-flex h-10 w-full items-center justify-center gap-2 rounded border border-brand bg-brand px-4 text-sm font-medium text-white transition-colors duration-fast ease-out hover:bg-brand-hover"
+        >
+          <Icon name="shield" size={14} />
+          Keycloak으로 로그인
+        </a>
+
+        <div className="mt-4 text-center text-[11px] text-ink-dim">
+          로그인 후 <span className="font-mono">{from}</span>으로 돌아갑니다.
         </div>
       </CardBody>
     </Card>
   );
 }
+
+// 로그인은 쿠키 상태에 따라 리다이렉트 동작이 달라지므로 매 요청 SSR
+export const dynamic = 'force-dynamic';
