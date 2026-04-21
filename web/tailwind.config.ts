@@ -40,6 +40,10 @@ const config: Config = {
           DEFAULT: 'var(--warning)',
           bg: 'var(--warning-bg)',
         },
+        info: {
+          DEFAULT: 'var(--info)',
+          bg: 'var(--info-bg)',
+        },
         ink: {
           DEFAULT: 'var(--text)',
           muted: 'var(--text-muted)',

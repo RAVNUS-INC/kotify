@@ -45,6 +45,8 @@
   --success-bg: #f0fdf4;
   --warning: #b45309;
   --warning-bg: #fffbeb;
+  --info: #1e4fd1;
+  --info-bg: #e6edff;
 
   /* — Type — */
   --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
