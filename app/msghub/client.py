@@ -61,6 +61,11 @@ def _raise_for_response(body: dict, http_status: int) -> None:
     if code == SUCCESS_CODE:
         return
 
+    # 실패 응답 본문 전체를 디버그용으로 출력 — 문서에 없는 부가 필드
+    # (error, detail, reason 등)가 29003 같은 "기타 오류"의 진짜 원인을
+    # 담고 있을 때 진단을 돕는다.
+    log.warning("msghub 실패 응답: http=%d body=%s", http_status, body)
+
     # 인증 에러 (20xxx)
     if code.startswith("20") or code in ("29011", "29025"):
         raise MsghubAuthError(f"[{code}] {message}", code=code, status_code=http_status)
