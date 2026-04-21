@@ -127,6 +127,7 @@ except Exception:  # noqa: BLE001
     _session_secret = _get_fallback_secret()
 
 # ── 라우터 등록 (JSON API 전용) ─────────────────────────────────────────────
+from app.routes.audit_api import router as audit_router
 from app.routes.auth import router as auth_router
 from app.routes.campaigns import router as campaigns_router
 from app.routes.contacts import router as contacts_router
@@ -148,6 +149,7 @@ app.include_router(contacts_router)
 app.include_router(groups_router)
 app.include_router(numbers_router)
 app.include_router(settings_router)
+app.include_router(audit_router)
 
 
 # ── 미들웨어: 사용자 컨텍스트 주입 ───────────────────────────────────────────
