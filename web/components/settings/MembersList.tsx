@@ -55,7 +55,12 @@ export function MembersList({ members }: MembersListProps) {
             <div className="font-mono text-[11px] text-ink-dim">
               {m.invitedAt}
             </div>
-            <Button variant="ghost" size="sm" disabled>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled
+              aria-label={`${m.name} 멤버 관리`}
+            >
               <Icon name="moreV" size={12} />
             </Button>
           </li>

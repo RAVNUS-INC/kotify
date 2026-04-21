@@ -27,16 +27,22 @@ type PageProps = {
 
 export default async function NumbersPage({ searchParams }: PageProps) {
   const status = normalize(searchParams?.status);
-  const numbers = await fetchNumbers({ status });
-
-  const approvedCount = numbers.filter((n) => n.status === 'approved').length;
-  const pendingCount = numbers.filter((n) => n.status === 'pending').length;
+  // PageHeader sub의 집계는 필터 무관 전체값이 정확.
+  // 필터 적용 시 해당 탭만 들어있어서 "승인 N / 대기 0" 식 오표시 발생을 방지.
+  const [numbers, allNumbers] = await Promise.all([
+    fetchNumbers({ status }),
+    status === 'all' ? Promise.resolve(null) : fetchNumbers({}),
+  ]);
+  const totals = allNumbers ?? numbers;
+  const approvedCount = totals.filter((n) => n.status === 'approved').length;
+  const pendingCount = totals.filter((n) => n.status === 'pending').length;
+  const totalCount = totals.length;
 
   return (
     <div className="k-page">
       <PageHeader
         title="발신번호"
-        sub={`총 ${numbers.length}개 · 승인 ${approvedCount} · 대기 ${pendingCount}`}
+        sub={`총 ${totalCount}개 · 승인 ${approvedCount} · 대기 ${pendingCount}`}
         actions={
           <Button variant="primary" size="sm" icon={<Icon name="plus" size={12} />}>
             번호 등록

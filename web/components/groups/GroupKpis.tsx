@@ -11,19 +11,17 @@ export function GroupKpis({ group }: GroupKpisProps) {
 
   return (
     <div className="grid grid-cols-4 gap-3">
-      <KpiBox label="총 인원" delay={100}>
+      <KpiBox label="총 인원">
         <Counter value={group.memberCount} delay={100} />
       </KpiBox>
       <KpiBox
         label="유효 번호"
-        delay={180}
         sub={invalidCount > 0 ? `무효 ${invalidCount}` : '전체 유효'}
       >
         <Counter value={group.validCount} delay={180} />
       </KpiBox>
       <KpiBox
         label="최근 도달률"
-        delay={260}
         sub={
           group.lastCampaignAt
             ? group.lastCampaignAt.split(' ')[0]
@@ -38,7 +36,6 @@ export function GroupKpis({ group }: GroupKpisProps) {
       </KpiBox>
       <KpiBox
         label="최근 발송"
-        delay={340}
         sub={group.lastCampaignAt ? group.lastCampaignAt.split(' ')[1] : undefined}
       >
         <span className="text-[22px] font-mono">
@@ -51,7 +48,6 @@ export function GroupKpis({ group }: GroupKpisProps) {
 
 type KpiBoxProps = {
   label: string;
-  delay: number;
   sub?: string;
   children: React.ReactNode;
 };

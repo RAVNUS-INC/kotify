@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Org } from '@/types/settings';
 import { Button, Field, Icon, Input } from '@/components/ui';
 import { patchOrgClient } from '@/lib/settings';
@@ -10,6 +11,10 @@ export type OrgSettingsFormProps = {
 };
 
 export function OrgSettingsForm({ initial }: OrgSettingsFormProps) {
+  const router = useRouter();
+  // baseline은 마지막 성공 저장값. dirty 판정에 사용.
+  // initial prop과 분리해 trimmed sync 이후에도 dirty 계산이 정확.
+  const [baseline, setBaseline] = useState(initial);
   const [name, setName] = useState(initial.name);
   const [service, setService] = useState(initial.service);
   const [contact, setContact] = useState(initial.contact);
@@ -18,9 +23,9 @@ export function OrgSettingsForm({ initial }: OrgSettingsFormProps) {
   const [error, setError] = useState<string | null>(null);
 
   const dirty =
-    name !== initial.name ||
-    service !== initial.service ||
-    contact !== initial.contact;
+    name !== baseline.name ||
+    service !== baseline.service ||
+    contact !== baseline.contact;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -28,13 +33,22 @@ export function OrgSettingsForm({ initial }: OrgSettingsFormProps) {
     setSaving(true);
     setError(null);
     setSaved(false);
+    const trimmed = {
+      name: name.trim(),
+      service: service.trim(),
+      contact: contact.trim(),
+    };
     try {
-      await patchOrgClient({
-        name: name.trim(),
-        service: service.trim(),
-        contact: contact.trim(),
-      });
+      const updated = await patchOrgClient(trimmed);
+      // 입력값이 trim되어 서버로 갔으니 로컬 state도 trimmed로 통일 + baseline 갱신.
+      // 이후 "되돌리기"를 눌러도 저장된 값이 유지되고 dirty도 정확히 false.
+      setName(trimmed.name);
+      setService(trimmed.service);
+      setContact(trimmed.contact);
+      setBaseline(updated);
       setSaved(true);
+      // Server Component가 stale initial prop을 갖고 있을 수 있으니 재실행 유도.
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -43,9 +57,9 @@ export function OrgSettingsForm({ initial }: OrgSettingsFormProps) {
   };
 
   const onReset = () => {
-    setName(initial.name);
-    setService(initial.service);
-    setContact(initial.contact);
+    setName(baseline.name);
+    setService(baseline.service);
+    setContact(baseline.contact);
     setError(null);
     setSaved(false);
   };
@@ -96,7 +110,7 @@ export function OrgSettingsForm({ initial }: OrgSettingsFormProps) {
       </Field>
 
       <Field label="타임존" hint="변경은 Phase 후속에 지원 예정">
-        <Input value={initial.timezone} readOnly disabled />
+        <Input value={baseline.timezone} readOnly disabled />
       </Field>
 
       <div className="rounded border border-line bg-gray-1 p-3 text-[12.5px] text-ink-muted">
@@ -106,13 +120,13 @@ export function OrgSettingsForm({ initial }: OrgSettingsFormProps) {
         <div className="flex justify-between">
           <span>캠페인당 수신자</span>
           <span className="font-mono tabular-nums">
-            {initial.limits.recipientsPerCampaign.toLocaleString('ko-KR')}명
+            {baseline.limits.recipientsPerCampaign.toLocaleString('ko-KR')}명
           </span>
         </div>
         <div className="mt-0.5 flex justify-between">
           <span>분당 캠페인</span>
           <span className="font-mono tabular-nums">
-            {initial.limits.campaignsPerMinute}건
+            {baseline.limits.campaignsPerMinute}건
           </span>
         </div>
       </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import * as Dialog from '@radix-ui/react-dialog';
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { Icon } from './Icon';
 import { cn } from '@/lib/cn';
 
@@ -28,6 +28,8 @@ export function Drawer({
   footer,
   className,
 }: DrawerProps) {
+  // useId로 unique ID 생성 — 같은 페이지에 여러 Drawer가 있어도 ID 충돌 없음
+  const descId = useId();
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -39,7 +41,7 @@ export function Drawer({
             className,
           )}
           style={{ width }}
-          aria-describedby={description ? 'k-drawer-description' : undefined}
+          aria-describedby={description ? descId : undefined}
         >
           {(title || description) && (
             <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
@@ -51,7 +53,7 @@ export function Drawer({
                 )}
                 {description && (
                   <Dialog.Description
-                    id="k-drawer-description"
+                    id={descId}
                     className="mt-0.5 text-sm text-ink-muted"
                   >
                     {description}

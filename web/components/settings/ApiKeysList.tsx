@@ -45,7 +45,12 @@ export function ApiKeysList({ keys }: ApiKeysListProps) {
           <Badge kind="neutral" icon={<Icon name="calendar" size={10} />}>
             {k.createdAt}
           </Badge>
-          <Button variant="ghost" size="sm" disabled>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled
+            aria-label={`${k.name} API 키 삭제`}
+          >
             <Icon name="trash" size={12} />
           </Button>
         </li>

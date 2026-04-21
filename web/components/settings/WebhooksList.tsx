@@ -44,7 +44,12 @@ export function WebhooksList({ webhooks }: WebhooksListProps) {
             </div>
           </div>
           <div className="font-mono text-[11px] text-ink-dim">{w.createdAt}</div>
-          <Button variant="ghost" size="sm" disabled>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled
+            aria-label={`${w.url} 웹훅 삭제`}
+          >
             <Icon name="trash" size={12} />
           </Button>
         </li>

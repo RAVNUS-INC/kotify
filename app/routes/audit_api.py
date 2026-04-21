@@ -39,6 +39,20 @@ _MOCK_AUDIT: List[dict] = [
 ]
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_csv_cell(value: str) -> str:
+    """CSV formula injection (CWE-1236) 방어.
+
+    `=`, `+`, `-`, `@`, `\\t`, `\\r`로 시작하는 값은 Excel/Numbers에서
+    공식으로 해석돼 실행될 수 있다. single-quote prefix로 무력화.
+    """
+    if value and value[0] in _FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
 def _filter(rows: List[dict], q: Optional[str], action: Optional[str]) -> List[dict]:
     if action and action != "all":
         rows = [r for r in rows if r.get("action") == action]
@@ -77,7 +91,14 @@ async def export_audit_csv(
     writer.writerow(["시간", "주체", "이메일", "액션", "대상", "IP"])
     for r in rows:
         writer.writerow(
-            [r["time"], r["actor"], r["actorEmail"], r["action"], r["target"], r["ip"]]
+            [
+                _safe_csv_cell(r["time"]),
+                _safe_csv_cell(r["actor"]),
+                _safe_csv_cell(r["actorEmail"]),
+                _safe_csv_cell(r["action"]),
+                _safe_csv_cell(r["target"]),
+                _safe_csv_cell(r["ip"]),
+            ]
         )
 
     return Response(

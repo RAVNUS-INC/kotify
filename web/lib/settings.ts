@@ -19,6 +19,10 @@ export async function fetchWebhooks(): Promise<Webhook[]> {
 
 /**
  * Client-side PATCH /org. envelope error 시 throw.
+ *
+ * 주의: 이 함수는 client component에서만 호출한다. 상대 경로 `/api/org`는
+ * Next.js rewrite가 FastAPI `/org`로 프록시한다 (next.config.mjs).
+ * Server Component에서는 apiFetch()로 절대 URL 직접 호출 (fetchOrg 참고).
  */
 export async function patchOrgClient(
   updates: Partial<Pick<Org, 'name' | 'service' | 'contact' | 'timezone'>>,

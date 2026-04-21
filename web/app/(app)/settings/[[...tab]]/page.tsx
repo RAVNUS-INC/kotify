@@ -42,6 +42,11 @@ export default async function SettingsPage({ params }: PageProps) {
     redirect('/settings/org');
   }
 
+  // 깊은 경로(/settings/org/extra/here) 방어 — 첫 세그먼트만 유지
+  if (params.tab.length > 1) {
+    redirect(`/settings/${params.tab[0]}`);
+  }
+
   const tab = resolveTab(params.tab);
   if (tab !== params.tab[0]) {
     // 알 수 없는 탭 — 기본으로
