@@ -1,6 +1,6 @@
 """마스터 키 관리 + Fernet 암호화/복호화.
 
-마스터 키는 `/var/lib/sms/master.key` (운영) 또는 `./var/master.key` (개발)에
+마스터 키는 `/var/lib/kotify/master.key` (운영) 또는 `./var/master.key` (개발)에
 600 권한으로 보관된다. 파일이 없으면 최초 기동 시 자동 생성한다.
 
 절대 금지:

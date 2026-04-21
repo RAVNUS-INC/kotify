@@ -1,0 +1,7 @@
+# /etc/cron.d/kotify-backup
+# kotify DB 일일 백업
+# 설치: cp /opt/kotify/deploy/kotify-backup.cron /etc/cron.d/kotify-backup
+#        chmod 644 /etc/cron.d/kotify-backup
+
+# 매일 00:00에 kotify 사용자로 백업 스크립트 실행
+0 0 * * * kotify /opt/kotify/deploy/kotify-backup.sh

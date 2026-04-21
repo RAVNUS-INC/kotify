@@ -28,7 +28,7 @@ async def setup_page(
     """Setup wizard 페이지.
 
     토큰은 표시하지 않는다 (#10).
-    사용자가 직접 cat /var/lib/sms/setup.token 으로 읽어 입력.
+    사용자가 직접 cat /var/lib/kotify/setup.token 으로 읽어 입력.
     """
     # 토큰 파일이 없으면 생성 (사용자가 파일에서 읽을 수 있도록)
     generate_setup_token(settings.setup_token_path)

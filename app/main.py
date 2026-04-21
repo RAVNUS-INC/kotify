@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _msghub_client
 
     # DB 테이블 생성 — dev_mode에서만 create_all 사용
-    # 운영 환경: systemd ExecStartPre=/opt/sms/.venv/bin/alembic upgrade head
+    # 운영 환경: systemd ExecStartPre=/opt/kotify/.venv/bin/alembic upgrade head
     if settings.dev_mode:
         Base.metadata.create_all(bind=engine)
 

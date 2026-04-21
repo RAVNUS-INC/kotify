@@ -151,7 +151,7 @@ if [[ "$SYNC_OK" == "true" ]]; then
     ok "NTP 동기화 완료"
     timedatectl status | grep -E "Local time|synchronized"
 else
-    warn "NTP 동기화 미완료 (네트워크 확인 필요). NCP API는 5분 이내 시간 오차를 요구합니다."
+    warn "NTP 동기화 미완료 (네트워크 확인 필요). msghub JWT 서명은 시간 오차에 민감합니다."
     timedatectl status
 fi
 
@@ -279,14 +279,14 @@ fi
 
 # ── Step 11: 백업 cron 설정 ─────────────────────────────────────────────────
 step "11. 백업 cron 설정"
-if [[ -f "${INSTALL_DIR}/deploy/sms-backup.sh" ]]; then
-    chmod +x "${INSTALL_DIR}/deploy/sms-backup.sh"
+if [[ -f "${INSTALL_DIR}/deploy/kotify-backup.sh" ]]; then
+    chmod +x "${INSTALL_DIR}/deploy/kotify-backup.sh"
     CRON_FILE="/etc/cron.d/kotify-backup"
-    cp "${INSTALL_DIR}/deploy/sms-backup.cron" "${CRON_FILE}"
+    cp "${INSTALL_DIR}/deploy/kotify-backup.cron" "${CRON_FILE}"
     chmod 644 "${CRON_FILE}"
     ok "백업 cron 설치: ${CRON_FILE}"
 else
-    warn "deploy/sms-backup.sh 없음. 백업 cron을 수동으로 설정하세요."
+    warn "deploy/kotify-backup.sh 없음. 백업 cron을 수동으로 설정하세요."
 fi
 
 # ── 완료 안내 ────────────────────────────────────────────────────────────────

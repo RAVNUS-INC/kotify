@@ -1,5 +1,5 @@
 [Unit]
-Description=kotify — Korean broadcast notification system powered by NCP
+Description=kotify — Korean broadcast notification system powered by U+ msghub
 Documentation=https://github.com/RAVNUS-INC/kotify
 After=network-online.target
 Wants=network-online.target
