@@ -54,7 +54,9 @@ const GROUPS: ReadonlyArray<NavGroup> = [
     label: 'Admin',
     items: [
       { href: '/numbers', label: '발신번호', icon: 'phone' },
-      { href: '/settings', label: '설정', icon: 'settings' },
+      // optional catch-all [[...tab]]은 typed routes가 구체 URL 리터럴을
+      // 자동 생성하지 않음. /settings 진입 시 server에서 /settings/org로 redirect.
+      { href: '/settings' as Route, label: '설정', icon: 'settings' },
       { href: '/audit', label: '감사 로그', icon: 'fileText' },
     ],
   },
