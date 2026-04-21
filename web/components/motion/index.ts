@@ -7,7 +7,7 @@ export { useDrawOn } from './useDrawOn';
 export type { UseDrawOnOptions } from './useDrawOn';
 
 export { Counter } from './Counter';
-export type { CounterProps } from './Counter';
+export type { CounterProps, CounterFormat } from './Counter';
 export { Rise, Stagger } from './Rise';
 export type { RiseProps, StaggerProps } from './Rise';
 export { Sparkline } from './Sparkline';

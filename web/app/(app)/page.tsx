@@ -1,19 +1,84 @@
-import { Placeholder } from '@/components/shell';
+import { fetchDashboard } from '@/lib/dashboard';
+import { PageHeader } from '@/components/shell';
+import {
+  InboxCard,
+  KpiCard,
+  RcsDonut,
+  TimelineRibbon,
+} from '@/components/dash';
+import { Button, Icon } from '@/components/ui';
 
-export default function Home() {
+export default async function Home() {
+  const data = await fetchDashboard();
+
   return (
-    <Placeholder
-      title="안녕하세요 👋"
-      sub="오늘 발송 현황과 미답 대화가 여기에 표시됩니다."
-      phase="Phase 5 · S1 Dashboard"
-      icon="home"
-    >
-      Timeline ribbon + 미답 대화 인박스 + KPI 스택(RCS 도달률, 오늘 발송,
-      예약, 비용)이 구현될 예정입니다. Kitchen sink가 필요하면{' '}
-      <a href="/kitchen" className="text-brand underline underline-offset-2">
-        /kitchen
-      </a>
-      으로 이동하세요.
-    </Placeholder>
+    <div className="k-page">
+      <PageHeader
+        title="오늘의 발송 현황"
+        sub={`미답 ${data.inbox.unread}건 · 예약 대기 ${data.kpis.scheduled}건`}
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Icon name="refresh" size={12} />}
+            >
+              새로고침
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<Icon name="send" size={12} />}
+            >
+              새 발송
+            </Button>
+          </>
+        }
+      />
+
+      <TimelineRibbon events={data.timeline.events} now={data.timeline.now} />
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[1.7fr_1fr]">
+        <InboxCard threads={data.inbox.threads} unread={data.inbox.unread} />
+
+        <div className="flex flex-col gap-4">
+          <div className="rounded-lg border border-gray-10 bg-gray-11 p-5 text-white">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-gray-5">
+                  오늘의 RCS 도달률
+                </div>
+                <div className="mt-0.5 text-[11.5px] text-gray-6">
+                  조직 전체 · 최근 24시간
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex items-center justify-center text-brand">
+              <RcsDonut rate={data.kpis.rcsRate} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <KpiCard
+              label="오늘 발송"
+              value={data.kpis.todaySent}
+              delay={120}
+            />
+            <KpiCard
+              label="예약 대기"
+              value={data.kpis.scheduled}
+              delay={200}
+            />
+          </div>
+
+          <KpiCard
+            label="오늘 비용"
+            value={data.kpis.todayCost}
+            format="currency"
+            delay={280}
+          />
+        </div>
+      </div>
+    </div>
   );
 }

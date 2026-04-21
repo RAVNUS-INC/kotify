@@ -14,7 +14,7 @@ export function Card({ className, children, ...rest }: CardProps) {
   );
 }
 
-export type CardHeaderProps = HTMLAttributes<HTMLDivElement> & {
+export type CardHeaderProps = Omit<HTMLAttributes<HTMLDivElement>, 'title'> & {
   title?: ReactNode;
   subtitle?: ReactNode;
   eyebrow?: ReactNode;
