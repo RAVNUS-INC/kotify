@@ -1,0 +1,53 @@
+[Unit]
+Description=kotify — Next.js 14 frontend (App Router)
+Documentation=https://github.com/RAVNUS-INC/kotify
+After=network-online.target kotify.service
+Wants=network-online.target
+# FastAPI가 먼저 기동되어 있는 편이 자연스럽지만 엄격 의존은 아님.
+# After=kotify.service 로 순서만 주고, Requires 는 걸지 않는다.
+
+[Service]
+Type=simple
+User=kotify
+Group=kotify
+WorkingDirectory=/opt/kotify/web
+# Next.js standalone 산출물 위치. ct-bootstrap.sh 가 pnpm build 후
+# .next/static 과 public/ 을 .next/standalone 안으로 복사해둔다.
+ExecStart=/usr/bin/node /opt/kotify/web/.next/standalone/server.js
+
+# 재시작 정책
+Restart=on-failure
+RestartSec=5
+
+# 로그 — journalctl 로 확인 (별도 stdout 파일 없음, Next.js 콘솔 로그는 전부 journal 로)
+StandardOutput=journal
+StandardError=journal
+
+# 환경변수
+#   FASTAPI_URL: Next.js rewrites 대상. 운영은 loopback(127.0.0.1:8080)만.
+#   HOSTNAME:    Next.js 서버 바인딩 주소. 0.0.0.0 으로 NPM 에서 프록시 받음.
+#   PORT:        외부 대면 포트(NPM 이 여기로 프록시).
+#   NODE_ENV:    production 모드 활성화 (Next.js 내부 최적화).
+Environment=NODE_ENV=production
+Environment=FASTAPI_URL=http://127.0.0.1:8080
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=3000
+
+# ── 보안 강화 (Systemd Hardening) ────────────────────────────────────────────
+# kotify-web 은 정적 자원만 서빙하므로 write 권한이 필요 없다.
+# /opt/kotify/web 은 read-only 로 두어도 동작한다.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/kotify
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

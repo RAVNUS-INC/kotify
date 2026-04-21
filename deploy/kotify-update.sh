@@ -5,13 +5,15 @@
 #
 # 사용법:
 #   sudo /opt/kotify/deploy/kotify-update.sh check   # 업데이트 확인 (JSON 출력)
-#   sudo /opt/kotify/deploy/kotify-update.sh apply    # 업데이트 적용 + 재시작
+#   sudo /opt/kotify/deploy/kotify-update.sh apply   # 업데이트 적용 + 두 서비스 재시작
 
 set -euo pipefail
 
 INSTALL_DIR="/opt/kotify"
+WEB_DIR="${INSTALL_DIR}/web"
 VENV="${INSTALL_DIR}/.venv"
-SERVICE="kotify"
+SERVICE_API="kotify"       # FastAPI
+SERVICE_WEB="kotify-web"   # Next.js
 BRANCH="main"
 
 cd "${INSTALL_DIR}"
@@ -40,26 +42,48 @@ case "${1:-}" in
         ;;
 
     apply)
+        # Phase 1: git pull
         echo '{"phase": "pull"}'
         git pull --ff-only origin "${BRANCH}" --quiet
 
-        echo '{"phase": "install"}'
+        # Phase 2a: Python 의존성 설치 (변경 없어도 빠름)
+        echo '{"phase": "install_backend"}'
         "${VENV}/bin/pip" install -e "${INSTALL_DIR}" --quiet 2>/dev/null
 
-        NEW_HASH=$(git rev-parse --short HEAD)
+        # Phase 2b: DB 마이그레이션
+        echo '{"phase": "migrate"}'
+        "${VENV}/bin/alembic" -c "${INSTALL_DIR}/alembic.ini" upgrade head --quiet 2>/dev/null || true
 
-        # 재시작은 2초 뒤 비동기로. HTTP 응답이 클라이언트에 먼저 도달하도록
-        # 하여 '업데이트 실패:' 오해를 방지하고, 클라이언트가 /healthz의 버전
-        # 필드로 재시작 완료를 정확히 감지할 수 있게 한다.
-        # systemd-run은 현재 프로세스의 cgroup에서 분리된 transient unit을
-        # 생성하므로 systemctl restart가 자신을 죽이는 문제가 없다.
+        # Phase 3: Next.js 의존성 + 빌드
+        # pnpm store 는 kotify 홈 밖이라 web 디렉토리 안에 격리.
+        # standalone 빌드 후 static/public 자원을 standalone 디렉토리 안으로 복사.
+        echo '{"phase": "install_web"}'
+        cd "${WEB_DIR}"
+        pnpm install --frozen-lockfile --silent 2>/dev/null
+
+        echo '{"phase": "build_web"}'
+        pnpm build 2>/dev/null >/dev/null
+
+        # standalone 산출물에 필요한 정적 자원 복사
+        # (Next.js output: 'standalone' 은 server.js 만 만들고 static/public 을
+        # 따로 두지 않는다. 런타임에 필요한 파일이 빠져 있으면 404 가 뜸.)
+        cp -R "${WEB_DIR}/.next/static" "${WEB_DIR}/.next/standalone/.next/"
+        if [[ -d "${WEB_DIR}/public" ]]; then
+            cp -R "${WEB_DIR}/public" "${WEB_DIR}/.next/standalone/"
+        fi
+
+        NEW_HASH=$(git -C "${INSTALL_DIR}" rev-parse --short HEAD)
+
+        # Phase 4: 재시작 (2초 지연, 비동기)
+        # 응답을 먼저 돌려받게 해서 웹 UI 에 '업데이트 실패' 오해 방지.
+        # 두 서비스를 동시에 재시작(uvicorn 먼저, 직후 Next.js).
         echo '{"phase": "restart_scheduled"}'
         if command -v systemd-run >/dev/null 2>&1; then
             systemd-run --on-active=2s --unit="kotify-restart-$$" \
-                /bin/systemctl restart "${SERVICE}" >/dev/null 2>&1 || \
-                (nohup bash -c "sleep 2 && systemctl restart ${SERVICE}" >/dev/null 2>&1 &)
+                /bin/systemctl restart "${SERVICE_API}" "${SERVICE_WEB}" >/dev/null 2>&1 || \
+                (nohup bash -c "sleep 2 && systemctl restart ${SERVICE_API} ${SERVICE_WEB}" >/dev/null 2>&1 &)
         else
-            nohup bash -c "sleep 2 && systemctl restart ${SERVICE}" >/dev/null 2>&1 &
+            nohup bash -c "sleep 2 && systemctl restart ${SERVICE_API} ${SERVICE_WEB}" >/dev/null 2>&1 &
         fi
         disown 2>/dev/null || true
 

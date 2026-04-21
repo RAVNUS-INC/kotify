@@ -130,6 +130,33 @@ if [[ "$PY_MAJOR" -lt 3 ]] || { [[ "$PY_MAJOR" -eq 3 ]] && [[ "$PY_MINOR" -lt 12
 fi
 ok "Python: ${PYTHON_VERSION}"
 
+# ── Step 2b: Node.js 20 LTS + pnpm 설치 ─────────────────────────────────────
+# Next.js 14가 Node 18.17+ / 20+ 를 요구. Debian 기본 저장소 버전은 보통 오래됐으므로
+# NodeSource 공식 저장소를 추가해 20 LTS 설치.
+step "2b. Node.js 20 LTS + pnpm 설치"
+NODE_MAJOR=0
+if command -v node >/dev/null 2>&1; then
+    NODE_MAJOR=$(node --version | sed 's/v//' | cut -d. -f1)
+fi
+
+if [[ "${NODE_MAJOR}" -lt 20 ]]; then
+    info "NodeSource 저장소 추가 + Node 20 설치 중..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh
+    bash /tmp/nodesource_setup.sh >/dev/null 2>&1
+    apt-get install -y -q nodejs
+    rm -f /tmp/nodesource_setup.sh
+fi
+NODE_VERSION=$(node --version)
+ok "Node ${NODE_VERSION}"
+
+# pnpm — Next.js 프로젝트가 pnpm-lock.yaml 기반. npm i -g 가 가장 보수적.
+if ! command -v pnpm >/dev/null 2>&1; then
+    info "pnpm 설치 중..."
+    npm install -g pnpm --silent
+fi
+PNPM_VERSION=$(pnpm --version)
+ok "pnpm ${PNPM_VERSION}"
+
 # ── Step 3: NTP 활성화 + 시간 동기화 ────────────────────────────────────────
 step "3. NTP 시간 동기화"
 systemctl enable systemd-timesyncd --quiet
@@ -223,6 +250,35 @@ info "애플리케이션 의존성 설치..."
 "${INSTALL_DIR}/.venv/bin/pip" install -e "${INSTALL_DIR}" --quiet
 ok "Python 패키지 설치 완료"
 
+# ── Step 7b: Next.js 빌드 (pnpm, standalone) ────────────────────────────────
+step "7b. Next.js 빌드 (pnpm, standalone 모드)"
+cd "${INSTALL_DIR}/web"
+
+info "pnpm 의존성 설치 (--frozen-lockfile)..."
+pnpm install --frozen-lockfile --silent
+
+info "pnpm build (next build)..."
+pnpm build
+
+# standalone 산출물에 정적 자원 복사.
+# Next.js `output: 'standalone'`은 server.js만 만들고 .next/static 과 public/ 은
+# 따로 두지 않는다. 런타임에 필요한 파일이 빠져 있으면 HTTP 404가 발생하므로
+# 부트스트랩 시점에 한 번 복사해둔다.
+info "standalone 산출물에 static/public 복사..."
+mkdir -p "${INSTALL_DIR}/web/.next/standalone/.next"
+cp -R "${INSTALL_DIR}/web/.next/static" "${INSTALL_DIR}/web/.next/standalone/.next/"
+if [[ -d "${INSTALL_DIR}/web/public" ]]; then
+    cp -R "${INSTALL_DIR}/web/public" "${INSTALL_DIR}/web/.next/standalone/"
+fi
+
+# 소유권 정리 — systemd(kotify-web.service)가 kotify 유저로 읽을 수 있도록
+chown -R "${SERVICE_USER}:${SERVICE_GROUP}" \
+    "${INSTALL_DIR}/web/.next" \
+    "${INSTALL_DIR}/web/node_modules"
+ok "Next.js 빌드 완료 (standalone + static/public 병합)"
+
+cd "${INSTALL_DIR}"
+
 # ── Step 8: DB 초기화 (alembic) ──────────────────────────────────────────────
 step "8. 데이터베이스 초기화"
 info "alembic upgrade head 실행..."
@@ -234,7 +290,9 @@ runuser -u "${SERVICE_USER}" -- \
 ok "DB 마이그레이션 완료 (${DATA_DIR}/sms.db)"
 
 # ── Step 9: systemd 서비스 등록 ─────────────────────────────────────────────
-step "9. systemd 서비스 등록"
+step "9. systemd 서비스 등록 (kotify + kotify-web)"
+
+# 9a. FastAPI (kotify.service)
 if [[ -f "${INSTALL_DIR}/deploy/kotify.service" ]]; then
     cp "${INSTALL_DIR}/deploy/kotify.service" "${SERVICE_FILE}"
     ok "kotify.service 복사 완료: ${SERVICE_FILE}"
@@ -242,10 +300,24 @@ else
     fail "${INSTALL_DIR}/deploy/kotify.service 파일이 없습니다."
 fi
 
+# 9b. Next.js (kotify-web.service)
+SERVICE_WEB_FILE="/etc/systemd/system/kotify-web.service"
+if [[ -f "${INSTALL_DIR}/deploy/kotify-web.service" ]]; then
+    cp "${INSTALL_DIR}/deploy/kotify-web.service" "${SERVICE_WEB_FILE}"
+    ok "kotify-web.service 복사 완료: ${SERVICE_WEB_FILE}"
+else
+    fail "${INSTALL_DIR}/deploy/kotify-web.service 파일이 없습니다."
+fi
+
 systemctl daemon-reload
-systemctl enable kotify
+
+# FastAPI 먼저 (Next.js가 /api/* 로 호출하므로)
+systemctl enable kotify kotify-web
 systemctl restart kotify
-ok "kotify 서비스 활성화 및 시작"
+ok "kotify(FastAPI) 서비스 활성화 및 시작"
+
+systemctl restart kotify-web
+ok "kotify-web(Next.js) 서비스 활성화 및 시작"
 
 # sudoers — 웹 UI 원클릭 업데이트용
 SUDOERS_SRC="${INSTALL_DIR}/deploy/kotify-sudoers"
@@ -259,34 +331,53 @@ else
 fi
 
 # ── Step 10: 서비스 기동 확인 ────────────────────────────────────────────────
-step "10. 서비스 상태 확인"
-sleep 3
+step "10. 서비스 상태 확인 (FastAPI + Next.js)"
+sleep 5
+
+# 10a. FastAPI
 if systemctl is-active --quiet kotify; then
-    ok "kotify 서비스 실행 중"
+    ok "kotify(FastAPI) 서비스 실행 중"
 else
-    warn "kotify 서비스가 시작되지 않았습니다. 로그를 확인하세요:"
+    warn "kotify(FastAPI) 서비스가 시작되지 않았습니다. 로그를 확인하세요:"
     journalctl -u kotify -n 30 --no-pager
-    fail "서비스 시작 실패"
+    fail "kotify(FastAPI) 서비스 시작 실패"
 fi
 
-# 헬스체크
 if curl -sf http://127.0.0.1:8080/healthz > /dev/null; then
-    ok "헬스체크 통과 (http://127.0.0.1:8080/healthz)"
+    ok "FastAPI 헬스체크 통과 (http://127.0.0.1:8080/healthz)"
 else
-    warn "헬스체크 실패. 서비스가 아직 준비 중일 수 있습니다."
+    warn "FastAPI 헬스체크 실패. 서비스가 아직 준비 중일 수 있습니다."
     warn "잠시 후 수동으로 확인: curl http://127.0.0.1:8080/healthz"
+fi
+
+# 10b. Next.js
+if systemctl is-active --quiet kotify-web; then
+    ok "kotify-web(Next.js) 서비스 실행 중"
+else
+    warn "kotify-web(Next.js) 서비스가 시작되지 않았습니다. 로그를 확인하세요:"
+    journalctl -u kotify-web -n 30 --no-pager
+    fail "kotify-web(Next.js) 서비스 시작 실패"
+fi
+
+# Next.js는 로그인 전 `/`에서 login으로 302, /login은 200. 두 코드 모두 수용.
+NEXT_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/login || echo 000)
+if [[ "${NEXT_CODE}" == "200" ]]; then
+    ok "Next.js 응답 정상 (http://127.0.0.1:3000/login → 200)"
+else
+    warn "Next.js 응답 비정상 (code=${NEXT_CODE}). 서비스 기동 직후일 수 있음."
+    warn "잠시 후 수동 확인: curl -I http://127.0.0.1:3000/login"
 fi
 
 # ── Step 11: 백업 cron 설정 ─────────────────────────────────────────────────
 step "11. 백업 cron 설정"
-if [[ -f "${INSTALL_DIR}/deploy/sms-backup.sh" ]]; then
-    chmod +x "${INSTALL_DIR}/deploy/sms-backup.sh"
+if [[ -f "${INSTALL_DIR}/deploy/kotify-backup.sh" ]]; then
+    chmod +x "${INSTALL_DIR}/deploy/kotify-backup.sh"
     CRON_FILE="/etc/cron.d/kotify-backup"
-    cp "${INSTALL_DIR}/deploy/sms-backup.cron" "${CRON_FILE}"
+    cp "${INSTALL_DIR}/deploy/kotify-backup.cron" "${CRON_FILE}"
     chmod 644 "${CRON_FILE}"
     ok "백업 cron 설치: ${CRON_FILE}"
 else
-    warn "deploy/sms-backup.sh 없음. 백업 cron을 수동으로 설정하세요."
+    warn "deploy/kotify-backup.sh 없음. 백업 cron을 수동으로 설정하세요."
 fi
 
 # ── 완료 안내 ────────────────────────────────────────────────────────────────
