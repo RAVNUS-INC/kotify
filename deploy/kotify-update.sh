@@ -42,35 +42,51 @@ case "${1:-}" in
         ;;
 
     apply)
+        # 롤백 지점: git pull 전 HEAD 기록. 이후 단계에서 실패하면
+        # trap ERR 에서 자동으로 이 커밋으로 되돌린다.
+        PREV_HEAD=$(git -C "${INSTALL_DIR}" rev-parse HEAD)
+        trap '
+            echo "{\"phase\": \"error\", \"rollback\": true, \"to\": \"'"${PREV_HEAD:0:7}"'\"}"
+            git -C "'"${INSTALL_DIR}"'" reset --hard "'"${PREV_HEAD}"'" >/dev/null 2>&1 || true
+        ' ERR
+
         # Phase 1: git pull
         echo '{"phase": "pull"}'
         git pull --ff-only origin "${BRANCH}" --quiet
 
         # Phase 2a: Python 의존성 설치 (변경 없어도 빠름)
         echo '{"phase": "install_backend"}'
-        "${VENV}/bin/pip" install -e "${INSTALL_DIR}" --quiet 2>/dev/null
+        "${VENV}/bin/pip" install -e "${INSTALL_DIR}" --quiet
 
-        # Phase 2b: DB 마이그레이션
+        # Phase 2b: DB 마이그레이션 — 실패 시 중단 (silent swallow 금지).
+        # 실패를 숨기면 신규 코드가 구 스키마로 구동되어 모든 요청이 크래시한다.
         echo '{"phase": "migrate"}'
-        "${VENV}/bin/alembic" -c "${INSTALL_DIR}/alembic.ini" upgrade head --quiet 2>/dev/null || true
+        if ! "${VENV}/bin/alembic" -c "${INSTALL_DIR}/alembic.ini" upgrade head 2>&1; then
+            echo '{"phase": "error", "step": "migrate", "message": "alembic upgrade failed"}'
+            exit 1
+        fi
 
         # Phase 3: Next.js 의존성 + 빌드
-        # pnpm store 는 kotify 홈 밖이라 web 디렉토리 안에 격리.
-        # standalone 빌드 후 static/public 자원을 standalone 디렉토리 안으로 복사.
         echo '{"phase": "install_web"}'
         cd "${WEB_DIR}"
-        pnpm install --frozen-lockfile --silent 2>/dev/null
+        pnpm install --frozen-lockfile --silent
 
         echo '{"phase": "build_web"}'
-        pnpm build 2>/dev/null >/dev/null
+        pnpm build >/dev/null
 
         # standalone 산출물에 필요한 정적 자원 복사
         # (Next.js output: 'standalone' 은 server.js 만 만들고 static/public 을
         # 따로 두지 않는다. 런타임에 필요한 파일이 빠져 있으면 404 가 뜸.)
+        # 재빌드 시 기존 static 이 있으면 제거 후 복사 (cp -R 덮어쓰기 충돌 회피).
+        rm -rf "${WEB_DIR}/.next/standalone/.next/static"
         cp -R "${WEB_DIR}/.next/static" "${WEB_DIR}/.next/standalone/.next/"
         if [[ -d "${WEB_DIR}/public" ]]; then
+            rm -rf "${WEB_DIR}/.next/standalone/public"
             cp -R "${WEB_DIR}/public" "${WEB_DIR}/.next/standalone/"
         fi
+
+        # 빌드 성공까지 왔으니 ERR trap 해제 (재시작 단계에서는 롤백 불필요)
+        trap - ERR
 
         NEW_HASH=$(git -C "${INSTALL_DIR}" rev-parse --short HEAD)
 

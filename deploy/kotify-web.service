@@ -34,11 +34,11 @@ Environment=HOSTNAME=0.0.0.0
 Environment=PORT=3000
 
 # ── 보안 강화 (Systemd Hardening) ────────────────────────────────────────────
-# kotify-web 은 정적 자원만 서빙하므로 write 권한이 필요 없다.
-# /opt/kotify/web 은 read-only 로 두어도 동작한다.
+# kotify-web 은 정적 자원만 서빙하고 로그는 journal 로만 간다
+# (StandardOutput/Error=journal). 디스크에 쓸 경로가 없으므로
+# ReadWritePaths 를 전부 제거해 최소 권한 원칙을 강화한다.
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/log/kotify
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true

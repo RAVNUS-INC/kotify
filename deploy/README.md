@@ -153,8 +153,8 @@ claudedocs/E2E-CHECKLIST.md
 | `kotify-web.service` | systemd 유닛 — Next.js (node server 3000) |
 | `kotify-sudoers` | 웹 UI 원클릭 업데이트 허용용 sudoers fragment |
 | `kotify-update.sh` | `/settings` → System → Update 에서 호출하는 스크립트 (git pull + 양쪽 재빌드 + systemd restart) |
-| `sms-backup.sh` | SQLite DB 일일 백업 스크립트 |
-| `sms-backup.cron` | 백업 cron 설정 (`/etc/cron.d/`에 복사) |
+| `kotify-backup.sh` | SQLite DB 일일 백업 스크립트 |
+| `kotify-backup.cron` | 백업 cron 설정 (`/etc/cron.d/`에 복사) |
 | `npm-config.md` | NPM Proxy Host 설정 가이드 |
 
 ---
@@ -181,7 +181,7 @@ systemctl restart kotify kotify-web
 #   git pull → pip install -e . → pnpm install && pnpm build → systemctl restart
 
 # 백업 수동 실행
-sudo -u kotify /opt/kotify/deploy/sms-backup.sh
+sudo -u kotify /opt/kotify/deploy/kotify-backup.sh
 
 # DB 직접 조회
 sqlite3 /var/lib/kotify/sms.db ".tables"

@@ -142,7 +142,8 @@ fi
 if [[ "${NODE_MAJOR}" -lt 20 ]]; then
     info "NodeSource 저장소 추가 + Node 20 설치 중..."
     curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh
-    bash /tmp/nodesource_setup.sh >/dev/null 2>&1
+    # stderr 는 남겨서 NodeSource 설치 실패(404/GPG 회전 등) 원인을 볼 수 있게 한다
+    bash /tmp/nodesource_setup.sh >/dev/null
     apt-get install -y -q nodejs
     rm -f /tmp/nodesource_setup.sh
 fi
@@ -178,7 +179,7 @@ if [[ "$SYNC_OK" == "true" ]]; then
     ok "NTP 동기화 완료"
     timedatectl status | grep -E "Local time|synchronized"
 else
-    warn "NTP 동기화 미완료 (네트워크 확인 필요). NCP API는 5분 이내 시간 오차를 요구합니다."
+    warn "NTP 동기화 미완료 (네트워크 확인 필요). msghub JWT 검증에 정확한 시간이 필요합니다."
     timedatectl status
 fi
 
@@ -343,7 +344,7 @@ else
     fail "kotify(FastAPI) 서비스 시작 실패"
 fi
 
-if curl -sf http://127.0.0.1:8080/healthz > /dev/null; then
+if curl -sf --max-time 10 http://127.0.0.1:8080/healthz > /dev/null; then
     ok "FastAPI 헬스체크 통과 (http://127.0.0.1:8080/healthz)"
 else
     warn "FastAPI 헬스체크 실패. 서비스가 아직 준비 중일 수 있습니다."
@@ -360,7 +361,7 @@ else
 fi
 
 # Next.js는 로그인 전 `/`에서 login으로 302, /login은 200. 두 코드 모두 수용.
-NEXT_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/login || echo 000)
+NEXT_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/login || echo 000)
 if [[ "${NEXT_CODE}" == "200" ]]; then
     ok "Next.js 응답 정상 (http://127.0.0.1:3000/login → 200)"
 else
