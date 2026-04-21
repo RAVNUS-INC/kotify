@@ -102,7 +102,8 @@ if ! apt-get install -y -q \
         curl \
         ca-certificates \
         systemd-timesyncd \
-        sqlite3; then
+        sqlite3 \
+        sudo; then
     # Debian 12에서 python3.12 실패 시 backports 시도
     if [[ "${VERSION_ID}" == "12" ]]; then
         warn "python3.12 패키지 설치 실패. backports 시도 중..."
@@ -113,7 +114,7 @@ if ! apt-get install -y -q \
         fi
         apt-get install -y -q -t bookworm-backports python3.12 python3.12-venv || \
             fail "python3.12 설치 실패. 수동 설치 후 재실행하세요."
-        apt-get install -y -q git curl ca-certificates systemd-timesyncd sqlite3
+        apt-get install -y -q git curl ca-certificates systemd-timesyncd sqlite3 sudo
     else
         fail "${PY_PKG} 설치 실패. 수동 설치 후 재실행하세요."
     fi
@@ -250,7 +251,9 @@ ok "kotify 서비스 활성화 및 시작"
 # sudoers — 웹 UI 원클릭 업데이트용
 SUDOERS_SRC="${INSTALL_DIR}/deploy/kotify-sudoers"
 SUDOERS_DST="/etc/sudoers.d/kotify-update"
-if [[ -f "${SUDOERS_SRC}" ]]; then
+if ! command -v sudo >/dev/null 2>&1; then
+    warn "sudo 바이너리가 없습니다. 웹 UI 업데이트가 동작하지 않습니다. (apt install sudo 후 재실행)"
+elif [[ -f "${SUDOERS_SRC}" ]]; then
     install -m 440 -o root -g root "${SUDOERS_SRC}" "${SUDOERS_DST}"
     chmod +x "${INSTALL_DIR}/deploy/kotify-update.sh"
     ok "sudoers 설치: ${SUDOERS_DST} (웹 UI 업데이트 허용)"
