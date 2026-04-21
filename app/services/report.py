@@ -67,8 +67,13 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
                 msg.status = "FB_PENDING"
                 fallback_needed.append(msg)
 
-    for cid in campaign_ids:
-        _refresh_campaign_counters(db, cid)
+    # autoflush=False 이므로 _update_message의 ORM 변경을 집계 SELECT 전에
+    # 명시적으로 flush 해야 한다. flush를 안 하면 SUM(...) 쿼리가 업데이트
+    # 이전 상태(status=REG 등)를 읽어 rcs_count/ok_count가 모두 0으로 찍힘.
+    if campaign_ids:
+        db.flush()
+        for cid in campaign_ids:
+            _refresh_campaign_counters(db, cid)
 
     db.flush()
     return processed, fallback_needed
@@ -117,8 +122,11 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
         elif sq.status in ("REG", "ING"):
             msg.status = sq.status
 
-    for cid in campaign_ids:
-        _refresh_campaign_counters(db, cid)
+    # autoflush=False — 집계 SELECT 전에 ORM 변경을 명시 flush (process_report 참조)
+    if campaign_ids:
+        db.flush()
+        for cid in campaign_ids:
+            _refresh_campaign_counters(db, cid)
 
     db.flush()
     return processed
