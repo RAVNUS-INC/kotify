@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { MessageBubble } from '@/components/chat';
 import {
@@ -16,18 +16,12 @@ import {
   Radio,
 } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import type { SenderNumber } from '@/types/number';
 import { DeviceMockup } from './DeviceMockup';
 
 type SendMode = 'now' | 'schedule';
 
 type Sender = { value: string; label: string };
-
-// TODO Phase 8: /api/numbers 에서 불러오기
-const SENDERS: ReadonlyArray<Sender> = [
-  { value: '1588-1234', label: '1588-1234 · 대표번호' },
-  { value: '02-3456-7890', label: '02-3456-7890 · 인사팀' },
-  { value: '010-1234-5678', label: '010-1234-5678 · 김운영' },
-];
 
 const SMS_BYTES = 90;
 const LMS_BYTES = 2000;
@@ -51,7 +45,12 @@ function computeEstimate(message: string, recipientCount: number) {
 
 export function ComposeForm() {
   const router = useRouter();
-  const [sender, setSender] = useState<string>('1588-1234');
+  // 발신번호는 /api/numbers?status=approved 에서 런타임 로드.
+  // 하드코딩 리스트는 운영 사용자마다 보유 번호가 달라 data-correctness 버그의 원인이 됐음.
+  const [senderOptions, setSenderOptions] = useState<ReadonlyArray<Sender>>([]);
+  const [senderLoading, setSenderLoading] = useState(true);
+  const [senderError, setSenderError] = useState<string | null>(null);
+  const [sender, setSender] = useState<string>('');
   const [recipients, setRecipients] = useState<string[]>([]);
   const [message, setMessage] = useState('');
   const [mode, setMode] = useState<SendMode>('now');
@@ -59,6 +58,35 @@ export function ComposeForm() {
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 발신번호 로딩 (승인된 번호만). stale response race 방어를 위해 cancelled flag.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/numbers?status=approved');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = (await res.json()) as { data?: SenderNumber[] };
+        if (cancelled) return;
+        const options = (json.data ?? []).map((n) => ({
+          value: n.number,
+          label: `${n.number} · ${n.brand}`,
+        }));
+        setSenderOptions(options);
+        if (options.length > 0 && options[0]) setSender(options[0].value);
+      } catch (err) {
+        if (cancelled) return;
+        setSenderError(
+          err instanceof Error ? err.message : '발신번호 목록 로딩 실패',
+        );
+      } finally {
+        if (!cancelled) setSenderLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const { bytes, channel, cost, bytesState } = useMemo(
     () => computeEstimate(message, recipients.length),
@@ -70,6 +98,7 @@ export function ComposeForm() {
 
   const canSubmit =
     sender !== '' &&
+    !senderLoading &&
     recipients.length > 0 &&
     recipients.length <= 1000 &&
     message.trim() !== '' &&
@@ -83,6 +112,7 @@ export function ComposeForm() {
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
+    let succeeded = false;
     try {
       const res = await fetch('/api/campaigns', {
         method: 'POST',
@@ -102,10 +132,15 @@ export function ComposeForm() {
       if (!res.ok || json.error) {
         throw new Error(json.error?.message ?? `HTTP ${res.status}`);
       }
+      succeeded = true;
       router.push('/campaigns');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setSubmitting(false);
+    } finally {
+      // 성공 시에도 router.push 가 동기 반환이라 navigation 직후 상태 리셋해야
+      // 잔류 disabled 로 다음 진입 시 버튼이 막히는 문제를 방지한다.
+      // 단 succeeded 인 경우 submitting=true 유지해 중복 제출 차단 (페이지 전환 전까지).
+      if (!succeeded) setSubmitting(false);
     }
   };
 
@@ -116,18 +151,31 @@ export function ComposeForm() {
   return (
     <form onSubmit={onSubmit} className="mt-6 grid gap-6 lg:grid-cols-[560px_1fr]">
       <div className="flex flex-col gap-5">
-        <Field label="발신번호" htmlFor="sender" required>
+        <Field
+          label="발신번호"
+          htmlFor="sender"
+          required
+          hint={senderLoading ? '발신번호 불러오는 중...' : undefined}
+          error={senderError ?? undefined}
+        >
           <select
             id="sender"
             value={sender}
             onChange={(e) => setSender(e.target.value)}
-            className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand focus:shadow-[0_0_0_3px_rgba(59,0,139,0.08)] focus:outline-none"
+            disabled={senderLoading || senderOptions.length === 0}
+            className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand focus:shadow-[0_0_0_3px_rgba(59,0,139,0.08)] focus:outline-none disabled:bg-gray-1 disabled:text-ink-dim"
           >
-            {SENDERS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
+            {senderLoading ? (
+              <option value="">불러오는 중...</option>
+            ) : senderOptions.length === 0 ? (
+              <option value="">승인된 발신번호 없음</option>
+            ) : (
+              senderOptions.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))
+            )}
           </select>
         </Field>
 

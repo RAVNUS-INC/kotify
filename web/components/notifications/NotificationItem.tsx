@@ -3,6 +3,7 @@ import type { Route } from 'next';
 import type { Notification, NotificationLevel } from '@/types/notification';
 import { Icon, type IconName } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { safeInternalHref } from '@/lib/url';
 
 export type NotificationItemProps = {
   notification: Notification;
@@ -80,10 +81,14 @@ export function NotificationItem({ notification: n }: NotificationItemProps) {
     </div>
   );
 
-  if (n.href) {
+  // open redirect 방어: 백엔드가 보낸 href 를 그대로 신뢰하지 않고
+  // safeInternalHref 로 정규화한 뒤에만 Link 로 렌더한다.
+  // 외부 스킴/protocol-relative/javascript: 는 전부 `/` 로 폴백.
+  const safeHref = n.href ? safeInternalHref(n.href, '') : '';
+  if (safeHref) {
     return (
       <Link
-        href={n.href as Route}
+        href={safeHref as Route}
         aria-label={`${n.title} — ${n.subtitle ?? ''}`}
         className="block border-b border-line last:border-b-0 focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(59,0,139,0.12)] focus-visible:z-10"
       >

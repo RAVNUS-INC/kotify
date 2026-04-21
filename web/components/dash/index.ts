@@ -12,3 +12,5 @@ export type { InboxCardProps } from './InboxCard';
 
 export { InboxThreadRow } from './InboxThreadRow';
 export type { InboxThreadRowProps } from './InboxThreadRow';
+
+export { DashboardActions } from './DashboardActions';

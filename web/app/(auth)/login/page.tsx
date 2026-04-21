@@ -1,23 +1,16 @@
 import { Button, Card, CardBody, Icon } from '@/components/ui';
+import { safeInternalHref } from '@/lib/url';
 
 type SearchParams = { from?: string };
-
-/**
- * open redirect 방지: `/`로 시작하되 `//`로 시작하지 않는 내부 경로만 허용.
- * 그 외엔 루트로 폴백.
- */
-function safeFrom(raw: string | undefined): string {
-  if (typeof raw !== 'string') return '/';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
-  return raw;
-}
 
 export default function Login({
   searchParams,
 }: {
   searchParams?: SearchParams;
 }) {
-  const from = safeFrom(searchParams?.from);
+  // open redirect 방지: 외부 스킴/protocol-relative/javascript: 차단.
+  // lib/url.ts 의 safeInternalHref 로 로그인/알림 공통 처리.
+  const from = safeInternalHref(searchParams?.from);
   const loginHref = `/api/auth/login?from=${encodeURIComponent(from)}`;
 
   return (

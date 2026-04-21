@@ -1,12 +1,12 @@
 import { fetchDashboard } from '@/lib/dashboard';
 import { PageHeader } from '@/components/shell';
 import {
+  DashboardActions,
   InboxCard,
   KpiCard,
   RcsDonut,
   TimelineRibbon,
 } from '@/components/dash';
-import { Button, Icon } from '@/components/ui';
 
 export default async function Home() {
   const data = await fetchDashboard();
@@ -16,24 +16,7 @@ export default async function Home() {
       <PageHeader
         title="오늘의 발송 현황"
         sub={`미답 ${data.inbox.unread}건 · 예약 대기 ${data.kpis.scheduled}건`}
-        actions={
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Icon name="refresh" size={12} />}
-            >
-              새로고침
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<Icon name="send" size={12} />}
-            >
-              새 발송
-            </Button>
-          </>
-        }
+        actions={<DashboardActions />}
       />
 
       <TimelineRibbon events={data.timeline.events} now={data.timeline.now} />
