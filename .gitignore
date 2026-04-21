@@ -46,6 +46,12 @@ dev-master.key
 # Third-party template source (dev reference only)
 temp/
 
+# Next.js (web/)
+web/node_modules/
+web/.next/
+web/out/
+web/*.tsbuildinfo
+
 # Playwright MCP 실행 산출물
 .playwright-mcp/
 
