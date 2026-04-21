@@ -3,14 +3,29 @@
 msghub가 발송 결과(리포트)와 고객 답장(MO)을 POST로 전달한다.
 - 200: 성공 처리
 - 400: 실패 → msghub가 10초 후 재시도
-- 보안: 웹훅 시크릿 토큰 헤더 검증 (미설정 + 프로덕션 시 거부)
 - 양방향 CHAT RCS 실패 시 SMS 수동 fallback 자동 발송
+
+## 보안: URL 경로 토큰
+
+msghub 공식 문서(2.8 메시지 리포트 §3)에 따르면 **웹훅 요청에 어떤
+인증 헤더도 첨부하지 않는다** (Content-Type만 포함). 따라서 HMAC 서명
+같은 일반적인 웹훅 보안 패턴은 적용 불가능하며, URL 자체를 시크릿으로
+쓰는 "URL obscurity" 방식만이 유일한 보호 수단이다.
+
+엔드포인트 형태:
+    POST /webhook/msghub/{token}/report
+    POST /webhook/msghub/{token}/mo
+
+- token은 `msghub.webhook_token` 설정값과 일치해야 통과
+- 토큰 미설정 + dev_mode: 통과 (로컬 테스트 편의)
+- 토큰 미설정 + 프로덕션: 거부
+- 토큰이 URL 경로에 포함되므로 msghub 콘솔에 전체 URL을 등록하면 끝
 """
 from __future__ import annotations
 
-import hmac
 import json
 import logging
+import secrets as _secrets
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Request
@@ -30,26 +45,26 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 
-def _verify_webhook(request: Request, db: Session) -> bool:
-    """웹훅 요청의 유효성을 검증한다.
+def _verify_token(token: str, db: Session) -> bool:
+    """URL 경로에 포함된 토큰이 저장된 msghub.webhook_token 과 일치하는지 확인.
 
-    msghub 콘솔에서 등록한 웹훅 시크릿이 있으면 헤더로 검증.
-    시크릿 미설정 시:
-    - dev_mode=True: 경고 로그 후 통과 (로컬 개발 편의)
-    - dev_mode=False: ERROR 로그 후 거부 (프로덕션 안전)
+    msghub는 웹훅에 인증 헤더를 보내지 않으므로(공식 문서 2.8 §3),
+    URL 경로에 포함된 시크릿 토큰이 사실상의 유일한 보호 수단이다.
+    토큰이 미설정인 경우:
+    - dev_mode=True: 통과 (로컬 테스트 편의)
+    - dev_mode=False: 거부 (프로덕션 안전)
     """
     store = SettingsStore(db)
-    secret = store.get("msghub.webhook_secret")
+    expected = store.get("msghub.webhook_token")
 
-    if not secret:
+    if not expected:
         if settings.dev_mode:
-            log.warning("msghub.webhook_secret 미설정 — 개발 모드이므로 인증 없이 통과")
+            log.warning("msghub.webhook_token 미설정 — 개발 모드이므로 인증 없이 통과")
             return True
-        log.error("msghub.webhook_secret 미설정 — 프로덕션 환경에서 웹훅 요청 거부")
+        log.error("msghub.webhook_token 미설정 — 프로덕션 환경에서 웹훅 요청 거부")
         return False
 
-    sig = request.headers.get("X-Msghub-Signature", "")
-    return hmac.compare_digest(sig, secret)
+    return _secrets.compare_digest(token, expected)
 
 
 async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
@@ -100,13 +115,14 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
     return sent
 
 
-@router.post("/msghub/report")
+@router.post("/msghub/{token}/report")
 async def receive_report(
+    token: str,
     request: Request,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
     """msghub 발송 결과 웹훅 수신."""
-    if not _verify_webhook(request, db):
+    if not _verify_token(token, db):
         log.warning("웹훅 인증 실패: %s", request.client.host if request.client else "unknown")
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
@@ -148,8 +164,9 @@ async def receive_report(
         return JSONResponse({"error": "processing failed"}, status_code=400)
 
 
-@router.post("/msghub/mo")
+@router.post("/msghub/{token}/mo")
 async def receive_mo(
+    token: str,
     request: Request,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
@@ -158,7 +175,7 @@ async def receive_mo(
     고객이 챗봇으로 보낸 답장과 자동응답 과금 데이터를 저장한다.
     moKey UNIQUE로 재시도 중복 저장을 방지한다.
     """
-    if not _verify_webhook(request, db):
+    if not _verify_token(token, db):
         log.warning(
             "MO 웹훅 인증 실패: %s",
             request.client.host if request.client else "unknown",
