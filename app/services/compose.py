@@ -83,23 +83,23 @@ RESERVE_MIN_LEAD_SECONDS = 10 * 60
 # 메시지 유형 → 채널 중립 유형
 _MSG_TYPE_MAP = {"SMS": "short", "LMS": "long", "MMS": "image"}
 
-# 메시지 유형 → RCS messagebaseId (v11 통합 RCS 기준)
-# 참조: claudedocs/msghub-api-guide.md §6, 공식 스펙 "2.3.2 통합 RCS 메시지"
+# 메시지 유형 → RCS messagebaseId (v11 통합 RCS, 모두 단방향 엔드포인트)
+# 참조: claudedocs/msghub-api-guide.md §6, 공식 스펙 "2.3.2 통합 RCS 메시지 §1"
 #
-# short (양방향 CHAT): RPCSAXX001 — 8원, fbInfoLst 미지원 → webhook에서 수동 SMS fallback
-# short (예약/단방향):  RPSSAXX001 — 9원, fbInfoLst 자동 fallback
-# long:                 RPLSAXX001 — 27원, fbInfoLst(SMS→LMS) 자동 fallback
-# image:                RPMSMMX001 — 40원 (MMS M형), fbInfoLst(MMS) 자동 fallback
+# short: RPSSAXX001 — 통합 RCS SMS형, 9원, fbInfoLst(SMS) 자동 fallback
+# long:  RPLSAXX001 — 통합 RCS LMS형, 27원, fbInfoLst(MMS) 자동 fallback
+# image: RPMSMMX001 — 통합 RCS MMS M형, 40원, fbInfoLst(MMS) 자동 fallback
 #
-# 주의: 기존 migration-spec의 SCL00000/SL000000/OMHIMV0001은 통합 RCS 이전
-# 사양이라 v11 엔드포인트에선 29003 NOT_FOUND로 거부됨.
+# 주의: RPCSAXX001(양방향 CHAT, 8원)은 /rcs/bi/v1.1 엔드포인트 전용으로
+# msghub 문서 §2("RCS 양방향 응답메시지를 발송합니다")에 따르면 고객의
+# MO 수신에 대한 응답 발송에만 사용 가능. outbound 브로드캐스트에 사용
+# 시 replyId(사전등록 응답 템플릿 ID)가 없어 29003/404로 거부된다.
+# outbound 단문은 단방향 SMS형(RPSSAXX001, 9원)을 사용해야 한다.
 _MESSAGEBASE_MAP = {
+    "short": "RPSSAXX001",   # 통합 RCS SMS형 (단방향)
     "long": "RPLSAXX001",    # 통합 RCS LMS형 (단방향)
     "image": "RPMSMMX001",   # 통합 RCS MMS M형 (이미지 중심)
 }
-
-# 양방향 CHAT 동시 발송 수 (API 호출 1건 = 수신자 1명)
-_CHAT_CONCURRENCY = 10
 
 
 def _classify_msg_type(content: str, has_attachment: bool) -> str:
@@ -188,143 +188,6 @@ def _build_merge_data(
     if rcs_file_id and msg_type == "image":
         data["media"] = f"maapfile://{rcs_file_id}"
     return data
-
-
-async def _dispatch_chat_messages(
-    db: Session,
-    client: MsghubClient,
-    campaign: Campaign,
-    callback: str,
-    content: str,
-    recipients: list[str],
-) -> int:
-    """양방향 CHAT 발송 (단문 전용, 1건씩 동시 발송).
-
-    RCS 양방향이 콘솔 설정 문제(29003 등)로 실패하면 즉시 SMS로 전환해
-    고객에게 메시지가 반드시 도달하도록 한다. 전환된 메시지는 channel=SMS,
-    cost=9로 기록되며 사용자가 과금 차이를 확인할 수 있다.
-
-    Returns:
-        API 호출 실패 수신자 수 (RCS + SMS 모두 실패한 건수).
-    """
-    semaphore = asyncio.Semaphore(_CHAT_CONCURRENCY)
-    sent_at = _now_iso()
-
-    async def _send_one(
-        idx: int, phone: str
-    ) -> tuple[int, str, str, SendResponse | None, str | None, str]:
-        """returns: (idx, phone, cli_key, resp, err, path)
-        path: 'RCS_CHAT' | 'SMS_FALLBACK' | 'FAILED'
-        """
-        cli_key = _make_cli_key(campaign.id, 0, idx)
-        async with semaphore:
-            # 1차: RCS 양방향 CHAT (8원)
-            try:
-                resp = await client.send_rcs_chat(
-                    description=content,
-                    phone=phone,
-                    cli_key=cli_key,
-                )
-                return idx, phone, cli_key, resp, None, "RCS_CHAT"
-            except MsghubBadRequest as exc:
-                log.warning(
-                    "RCS 양방향 실패 → SMS 전환: cli_key=%s, err=%s",
-                    cli_key, exc,
-                )
-            except (MsghubRateLimited, MsghubServerError) as exc:
-                return idx, phone, cli_key, None, str(exc), "FAILED"
-            except Exception as exc:
-                return idx, phone, cli_key, None, str(exc), "FAILED"
-
-            # 2차: SMS 직접 발송 (9원, -fb cli_key로 중복 방지)
-            fb_cli_key = f"{cli_key}-fb"
-            try:
-                recv = RecvInfo(cli_key=fb_cli_key, phone=phone)
-                resp = await client.send_sms(
-                    callback=callback, msg=content, recv_list=[recv],
-                )
-                return idx, phone, fb_cli_key, resp, None, "SMS_FALLBACK"
-            except Exception as sms_exc:
-                return (
-                    idx, phone, cli_key, None,
-                    f"RCS+SMS 모두 실패 (SMS: {sms_exc})",
-                    "FAILED",
-                )
-
-    results = await asyncio.gather(
-        *[_send_one(i, p) for i, p in enumerate(recipients)]
-    )
-
-    # MsghubRequest + Message 레코드 생성 (가상 청크 단위)
-    failed_count = 0
-    batch: list[tuple] = list(results)
-    chunk_groups = [batch[i : i + CHUNK_SIZE] for i in range(0, len(batch), CHUNK_SIZE)]
-
-    for chunk_idx, group in enumerate(chunk_groups):
-        msghub_req = MsghubRequest(
-            campaign_id=campaign.id,
-            chunk_index=chunk_idx,
-            response_code="10000",
-            response_message="chat",
-            error_body=None,
-            sent_at=sent_at,
-        )
-        db.add(msghub_req)
-        db.flush()
-
-        for idx, phone, cli_key, resp, err, path in group:
-            # 응답에서 msg_key 추출 (SendResponse.items[0].msg_key)
-            msg_key = None
-            if resp is not None and hasattr(resp, "items") and resp.items:
-                msg_key = resp.items[0].msg_key or None
-
-            if err or path == "FAILED":
-                msg = Message(
-                    campaign_id=campaign.id,
-                    msghub_request_id=msghub_req.id,
-                    to_number=phone,
-                    to_number_raw=phone,
-                    cli_key=cli_key,
-                    status="FAILED",
-                    result_desc=err or "알 수 없는 실패",
-                )
-                failed_count += 1
-            elif path == "SMS_FALLBACK":
-                # RCS 실패 후 SMS로 전환됨. 리포트 웹훅 오면 확정되지만
-                # UI에서 즉시 "SMS로 전환" 상태가 보이도록 미리 기록.
-                msg = Message(
-                    campaign_id=campaign.id,
-                    msghub_request_id=msghub_req.id,
-                    to_number=phone,
-                    to_number_raw=phone,
-                    cli_key=cli_key,
-                    msg_key=msg_key,
-                    status="REG",
-                    channel="SMS",
-                    product_code="SMS",
-                    result_desc="RCS 양방향 실패 → SMS 자동 전환",
-                )
-            else:
-                msg = Message(
-                    campaign_id=campaign.id,
-                    msghub_request_id=msghub_req.id,
-                    to_number=phone,
-                    to_number_raw=phone,
-                    cli_key=cli_key,
-                    msg_key=msg_key,
-                    status="REG",
-                )
-            db.add(msg)
-
-        db.flush()
-
-    # CRITICAL 수정: 루프 내부 commit 을 루프 밖 단일 commit 으로 통합.
-    # 이전 구현은 청크마다 commit 해서 중간 크래시 시 campaign counter/messages
-    # 가 부분 커밋되어 `DISPATCHING` 상태에 멈춘 레코드들이 남았다. 이제 전체가
-    # 성공해야 커밋되고, 예외 발생 시 호출 측에서 rollback 가능.
-    db.commit()
-
-    return failed_count
 
 
 async def _dispatch_rcs_chunks(
@@ -495,9 +358,12 @@ async def dispatch_campaign(
 ) -> Campaign:
     """캠페인을 생성하고 msghub를 통해 RCS 우선 발송한다.
 
-    단문(short): RCS 양방향 CHAT (8원) — fbInfoLst 미지원이므로
-    RCS 실패 시 report.py/webhook.py에서 SMS 수동 fallback.
-    장문/이미지: RCS 단방향 + fbInfoLst (자동 fallback, 동일 단가).
+    모든 메시지 유형은 통합 RCS 단방향(/rcs/v1.1)을 사용한다:
+    - short: RPSSAXX001 (9원), fbInfoLst → SMS
+    - long:  RPLSAXX001 (27원), fbInfoLst → MMS (title+body)
+    - image: RPMSMMX001 (40원), fbInfoLst → MMS
+
+    RCS 실패 시 msghub가 fbInfoLst로 자동 대체발송한다.
     """
     # 0. 수신자 수 제한
     if len(recipients) > MAX_RECIPIENTS_PER_CAMPAIGN:
@@ -540,10 +406,8 @@ async def dispatch_campaign(
     if caller is None:
         raise ValueError(f"발신번호 '{caller_number}'가 활성 목록에 없습니다.")
 
-    # 2. messagebaseId 결정
-    # 단문: 양방향 CHAT (8원). 단, 예약 발송은 양방향 미지원이므로 단방향 fallback.
-    is_chat = msg_type == "short" and not is_reserved
-    messagebase_id = "RPCSAXX001" if is_chat else (_MESSAGEBASE_MAP.get(msg_type) or "RPSSAXX001")
+    # 2. messagebaseId 결정 — 모든 유형이 단방향 엔드포인트(/rcs/v1.1) 사용.
+    messagebase_id = _MESSAGEBASE_MAP.get(msg_type) or "RPSSAXX001"
 
     now = _now_iso()
 
@@ -578,27 +442,15 @@ async def dispatch_campaign(
 
     db.commit()
 
-    # 4. 발송
-    if is_chat:
-        # 양방향 CHAT (단문 8원) — 1건씩 동시 발송, fallback은 webhook에서 처리
-        failed_recipients = await _dispatch_chat_messages(
-            db, msghub_client, campaign, caller_number, content, recipients,
-        )
-        failed_chunks: list[int] = []
-        failed_chunk_sizes: list[int] = [failed_recipients] if failed_recipients else []
-        chunks = [recipients]  # 가상 청크 1개 (audit 로그용)
-    else:
-        # 단방향 RCS + fbInfoLst (장문/이미지)
-        failed_chunks, failed_chunk_sizes = await _dispatch_rcs_chunks(
-            db, msghub_client, campaign, caller_number, content, subject,
-            recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
-            is_reserved, reserve_utc_iso, msghub_reserve_time,
-        )
-        chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
+    # 4. 발송 — 단방향 RCS + fbInfoLst 자동 fallback (모든 유형 공통)
+    failed_chunks, failed_chunk_sizes = await _dispatch_rcs_chunks(
+        db, msghub_client, campaign, caller_number, content, subject,
+        recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
+        is_reserved, reserve_utc_iso, msghub_reserve_time,
+    )
+    chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
 
-    # 5. Campaign state + counters 업데이트
-    # CHAT 경로는 failed_chunks가 항상 빈 리스트(가상 청크 1개)라서 청크 기반
-    # 판정을 쓰면 부분/전원 실패도 DISPATCHED로 잘못 들어간다. 수신자 수 기반으로 판정.
+    # 5. Campaign state + counters 업데이트 — 수신자 수 기반 판정.
     total_chunks = len(chunks)
     failed_recipients = sum(failed_chunk_sizes)
     total_recipients = len(recipients)
