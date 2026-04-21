@@ -254,50 +254,93 @@ class WebhookReport:
 
 @dataclass
 class MoItem:
-    """RCS 양방향 MO (고객 답장 + 자동응답 과금) 항목."""
+    """MO (수신) 항목 — RCS 양방향(rcsBiLst)과 SMS/MMS(moLst) 두 형식 통합.
+
+    msghub는 두 가지 MO 웹훅 페이로드를 보낸다:
+
+    1) RCS 양방향 MO (rcsBiLst 항목):
+       { "msgKey", "phone", "chatbotId", "replyId", "eventType" (message|postback),
+         "contentInfo": {"textMessage", "fileMessage", "geolocationPushMessage"},
+         "postbackId", "postbackData", "moRecvDt", "ymd", "hm" }
+
+    2) SMS/MMS MO (공식 §5.2, moLst 항목):
+       { "moKey", "moNumber", "moCallback", "moType" (SMSMO|MMSMO|RCSMO),
+         "moTitle", "moMsg", "telco", "productCode", "contentCnt",
+         "contentInfoLst": [...], "moRecvDt" }
+    """
 
     mo_key: str
-    mo_number: str               # 고객 번호
-    mo_callback: str = ""        # 수신 챗봇(우리) 번호
-    mo_type: str = ""            # SMSMO / RCSMO 등
-    product_code: str = ""       # 과금 상품코드
-    mo_title: str | None = None
-    mo_msg: str | None = None
+    number: str                             # phone / moNumber
+    callback: str = ""                      # chatbotId / moCallback
+    mo_type: str = ""                       # eventType 또는 moType
+    reply_id: str = ""                      # 양방향 전용 (답장 발송 시 필요)
+    mo_title: str | None = None             # SMS/MMS MO 전용
+    mo_msg: str | None = None               # textMessage / moMsg
     telco: str = ""
     content_cnt: int = 0
-    content_info_lst: list[dict] | None = None
+    content_info: dict | list | None = None # 양방향 dict / SMS-MMS list
+    product_code: str = ""
+    postback_id: str | None = None
+    postback_data: str | None = None
     mo_recv_dt: str = ""
 
     @staticmethod
     def from_dict(d: dict) -> MoItem:
+        # msgKey 존재 여부로 RCS 양방향 vs SMS/MMS 형식 자동 감지
+        if "msgKey" in d:
+            content = d.get("contentInfo") or {}
+            text = content.get("textMessage") if isinstance(content, dict) else None
+            return MoItem(
+                mo_key=d.get("msgKey", ""),
+                number=d.get("phone", ""),
+                callback=d.get("chatbotId", ""),
+                mo_type=d.get("eventType", ""),
+                reply_id=d.get("replyId", ""),
+                mo_msg=text,
+                content_info=content if isinstance(content, dict) else None,
+                postback_id=d.get("postbackId"),
+                postback_data=d.get("postbackData"),
+                mo_recv_dt=d.get("moRecvDt", ""),
+            )
+        # SMS/MMS MO (§5.2)
+        content_lst = d.get("contentInfoLst")
         return MoItem(
             mo_key=d.get("moKey", ""),
-            mo_number=d.get("moNumber", ""),
-            mo_callback=d.get("moCallback", ""),
+            number=d.get("moNumber", ""),
+            callback=d.get("moCallback", ""),
             mo_type=d.get("moType", ""),
-            product_code=d.get("productCode", ""),
             mo_title=d.get("moTitle"),
             mo_msg=d.get("moMsg"),
             telco=d.get("telco", ""),
             content_cnt=d.get("contentCnt", 0) or 0,
-            content_info_lst=d.get("contentInfoLst"),
+            content_info=content_lst if isinstance(content_lst, list) else None,
+            product_code=d.get("productCode", ""),
             mo_recv_dt=d.get("moRecvDt", ""),
         )
 
 
 @dataclass
 class MoWebhookPayload:
-    """MO 웹훅 페이로드."""
+    """MO 웹훅 페이로드 — 두 형식 자동 감지.
+
+    RCS 양방향: { "rcsBiCnt", "rcsBiLst": [...], "rcsBiaLst", "rcsBirLst" }
+    SMS/MMS:    { "moCnt", "moLst": [...] }
+    """
 
     mo_cnt: int
     items: list[MoItem] = field(default_factory=list)
 
     @staticmethod
     def from_dict(data: dict) -> MoWebhookPayload:
-        items = [MoItem.from_dict(d) for d in data.get("moLst") or []]
+        if "rcsBiLst" in data:
+            raw_items = data.get("rcsBiLst") or []
+            count = data.get("rcsBiCnt", 0) or len(raw_items)
+        else:
+            raw_items = data.get("moLst") or []
+            count = data.get("moCnt", 0) or len(raw_items)
         return MoWebhookPayload(
-            mo_cnt=data.get("moCnt", 0),
-            items=items,
+            mo_cnt=count,
+            items=[MoItem.from_dict(d) for d in raw_items],
         )
 
 
