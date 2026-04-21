@@ -1,14 +1,18 @@
 """스레드(대화방) API 라우트 — S5 인박스, S6 스레드 상세.
 
-Phase 6c: mock 데이터 + SSE 주소 확보 (이벤트 발행은 Phase 6d).
+Phase 6c: mock 데이터 + SSE 주소 확보.
+Phase 6d: 메시지 발송 POST + 읽음 표시. SSE 실제 이벤트 발행은 Phase 7+.
 """
 from __future__ import annotations
 
 import asyncio
+import uuid
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
@@ -133,6 +137,68 @@ async def get_thread(tid: str):
         {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
         status_code=404,
     )
+
+
+class MessageCreateBody(BaseModel):
+    text: str = Field(..., min_length=1)
+
+
+def _find_thread(tid: str) -> Optional[dict]:
+    for t in _MOCK_THREADS:
+        if t["id"] == tid:
+            return t
+    return None
+
+
+@router.post("/threads/{tid}/messages")
+async def post_message(tid: str, body: MessageCreateBody):
+    """새 메시지 전송 (mock)."""
+    thread = _find_thread(tid)
+    if thread is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    text = body.text.strip()
+    if not text:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": "validation_failed",
+                    "message": "메시지 본문이 필요합니다",
+                    "fields": {"text": "본문이 비어 있습니다"},
+                }
+            },
+            status_code=422,
+        )
+
+    now_hhmm = datetime.now().strftime("%H:%M")
+    message = {
+        "id": f"m-{uuid.uuid4().hex[:8]}",
+        "side": "us",
+        "kind": thread["channel"],
+        "text": text,
+        "time": now_hhmm,
+    }
+    thread.setdefault("messages", []).append(message)
+    thread["preview"] = text[:60]
+    thread["time"] = now_hhmm
+    thread["unread"] = False
+
+    return {"data": {"message": message}}
+
+
+@router.post("/threads/{tid}/read")
+async def mark_read(tid: str):
+    """스레드 읽음 표시."""
+    thread = _find_thread(tid)
+    if thread is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    thread["unread"] = False
+    return {"data": {"id": tid, "unread": False}}
 
 
 @router.get("/chat/stream")
