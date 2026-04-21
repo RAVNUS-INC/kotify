@@ -53,9 +53,17 @@ def _verify_token(token: str, db: Session) -> bool:
     토큰이 미설정인 경우:
     - dev_mode=True: 통과 (로컬 테스트 편의)
     - dev_mode=False: 거부 (프로덕션 안전)
+
+    저장 값이 손상됐거나 (Fernet 복호화 실패 등) 설정 저장소 자체가
+    예외를 던지는 경우 인증 실패로 취급한다. 500으로 번져서 전체 웹훅
+    엔드포인트가 다운되는 것을 방지한다.
     """
     store = SettingsStore(db)
-    expected = store.get("msghub.webhook_token")
+    try:
+        expected = store.get("msghub.webhook_token")
+    except Exception:
+        log.exception("msghub.webhook_token 조회 실패 — 인증 거부")
+        return False
 
     if not expected:
         if settings.dev_mode:
