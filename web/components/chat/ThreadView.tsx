@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { ChatThreadDetail } from '@/types/chat';
+import { markReadClient } from '@/lib/chat';
 import { MessageBubble } from './MessageBubble';
 import { ThreadComposer } from './ThreadComposer';
 import { useChatStream } from './useChatStream';
@@ -20,6 +21,16 @@ export function ThreadView({ thread }: ThreadViewProps) {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [lastMessageId]);
+
+  // 스레드 진입 시 자동 읽음 처리 (unread인 경우만)
+  const threadId = thread.id;
+  const wasUnread = thread.unread === true;
+  useEffect(() => {
+    if (!wasUnread) return;
+    void markReadClient(threadId).catch(() => {
+      // 읽음 표시 실패는 치명적이지 않음 — silent
+    });
+  }, [threadId, wasUnread]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">

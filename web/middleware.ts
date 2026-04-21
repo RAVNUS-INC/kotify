@@ -9,8 +9,11 @@ const PUBLIC_PATTERNS = [/^\/login/, /^\/onboarding/, /^\/offline/, /^\/fonts/];
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 개발 우회
-  if (process.env.AUTH_DISABLED === 'true') {
+  // 개발 우회 (production에서는 절대 무시)
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.AUTH_DISABLED === 'true'
+  ) {
     return NextResponse.next();
   }
 

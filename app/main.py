@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -165,6 +166,27 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         {"error": {"code": f"http_{exc.status_code}", "message": exc.detail}},
         status_code=exc.status_code,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    """Pydantic 검증 실패 → envelope 형식 422."""
+    fields: dict[str, str] = {}
+    for err in exc.errors():
+        loc = err.get("loc", ())
+        path = ".".join(str(s) for s in loc if s != "body")
+        if path:
+            fields[path] = err.get("msg", "")
+    return JSONResponse(
+        {
+            "error": {
+                "code": "validation_failed",
+                "message": "입력값이 올바르지 않습니다",
+                "fields": fields,
+            }
+        },
+        status_code=422,
     )
 
 

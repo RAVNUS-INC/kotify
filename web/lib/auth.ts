@@ -15,6 +15,8 @@ export const SESSION_COOKIE = 'sms_session';
 const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://localhost:8000';
 
 export function isAuthDisabled(): boolean {
+  // production에서는 AUTH_DISABLED 무조건 무시 (실수 방지)
+  if (process.env.NODE_ENV === 'production') return false;
   return process.env.AUTH_DISABLED === 'true';
 }
 

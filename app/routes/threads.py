@@ -12,9 +12,12 @@ from typing import List, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter()
+
+# in-memory mock 데이터 동시성 보호 (Phase 10 실제 DB 도입 시 제거)
+_mock_lock = asyncio.Lock()
 
 
 _MOCK_THREADS: List[dict] = [
@@ -142,6 +145,14 @@ async def get_thread(tid: str):
 class MessageCreateBody(BaseModel):
     text: str = Field(..., min_length=1)
 
+    @field_validator("text")
+    @classmethod
+    def _strip_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("비어 있을 수 없습니다")
+        return stripped
+
 
 def _find_thread(tid: str) -> Optional[dict]:
     for t in _MOCK_THREADS:
@@ -152,38 +163,30 @@ def _find_thread(tid: str) -> Optional[dict]:
 
 @router.post("/threads/{tid}/messages")
 async def post_message(tid: str, body: MessageCreateBody):
-    """새 메시지 전송 (mock)."""
-    thread = _find_thread(tid)
-    if thread is None:
-        return JSONResponse(
-            {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
-            status_code=404,
-        )
-    text = body.text.strip()
-    if not text:
-        return JSONResponse(
-            {
-                "error": {
-                    "code": "validation_failed",
-                    "message": "메시지 본문이 필요합니다",
-                    "fields": {"text": "본문이 비어 있습니다"},
-                }
-            },
-            status_code=422,
-        )
+    """새 메시지 전송 (mock).
 
-    now_hhmm = datetime.now().strftime("%H:%M")
-    message = {
-        "id": f"m-{uuid.uuid4().hex[:8]}",
-        "side": "us",
-        "kind": thread["channel"],
-        "text": text,
-        "time": now_hhmm,
-    }
-    thread.setdefault("messages", []).append(message)
-    thread["preview"] = text[:60]
-    thread["time"] = now_hhmm
-    thread["unread"] = False
+    _mock_lock로 동시 append 방지. 실제 DB 도입 시 row-level lock으로 대체.
+    """
+    async with _mock_lock:
+        thread = _find_thread(tid)
+        if thread is None:
+            return JSONResponse(
+                {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
+                status_code=404,
+            )
+
+        now_hhmm = datetime.now().strftime("%H:%M")
+        message = {
+            "id": f"m-{uuid.uuid4().hex[:8]}",
+            "side": "us",
+            "kind": thread["channel"],
+            "text": body.text,
+            "time": now_hhmm,
+        }
+        thread.setdefault("messages", []).append(message)
+        thread["preview"] = body.text[:60]
+        thread["time"] = now_hhmm
+        thread["unread"] = False
 
     return {"data": {"message": message}}
 
@@ -191,13 +194,14 @@ async def post_message(tid: str, body: MessageCreateBody):
 @router.post("/threads/{tid}/read")
 async def mark_read(tid: str):
     """스레드 읽음 표시."""
-    thread = _find_thread(tid)
-    if thread is None:
-        return JSONResponse(
-            {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
-            status_code=404,
-        )
-    thread["unread"] = False
+    async with _mock_lock:
+        thread = _find_thread(tid)
+        if thread is None:
+            return JSONResponse(
+                {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
+                status_code=404,
+            )
+        thread["unread"] = False
     return {"data": {"id": tid, "unread": False}}
 
 

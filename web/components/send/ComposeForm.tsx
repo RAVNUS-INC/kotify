@@ -109,7 +109,9 @@ export function ComposeForm() {
     }
   };
 
-  const previewKind = channel === 'MMS' ? 'sms' : channel === 'LMS' ? 'sms' : 'sms';
+  // SMS/LMS/MMS는 모두 'sms' 버블로 표시. RCS 프리뷰는 Phase 후속에서 실제
+  // 발신 RCS 지원 여부 확인 후 분기.
+  const previewKind = 'sms' as const;
 
   return (
     <form onSubmit={onSubmit} className="mt-6 grid gap-6 lg:grid-cols-[560px_1fr]">

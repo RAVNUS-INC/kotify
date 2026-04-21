@@ -24,6 +24,8 @@ export type SidebarProps = {
   user: SessionUser;
 };
 
+// count/alert는 Phase 8+에서 실제 unread 수를 주입하는 구조가 마련되면 복원.
+// 지금은 하드코딩 제거 — 사용자 혼란 방지.
 const GROUPS: ReadonlyArray<NavGroup> = [
   {
     label: 'Send',
@@ -31,7 +33,7 @@ const GROUPS: ReadonlyArray<NavGroup> = [
       { href: '/', label: '홈', icon: 'home' },
       { href: '/send/new', label: '새 발송', icon: 'send' },
       { href: '/campaigns', label: '발송 이력', icon: 'clock' },
-      { href: '/chat', label: '대화방', icon: 'chat', count: 3, alert: true },
+      { href: '/chat', label: '대화방', icon: 'chat' },
     ],
   },
   {
@@ -45,7 +47,7 @@ const GROUPS: ReadonlyArray<NavGroup> = [
     label: 'Analytics',
     items: [
       { href: '/reports', label: '리포트', icon: 'barChart' },
-      { href: '/notifications', label: '알림', icon: 'bell', count: 3, alert: true },
+      { href: '/notifications', label: '알림', icon: 'bell' },
     ],
   },
   {

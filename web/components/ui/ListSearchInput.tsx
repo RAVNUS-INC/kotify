@@ -19,7 +19,13 @@ export function ListSearchInput({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [value, setValue] = useState<string>(searchParams.get(param) ?? '');
+  const paramValue = searchParams.get(param) ?? '';
+  const [value, setValue] = useState<string>(paramValue);
+
+  // URL 외부 네비게이션(뒤로가기 등)으로 searchParams가 변하면 input도 sync.
+  useEffect(() => {
+    setValue(paramValue);
+  }, [paramValue]);
 
   useEffect(() => {
     const t = setTimeout(() => {

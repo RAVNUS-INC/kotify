@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter()
 
@@ -170,23 +170,18 @@ class CampaignCreateBody(BaseModel):
     """POST /campaigns 요청 body."""
 
     sender: str = Field(..., min_length=1)
-    recipients: List[str] = Field(default_factory=list)
+    recipients: List[str] = Field(..., min_length=1, max_length=1000)
     message: str = Field(..., min_length=1)
     sendAt: Optional[str] = None
     channel: Optional[str] = None
 
-
-def _validation_error(message: str, field: str) -> JSONResponse:
-    return JSONResponse(
-        {
-            "error": {
-                "code": "validation_failed",
-                "message": message,
-                "fields": {field: message},
-            }
-        },
-        status_code=422,
-    )
+    @field_validator("sender", "message")
+    @classmethod
+    def _strip_non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("비어 있을 수 없습니다")
+        return stripped
 
 
 def _estimate_cost(message: str, count: int) -> tuple[int, int, str]:
@@ -333,18 +328,12 @@ async def list_campaigns(
 async def create_campaign(body: CampaignCreateBody) -> JSONResponse:
     """새 캠페인 생성 (mock).
 
+    필드 검증은 Pydantic + field_validator가 전담.
+    전역 validation_error_handler(app/main.py)가 envelope 422로 변환.
+
     Returns:
         envelope `{ data: { id, status, estimate: { reach, cost, channel } } }`.
     """
-    if not body.sender.strip():
-        return _validation_error("발신번호가 필요합니다", "sender")
-    if not body.recipients:
-        return _validation_error("수신자가 한 명 이상 필요합니다", "recipients")
-    if not body.message.strip():
-        return _validation_error("메시지 본문이 필요합니다", "message")
-    if len(body.recipients) > 1000:
-        return _validation_error("캠페인당 수신자는 최대 1,000명입니다", "recipients")
-
     cid = uuid.uuid4().hex[:12]
     count = len(body.recipients)
     _bytes, cost, channel = _estimate_cost(body.message, count)

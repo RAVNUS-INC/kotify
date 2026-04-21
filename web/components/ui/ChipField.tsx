@@ -64,7 +64,10 @@ export const ChipField = forwardRef<HTMLInputElement, ChipFieldProps>(
     };
 
     const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter' || e.key === ',') {
+      if (
+        (e.key === 'Enter' || e.key === ',') &&
+        !e.nativeEvent.isComposing
+      ) {
         if (input.trim()) {
           e.preventDefault();
           addChip(input);

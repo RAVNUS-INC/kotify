@@ -99,10 +99,6 @@ export function ThreadPreview({ thread }: ThreadPreviewProps) {
           </Button>
         </div>
 
-        <p className="mt-4 text-[12.5px] text-ink-dim">
-          전체 대화와 Composer는 Phase 6d에서 스레드 상세 페이지로
-          구현됩니다.
-        </p>
       </div>
     </div>
   );
