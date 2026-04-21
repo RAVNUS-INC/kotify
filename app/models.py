@@ -292,26 +292,32 @@ class Attachment(Base):
 
 
 class MoMessage(Base):
-    """RCS 양방향 수신 메시지 (MO) — 고객이 챗봇으로 보낸 답장 및 과금 데이터."""
+    """RCS 양방향 수신 메시지 (MO) — 고객이 챗봇으로 보낸 답장 및 postback 이벤트."""
 
     __tablename__ = "mo_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # msghub가 발급한 MO 고유 키 (멱등성 보장)
+    # msghub가 발급한 MO 고유 키 (멱등성 보장, msghub payload의 msgKey)
     mo_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    # 답장을 보낸 고객 번호
+    # 답장을 보낸 고객 번호 (msghub payload의 phone)
     mo_number: Mapped[str] = mapped_column(Text, nullable=False)
-    # 수신 챗봇(우리) 번호
+    # 수신 챗봇(우리) 번호 (msghub payload의 chatbotId)
     mo_callback: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # SMSMO / RCSMO 등
+    # message / postback (msghub payload의 eventType)
     mo_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 과금 상품코드
+    # 양방향 답장 발송 시 /rcs/bi/v1.1 에 넘겨야 하는 replyId
+    reply_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 버튼 클릭 등 postback 이벤트의 식별자/데이터
+    postback_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    postback_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 레거시 — v11 양방향 페이로드엔 없지만 미래 호환을 위해 유지 (nullable)
     product_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     mo_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 고객이 보낸 텍스트 (contentInfo.textMessage)
     mo_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
     telco: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_cnt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # JSON: 첨부/부가 콘텐츠 정보
+    # contentInfo 전체 JSON (fileMessage, geolocationPushMessage 등)
     content_info_lst: Mapped[str | None] = mapped_column(Text, nullable=True)
     # msghub가 기록한 수신 일시
     mo_recv_dt: Mapped[str | None] = mapped_column(Text, nullable=True)

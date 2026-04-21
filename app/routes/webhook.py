@@ -178,40 +178,44 @@ async def receive_mo(
     request: Request,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
-    """msghub RCS 양방향 MO 수신 웹훅.
+    """msghub MO 수신 웹훅 — RCS 양방향(rcsBiLst)와 SMS/MMS(moLst) 양쪽 지원.
 
-    고객이 챗봇으로 보낸 답장과 자동응답 과금 데이터를 저장한다.
-    moKey UNIQUE로 재시도 중복 저장을 방지한다.
+    공식 문서 §5.2에 따라 응답은 `{"code": "10000", "message": "success"}`
+    형식이어야 msghub가 "수신 성공"으로 큐에서 삭제한다. 실패 시
+    `{"code": "20xxx", "message": "..."}` 형태로 돌려주면 재시도.
+
+    msgKey/moKey UNIQUE 제약으로 재시도 중복 저장을 방지한다.
     """
     if not _verify_token(token, db):
         log.warning(
             "MO 웹훅 인증 실패: %s",
             request.client.host if request.client else "unknown",
         )
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return JSONResponse(
+            {"code": "20001", "message": "unauthorized"}, status_code=401
+        )
 
     try:
         body = await request.json()
     except Exception:
         log.warning("MO 웹훅 JSON 파싱 실패")
-        return JSONResponse({"error": "invalid json"}, status_code=400)
-
-    # 진단: msghub가 보내는 실제 페이로드 구조 확인 (moLst vs dataLst 등)
-    # WARNING 레벨로 출력 — uvicorn 기본 로그 필터가 INFO를 가릴 수 있음.
-    log.warning("MO 웹훅 수신 raw body: %s", body)
+        return JSONResponse(
+            {"code": "20002", "message": "invalid json"}, status_code=400
+        )
 
     try:
         payload = MoWebhookPayload.from_dict(body)
     except Exception:
         log.warning("MO 페이로드 파싱 실패: %s", body)
-        return JSONResponse({"error": "invalid mo format"}, status_code=400)
+        return JSONResponse(
+            {"code": "20003", "message": "invalid mo format"}, status_code=400
+        )
 
     if not payload.items:
-        log.warning(
-            "MO 웹훅 — 파싱된 items 0건 (raw moCnt=%s, keys=%s)",
-            body.get("moCnt"), list(body.keys()),
+        # rcsBiaLst/rcsBirLst만 있는 heartbeat/ack 등에서 정상 경로 — success 반환
+        return JSONResponse(
+            {"code": "10000", "message": "success"}, status_code=200
         )
-        return JSONResponse({"status": "no items"}, status_code=200)
 
     raw = json.dumps(body, ensure_ascii=False)
     now = datetime.now(UTC).isoformat()
@@ -221,7 +225,7 @@ async def receive_mo(
     try:
         for item in payload.items:
             if not item.mo_key:
-                log.warning("moKey 누락 — skip: %s", item)
+                log.warning("mo_key 누락 — skip: %s", item)
                 continue
 
             exists = db.execute(
@@ -233,17 +237,20 @@ async def receive_mo(
 
             mo = MoMessage(
                 mo_key=item.mo_key,
-                mo_number=item.mo_number,
-                mo_callback=item.mo_callback or None,
+                mo_number=item.number,
+                mo_callback=item.callback or None,
                 mo_type=item.mo_type or None,
+                reply_id=item.reply_id or None,
+                postback_id=item.postback_id,
+                postback_data=item.postback_data,
                 product_code=item.product_code or None,
                 mo_title=item.mo_title,
                 mo_msg=item.mo_msg,
                 telco=item.telco or None,
                 content_cnt=item.content_cnt,
                 content_info_lst=(
-                    json.dumps(item.content_info_lst, ensure_ascii=False)
-                    if item.content_info_lst
+                    json.dumps(item.content_info, ensure_ascii=False)
+                    if item.content_info
                     else None
                 ),
                 mo_recv_dt=item.mo_recv_dt or None,
@@ -257,15 +264,16 @@ async def receive_mo(
     except Exception:
         db.rollback()
         log.exception("MO 저장 실패")
-        return JSONResponse({"error": "storage failed"}, status_code=400)
+        return JSONResponse(
+            {"code": "20004", "message": "storage failed"}, status_code=400
+        )
 
-    log.info(
+    log.warning(  # WARNING — 기본 uvicorn 필터 통과용 (운영 안정화 후 INFO로 강등)
         "MO 수신: 저장 %d건, 중복 %d건, 페이로드 %d건",
         saved,
         duplicates,
         payload.mo_cnt,
     )
     return JSONResponse(
-        {"status": "ok", "saved": saved, "duplicates": duplicates},
-        status_code=200,
+        {"code": "10000", "message": "success"}, status_code=200
     )
