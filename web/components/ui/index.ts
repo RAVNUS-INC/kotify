@@ -52,3 +52,9 @@ export type { ChipFieldProps } from './ChipField';
 
 export { Editor, EditorToolbarButton, EditorToolbarDivider } from './Editor';
 export type { EditorProps, EditorToolbarButtonProps } from './Editor';
+
+export { LinkSegmented } from './LinkSegmented';
+export type { LinkSegmentedProps, LinkSegmentedOption } from './LinkSegmented';
+
+export { ListSearchInput } from './ListSearchInput';
+export type { ListSearchInputProps } from './ListSearchInput';
