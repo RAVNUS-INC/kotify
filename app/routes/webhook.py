@@ -1,28 +1,31 @@
 """msghub 리포트 + MO 웹훅 수신 엔드포인트.
 
 msghub가 발송 결과(리포트)와 고객 답장(MO)을 POST로 전달한다.
-- 200: 성공 처리 (msghub가 다시 보내지 않도록 명시적 ack)
-- 400: 페이로드 포맷 오류 (재시도해도 동일 실패 — client error)
-- 401: 서명 검증 실패 (위조 시도)
-- 500: 서버 내부 오류 (msghub가 일정 시간 뒤 재시도 허용)
+- 200: 성공 처리
+- 400: 실패 → msghub가 10초 후 재시도
+- 양방향 CHAT RCS 실패 시 SMS 수동 fallback 자동 발송
 
-보안:
-- HMAC-SHA256 서명 검증: `X-Msghub-Signature` = hex(HMAC(request_body, secret))
-- `msghub.webhook_secret` 미설정 시 fail-closed (401) — dev 에만 SMS_DEV_MODE 로 우회
-- 서명 검증 → 페이로드 파싱 순서 엄수 (위조 페이로드로 파서 버그 트리거 방지)
+## 보안: URL 경로 토큰
 
-CRITICAL 수정 이력:
-- 이전 `hmac.compare_digest(sig, secret)` 는 HMAC 가 아니라 단순 bearer 토큰 비교였음.
-  body 무결성 보장 불가 + 시크릿 유출 시 임의 페이로드 주입 가능.
-- HMAC(body, secret) 으로 변경 + 시크릿 미설정 시 fail-closed.
+msghub 공식 문서(2.8 메시지 리포트 §3)에 따르면 **웹훅 요청에 어떤
+인증 헤더도 첨부하지 않는다** (Content-Type만 포함). 따라서 HMAC 서명
+같은 일반적인 웹훅 보안 패턴은 적용 불가능하며, URL 자체를 시크릿으로
+쓰는 "URL obscurity" 방식만이 유일한 보호 수단이다.
+
+엔드포인트 형태:
+    POST /webhook/msghub/{token}/report
+    POST /webhook/msghub/{token}/mo
+
+- token은 `msghub.webhook_token` 설정값과 일치해야 통과
+- 토큰 미설정 + dev_mode: 통과 (로컬 테스트 편의)
+- 토큰 미설정 + 프로덕션: 거부
+- 토큰이 URL 경로에 포함되므로 msghub 콘솔에 전체 URL을 등록하면 끝
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
-import os
+import secrets as _secrets
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Request
@@ -30,6 +33,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db import get_db
 from app.models import Campaign, Message, MoMessage
 from app.msghub.schemas import MoWebhookPayload, RecvInfo, WebhookReport
@@ -41,51 +45,35 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 
-async def _verify_webhook(request: Request, raw_body: bytes, db: Session) -> bool:
-    """HMAC-SHA256 로 웹훅 페이로드 무결성을 검증한다.
+def _verify_token(token: str, db: Session) -> bool:
+    """URL 경로에 포함된 토큰이 저장된 msghub.webhook_token 과 일치하는지 확인.
 
-    알고리즘:
-        expected_sig = hex(HMAC-SHA256(body, secret))
-        if compare_digest(header_sig, expected_sig): pass
-
-    시크릿이 설정되지 않은 경우:
-    - 운영(`SMS_DEV_MODE=false`): fail-closed → 401 반환
-    - 개발(`SMS_DEV_MODE=true`): 경고 로그 후 통과 (로컬 테스트 편의)
-
-    Args:
-        request: Starlette Request.
-        raw_body: 이미 읽은 raw body bytes (json 파싱 전).
-        db: SQLAlchemy 세션.
-
-    Returns:
-        True — 검증 통과 / False — 차단.
+    msghub는 웹훅에 인증 헤더를 보내지 않으므로(공식 문서 2.8 §3),
+    URL 경로에 포함된 시크릿 토큰이 사실상의 유일한 보호 수단이다.
+    토큰이 미설정인 경우:
+    - dev_mode=True: 통과 (로컬 테스트 편의)
+    - dev_mode=False: 거부 (프로덕션 안전)
     """
     store = SettingsStore(db)
-    secret = store.get("msghub.webhook_secret")
+    expected = store.get("msghub.webhook_token")
 
-    if not secret:
-        if os.getenv("SMS_DEV_MODE") == "true":
-            log.warning("msghub.webhook_secret 미설정 — dev 모드에서만 통과")
+    if not expected:
+        if settings.dev_mode:
+            log.warning("msghub.webhook_token 미설정 — 개발 모드이므로 인증 없이 통과")
             return True
-        log.error("msghub.webhook_secret 미설정 — 웹훅 차단 (fail-closed)")
+        log.error("msghub.webhook_token 미설정 — 프로덕션 환경에서 웹훅 요청 거부")
         return False
 
-    sig_header = request.headers.get("X-Msghub-Signature", "")
-    if not sig_header:
-        return False
-
-    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(sig_header, expected)
+    return _secrets.compare_digest(token, expected)
 
 
 async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
     """양방향 CHAT RCS 실패 메시지에 대해 SMS fallback을 발송한다.
 
-    각 메시지마다 savepoint 로 보호하여 부분 실패가 다른 메시지에 영향주지 않도록 한다.
-    실패한 메시지는 FAILED 로 전이하고 result_desc 에 원인 기록.
+    각 메시지의 cli_key를 {원본}-fb로 갱신하여 SMS 리포트 매칭에 사용.
 
     Returns:
-        fallback 발송 성공 건수.
+        fallback 발송 시도 건수.
     """
     from app.main import get_msghub_client
 
@@ -94,6 +82,7 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
         log.error("SMS fallback 실패: msghub 클라이언트 미초기화")
         return 0
 
+    # 캠페인별로 그룹화 (caller_number, content 조회용)
     campaign_cache: dict[int, Campaign] = {}
     for msg in messages:
         if msg.campaign_id not in campaign_cache:
@@ -105,29 +94,20 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
         if campaign is None:
             continue
 
-        # 각 메시지마다 savepoint — 부분 실패 격리
-        sp = db.begin_nested()
-        try:
-            fb_cli_key = f"{msg.cli_key}-fb"
-            msg.cli_key = fb_cli_key
-            msg.status = "FB_PENDING"
+        fb_cli_key = f"{msg.cli_key}-fb"
+        msg.cli_key = fb_cli_key
+        msg.status = "FB_PENDING"
 
+        try:
             recv = RecvInfo(cli_key=fb_cli_key, phone=msg.to_number)
             await client.send_sms(
                 callback=campaign.caller_number,
                 msg=campaign.content,
                 recv_list=[recv],
             )
-            sp.commit()
             sent += 1
         except Exception:
-            sp.rollback()
-            log.exception(
-                "SMS fallback 발송 실패: msg_id=%s, phone=%s",
-                msg.id,
-                msg.to_number,
-            )
-            # 실패 기록 — outer transaction 에 남김
+            log.exception("SMS fallback 발송 실패: msg_id=%s, phone=%s", msg.id, msg.to_number)
             msg.status = "FAILED"
             msg.result_desc = (msg.result_desc or "") + " (SMS fallback 실패)"
 
@@ -135,30 +115,19 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
     return sent
 
 
-@router.post("/msghub/report")
+@router.post("/msghub/{token}/report")
 async def receive_report(
+    token: str,
     request: Request,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
-    """msghub 발송 결과 웹훅 수신.
-
-    응답 코드:
-    - 200: 정상 처리 (msghub 가 재시도하지 않음)
-    - 400: 페이로드 포맷 오류 (영구 실패, 재시도해도 무의미)
-    - 401: 서명 검증 실패
-    - 500: 서버 내부 오류 (msghub 가 지연 후 재시도)
-    """
-    raw_body = await request.body()
-
-    if not await _verify_webhook(request, raw_body, db):
-        log.warning(
-            "웹훅 인증 실패: %s",
-            request.client.host if request.client else "unknown",
-        )
+    """msghub 발송 결과 웹훅 수신."""
+    if not _verify_token(token, db):
+        log.warning("웹훅 인증 실패: %s", request.client.host if request.client else "unknown")
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     try:
-        body = json.loads(raw_body)
+        body = await request.json()
     except Exception:
         log.warning("웹훅 JSON 파싱 실패")
         return JSONResponse({"error": "invalid json"}, status_code=400)
@@ -174,18 +143,16 @@ async def receive_report(
 
     try:
         processed, fallback_needed = process_report(db, report.items)
-        db.commit()
 
+        # 양방향 CHAT RCS 실패 → SMS 자동 fallback
+        # process_report 결과와 fallback을 단일 트랜잭션으로 커밋.
+        # fallback 루프가 실패하면 rollback되어 msghub 재시도 시 멱등하게 재처리.
         fallback_sent = 0
         if fallback_needed:
             fallback_sent = await _send_sms_fallback(db, fallback_needed)
-            db.commit()
-            log.info(
-                "SMS fallback 발송: %d/%d건",
-                fallback_sent,
-                len(fallback_needed),
-            )
+            log.info("SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
 
+        db.commit()
         log.info("웹훅 리포트 처리: %d/%d건", processed, report.rpt_cnt)
         return JSONResponse(
             {"status": "ok", "processed": processed, "fallback": fallback_sent},
@@ -194,13 +161,12 @@ async def receive_report(
     except Exception:
         db.rollback()
         log.exception("웹훅 리포트 처리 실패")
-        # 500: 일시적 서버 오류로 간주 → msghub 가 일정 지연 후 재시도.
-        # 400 은 "영구 실패" 로 해석되므로, 처리 중 예외는 500 이 맞다.
-        return JSONResponse({"error": "processing failed"}, status_code=500)
+        return JSONResponse({"error": "processing failed"}, status_code=400)
 
 
-@router.post("/msghub/mo")
+@router.post("/msghub/{token}/mo")
 async def receive_mo(
+    token: str,
     request: Request,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
@@ -209,9 +175,7 @@ async def receive_mo(
     고객이 챗봇으로 보낸 답장과 자동응답 과금 데이터를 저장한다.
     moKey UNIQUE로 재시도 중복 저장을 방지한다.
     """
-    raw_body = await request.body()
-
-    if not await _verify_webhook(request, raw_body, db):
+    if not _verify_token(token, db):
         log.warning(
             "MO 웹훅 인증 실패: %s",
             request.client.host if request.client else "unknown",
@@ -219,7 +183,7 @@ async def receive_mo(
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     try:
-        body = json.loads(raw_body)
+        body = await request.json()
     except Exception:
         log.warning("MO 웹훅 JSON 파싱 실패")
         return JSONResponse({"error": "invalid json"}, status_code=400)
@@ -277,7 +241,7 @@ async def receive_mo(
     except Exception:
         db.rollback()
         log.exception("MO 저장 실패")
-        return JSONResponse({"error": "storage failed"}, status_code=500)
+        return JSONResponse({"error": "storage failed"}, status_code=400)
 
     log.info(
         "MO 수신: 저장 %d건, 중복 %d건, 페이로드 %d건",
