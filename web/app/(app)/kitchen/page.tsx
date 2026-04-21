@@ -1,5 +1,7 @@
 import { FormsSample } from '@/components/demo/FormsSample';
 import { MotionSample } from '@/components/demo/MotionSample';
+import { MessageBubble } from '@/components/chat';
+import { DeviceMockup } from '@/components/send';
 import { PageHeader } from '@/components/shell';
 import {
   Badge,
@@ -82,6 +84,31 @@ export default function Kitchen() {
 
       <Section title="Motion (client)">
         <MotionSample />
+      </Section>
+
+      <Section title="Device preview · Message bubbles">
+        <div className="flex flex-wrap items-start gap-8">
+          <DeviceMockup frame="ios" senderName="Kotify" timeLabel="14:02">
+            <MessageBubble kind="rcs" side="them" timestamp="14:02">
+              안녕하세요 박지훈 님,{'\n'}내일 배송 예정입니다.
+            </MessageBubble>
+            <MessageBubble kind="rcs" side="us" timestamp="14:03">
+              네 확인했습니다.
+            </MessageBubble>
+            <MessageBubble kind="sms" side="them" timestamp="14:05">
+              배송 일정 변경 안내입니다.
+            </MessageBubble>
+          </DeviceMockup>
+
+          <DeviceMockup frame="android" senderName="Kotify" timeLabel="지금">
+            <MessageBubble kind="kakao" side="them" timestamp="11:20">
+              카카오톡 테스트 메시지
+            </MessageBubble>
+            <MessageBubble kind="kakao" side="us" timestamp="11:21">
+              알겠습니다.
+            </MessageBubble>
+          </DeviceMockup>
+        </div>
       </Section>
 
       <Section title="Card">

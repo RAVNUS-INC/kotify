@@ -3,6 +3,10 @@
 import { useState } from 'react';
 import {
   Check,
+  ChipField,
+  Editor,
+  EditorToolbarButton,
+  EditorToolbarDivider,
   Field,
   Icon,
   Input,
@@ -24,6 +28,7 @@ export function FormsSample() {
   const [channel, setChannel] = useState<Channel>('rcs');
   const [immediate, setImmediate] = useState(true);
   const [realtime, setRealtime] = useState(false);
+  const [recipients, setRecipients] = useState<string[]>(['010-1234-5678', '010-9876-5432']);
 
   const bytes = new TextEncoder().encode(msg).length;
   const bytesState: 'warn' | 'err' | undefined =
@@ -99,17 +104,72 @@ export function FormsSample() {
       </div>
 
       <Field
-        label="메시지 본문"
-        htmlFor="msg"
-        hint="140바이트 초과 시 LMS로 전환됩니다"
+        label="수신자"
+        htmlFor="recipients"
+        hint="이름·번호·그룹 입력 후 Enter 또는 쉼표로 추가"
+      >
+        <ChipField
+          id="recipients"
+          aria-label="수신자 목록"
+          value={recipients}
+          onChange={setRecipients}
+          placeholder="예) 010-1234-5678"
+          maxChips={10}
+        />
+      </Field>
+
+      <Field
+        label="메시지 본문 (Editor)"
+        htmlFor="msg-editor"
+        hint="Editor는 toolbar/footer 슬롯을 받는 3단 박스"
         counter={{
           value: `${bytes} / 180 bytes`,
           state: bytesState,
         }}
       >
+        <Editor
+          id="msg-editor"
+          rows={4}
+          value={msg}
+          onChange={(e) => setMsg(e.target.value)}
+          placeholder="본문을 입력하세요"
+          invalid={bytesState === 'err'}
+          toolbar={
+            <>
+              <EditorToolbarButton icon={<Icon name="hash" size={12} />}>
+                변수
+              </EditorToolbarButton>
+              <EditorToolbarButton icon={<Icon name="fileText" size={12} />}>
+                템플릿
+              </EditorToolbarButton>
+              <EditorToolbarDivider />
+              <EditorToolbarButton icon={<Icon name="image" size={12} />}>
+                이미지
+              </EditorToolbarButton>
+              <EditorToolbarButton icon={<Icon name="link" size={12} />}>
+                링크
+              </EditorToolbarButton>
+            </>
+          }
+          footer={
+            <>
+              <span className="font-mono">
+                {bytes} / 180 bytes · 예상 1건 ₩8
+              </span>
+              <span className="font-mono text-ink-dim">plain text</span>
+            </>
+          }
+        />
+      </Field>
+
+      <Field
+        label="메시지 본문 (Textarea)"
+        htmlFor="msg"
+        hint="단순 멀티라인 입력"
+      >
         <Textarea
           id="msg"
-          rows={4}
+          rows={3}
           value={msg}
           onChange={(e) => setMsg(e.target.value)}
           placeholder="본문을 입력하세요"

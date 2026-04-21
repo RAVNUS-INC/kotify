@@ -46,3 +46,9 @@ export type { SegmentedProps, SegmentedItem } from './Segmented';
 
 export { EmptyState } from './EmptyState';
 export type { EmptyStateProps, EmptyStateSize } from './EmptyState';
+
+export { ChipField } from './ChipField';
+export type { ChipFieldProps } from './ChipField';
+
+export { Editor, EditorToolbarButton, EditorToolbarDivider } from './Editor';
+export type { EditorProps, EditorToolbarButtonProps } from './Editor';
