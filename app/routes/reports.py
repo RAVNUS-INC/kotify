@@ -15,14 +15,7 @@ from fastapi.responses import Response
 router = APIRouter()
 
 
-_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-
-def _safe(value: str) -> str:
-    """CSV formula injection 방어 (audit_api 동일 헬퍼)."""
-    if value and value[0] in _FORMULA_PREFIXES:
-        return "'" + value
-    return value
+from app.util.csv_safe import safe_csv_cell as _safe
 
 
 _MOCK_REPORT: dict = {

@@ -39,18 +39,7 @@ _MOCK_AUDIT: List[dict] = [
 ]
 
 
-_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-
-def _safe_csv_cell(value: str) -> str:
-    """CSV formula injection (CWE-1236) 방어.
-
-    `=`, `+`, `-`, `@`, `\\t`, `\\r`로 시작하는 값은 Excel/Numbers에서
-    공식으로 해석돼 실행될 수 있다. single-quote prefix로 무력화.
-    """
-    if value and value[0] in _FORMULA_PREFIXES:
-        return "'" + value
-    return value
+from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
 
 
 def _filter(rows: List[dict], q: Optional[str], action: Optional[str]) -> List[dict]:

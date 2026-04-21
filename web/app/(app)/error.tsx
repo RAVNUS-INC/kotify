@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { ErrorPage } from '@/components/error';
 import { Button, Icon } from '@/components/ui';
 
@@ -15,10 +15,11 @@ export default function AppError({ error, reset }: AppErrorProps) {
     console.error('[AppError]', error);
   }, [error]);
 
-  const now = useMemo(
-    () => new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
-    [],
-  );
+  // hydration-safe (RootError와 동일 패턴)
+  const [now, setNow] = useState('');
+  useEffect(() => {
+    setNow(new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }));
+  }, []);
 
   const isNetwork =
     error.message.includes('fetch failed') ||
@@ -39,15 +40,11 @@ export default function AppError({ error, reset }: AppErrorProps) {
             ? 'FastAPI 서버가 기동 중인지 확인하거나 잠시 후 다시 시도하세요.'
             : error.message || '알 수 없는 오류가 발생했습니다.'
         }
-        diagnostics={
-          error.digest
-            ? [
-                { label: 'trace_id', value: error.digest },
-                { label: 'time', value: now },
-                { label: 'service', value: 'kotify-web' },
-              ]
-            : undefined
-        }
+        diagnostics={[
+          { label: 'trace_id', value: error.digest ?? '—' },
+          { label: 'time', value: now || '—' },
+          { label: 'service', value: 'kotify-web' },
+        ]}
         actions={
           <>
             <Button

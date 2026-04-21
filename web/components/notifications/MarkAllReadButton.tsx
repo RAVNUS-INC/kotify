@@ -17,6 +17,9 @@ export function MarkAllReadButton({ disabled }: MarkAllReadButtonProps) {
     if (pending || disabled) return;
     setPending(true);
     try {
+      // 서버 mutation이 끝난 뒤 refresh를 트리거.
+      // router.refresh()는 non-blocking이지만 mutation은 await로 완료 보장,
+      // pending 재활성화 전까진 이중 클릭이 차단됨.
       await markAllNotificationsReadClient();
       router.refresh();
     } finally {

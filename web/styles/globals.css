@@ -88,3 +88,40 @@
 .k-drawer-content[data-state='closed'] {
   animation: k-drawer-out 240ms cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* ============ Command Palette (중앙 fade + scale) ============ */
+@keyframes k-cmd-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes k-cmd-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+}
+.k-cmd-content[data-state='open'] {
+  animation: k-cmd-in 200ms cubic-bezier(0.22, 0.9, 0.3, 1);
+}
+.k-cmd-content[data-state='closed'] {
+  animation: k-cmd-out 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* <mark> 하이라이트 전역 스타일 (검색 결과 등에서 사용) */
+mark {
+  background: rgba(59, 0, 139, 0.12);
+  color: var(--brand);
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: inherit;
+}

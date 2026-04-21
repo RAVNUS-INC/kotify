@@ -101,7 +101,9 @@ export function CommandPalette() {
     }
   }, [open]);
 
-  // debounced search
+  // debounced search + stale response 방어.
+  // 타이머 fire 이후 fetch가 in-flight인 상황에서 사용자가 추가 입력하면
+  // 이전 응답이 새 응답보다 늦게 와서 setResult로 덮어쓰는 race 방지.
   useEffect(() => {
     const query = q.trim();
     if (!query) {
@@ -109,19 +111,25 @@ export function CommandPalette() {
       setLoading(false);
       return;
     }
+    let cancelled = false;
     const t = setTimeout(async () => {
       setLoading(true);
       try {
         const r = await searchClient(query);
-        setResult(r);
-        setActive(0);
+        if (!cancelled) {
+          setResult(r);
+          setActive(0);
+        }
       } catch {
-        setResult(null);
+        if (!cancelled) setResult(null);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 200);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [q]);
 
   const items = result ? buildItems(q, result) : [];

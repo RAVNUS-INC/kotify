@@ -56,18 +56,17 @@ export default async function ReportsPage({ searchParams }: PageProps) {
         }
       />
 
-      <div className="mb-5">
+      <div className="mb-5 flex items-center gap-3">
         <LinkSegmented
           aria-label="기간"
           active={period}
           basePath="/reports"
           param="period"
-          options={[
-            { value: '7d', label: '7일' },
-            { value: '30d', label: '30일' },
-            { value: '90d', label: '90일' },
-          ]}
+          options={[{ value: '7d', label: '7일' }]}
         />
+        <span className="font-mono text-[11px] text-ink-dim">
+          30일 · 90일은 실제 집계 쿼리 연결 후 제공
+        </span>
       </div>
 
       <ReportKpiStack kpis={report.kpis} />

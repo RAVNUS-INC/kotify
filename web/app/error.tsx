@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import '../styles/globals.css';
 import { ErrorPage } from '@/components/error';
 import { Button, Icon } from '@/components/ui';
@@ -16,10 +16,12 @@ export default function RootError({ error, reset }: RootErrorProps) {
     console.error('[RootError]', error);
   }, [error]);
 
-  const now = useMemo(
-    () => new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
-    [],
-  );
+  // 클라이언트 마운트 이후에만 시각 설정 — SSR/CSR 간 시계 차이로 인한
+  // hydration mismatch 방지.
+  const [now, setNow] = useState('');
+  useEffect(() => {
+    setNow(new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }));
+  }, []);
 
   const isNetwork =
     error.message.includes('fetch failed') ||
@@ -43,7 +45,7 @@ export default function RootError({ error, reset }: RootErrorProps) {
           }
           diagnostics={[
             { label: 'trace_id', value: error.digest ?? '—' },
-            { label: 'time', value: now },
+            { label: 'time', value: now || '—' },
             { label: 'service', value: 'kotify-web' },
           ]}
           actions={

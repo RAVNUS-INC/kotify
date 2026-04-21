@@ -31,18 +31,17 @@ export function DailyBars({ daily }: DailyBarsProps) {
           <div className="mb-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
             일별 회신
           </div>
-          <div
-            className="grid grid-cols-7 gap-1 text-center"
-            role="table"
+          <ul
+            role="list"
             aria-label="일별 회신 수"
+            className="grid grid-cols-7 gap-1 text-center"
           >
             {daily.labels.map((label, i) => {
               const reply = daily.reply[i] ?? 0;
               return (
-                <div
+                <li
                   key={label}
                   className="flex flex-col items-center gap-0.5"
-                  role="cell"
                 >
                   <span className="font-mono text-xs tabular-nums text-ink">
                     {reply}
@@ -50,10 +49,10 @@ export function DailyBars({ daily }: DailyBarsProps) {
                   <span className="font-mono text-[10px] text-ink-dim">
                     {label}
                   </span>
-                </div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         </div>
       </CardBody>
     </Card>

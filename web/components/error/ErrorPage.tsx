@@ -42,11 +42,7 @@ export function ErrorPage({
 }: ErrorPageProps) {
   return (
     <div className="flex min-h-[70vh] items-center justify-center p-6">
-      <div
-        role="alert"
-        aria-live="assertive"
-        className="flex max-w-md flex-col items-center gap-4 text-center"
-      >
+      <div className="flex max-w-md flex-col items-center gap-4 text-center">
         <div className="relative">
           <div
             className={cn(
@@ -67,7 +63,12 @@ export function ErrorPage({
           Error {code}
         </div>
 
-        <h1 className="m-0 text-2xl font-semibold tracking-tight text-ink">
+        {/* role=alert는 가장 중요한 한 줄에만 — 전체 카드가 alert면 SR 읽기 과함 */}
+        <h1
+          role="alert"
+          aria-live="assertive"
+          className="m-0 text-2xl font-semibold tracking-tight text-ink"
+        >
           {title}
         </h1>
 
@@ -82,7 +83,7 @@ export function ErrorPage({
             <div className="mb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
               진단 정보
             </div>
-            <dl className="grid grid-cols-[88px_1fr] gap-x-3 gap-y-1 font-mono text-[11.5px]">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[11.5px]">
               {diagnostics.map((d) => (
                 <Fragment key={d.label}>
                   <dt className="text-ink-dim">{d.label}</dt>
