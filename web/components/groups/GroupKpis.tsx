@@ -12,13 +12,13 @@ export function GroupKpis({ group }: GroupKpisProps) {
   return (
     <div className="grid grid-cols-4 gap-3">
       <KpiBox label="총 인원">
-        <Counter value={group.memberCount} delay={100} />
+        <Counter value={group.memberCount} delay={100} duration={800} />
       </KpiBox>
       <KpiBox
         label="유효 번호"
         sub={invalidCount > 0 ? `무효 ${invalidCount}` : '전체 유효'}
       >
-        <Counter value={group.validCount} delay={180} />
+        <Counter value={group.validCount} delay={180} duration={800} />
       </KpiBox>
       <KpiBox
         label="최근 도달률"
@@ -29,7 +29,12 @@ export function GroupKpis({ group }: GroupKpisProps) {
         }
       >
         {group.reachRate != null ? (
-          <Counter value={group.reachRate} format="percent" delay={260} />
+          <Counter
+            value={group.reachRate}
+            format="percent"
+            delay={260}
+            duration={800}
+          />
         ) : (
           <span className="text-ink-dim">—</span>
         )}

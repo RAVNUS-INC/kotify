@@ -36,14 +36,14 @@ export function FallbackFlow({ breakdown }: FallbackFlowProps) {
           count={smsFallback}
           total={total}
           color="var(--warning)"
-          delay={280}
+          delay={220}
         />
         <FlowRow
           label="실패"
           count={failed}
           total={total}
           color="var(--danger)"
-          delay={440}
+          delay={340}
         />
       </div>
 
@@ -91,7 +91,7 @@ function FlowRow({ label, count, total, color, delay }: FlowRowProps) {
         color={color}
         height={3}
         delay={delay}
-        duration={900}
+        duration={700}
         ariaLabel={`${label} ${count}건`}
       />
     </div>

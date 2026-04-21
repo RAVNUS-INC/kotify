@@ -68,12 +68,13 @@ function KpiCell({ label, kpi, format, delay }: KpiCellProps) {
         <span className="font-mono text-[10.5px] text-ink-dim">vs 지난 주</span>
       </div>
       <div className="mt-3">
+        {/* Phase 10c: Counter와 거의 동시에 시작, 700ms로 압축 (1.2초 예산) */}
         <Sparkline
           data={kpi.spark}
           width={160}
           height={32}
-          delay={delay + 200}
-          duration={800}
+          delay={delay + 100}
+          duration={700}
           color="var(--brand)"
         />
       </div>

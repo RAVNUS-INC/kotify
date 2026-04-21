@@ -77,12 +77,13 @@ function KpiBox({
       )}
       {progress !== undefined && (
         <div className="mt-3">
+          {/* Phase 10c: Counter와 동일 시점 start, 700ms로 압축 → 1.2초 예산 준수 */}
           <Progress
             value={progress}
             max={100}
             color={progressColor}
-            duration={1000}
-            delay={delay + 200}
+            duration={700}
+            delay={delay + 100}
             ariaLabel={label}
           />
         </div>

@@ -29,7 +29,8 @@ export function ChannelBreakdown({ channels }: ChannelBreakdownProps) {
     color: CHANNEL_COLOR[k],
     count: channels[k].count,
     rate: channels[k].rate,
-    delay: 200 + i * 120,
+    // Phase 10c: 1.2s 예산 준수 — 기존 200+120i → 100+80i로 압축
+    delay: 100 + i * 80,
   }));
 
   return (
@@ -63,7 +64,7 @@ export function ChannelBreakdown({ channels }: ChannelBreakdownProps) {
                 color={e.color}
                 height={4}
                 delay={e.delay}
-                duration={900}
+                duration={700}
                 ariaLabel={`${e.label} ${e.rate}%`}
               />
             </div>

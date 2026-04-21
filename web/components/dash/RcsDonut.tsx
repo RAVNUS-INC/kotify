@@ -16,8 +16,9 @@ export function RcsDonut({
   rate,
   size = 160,
   strokeWidth = 10,
-  delay = 300,
-  duration = 1000,
+  // motion.md 1.2초 예산 기준으로 축소 (Phase 10c). 이전: 300/1000 → 1300ms 정지
+  delay = 200,
+  duration = 800,
 }: RcsDonutProps) {
   const r = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * r;
