@@ -14,3 +14,6 @@ export { WebhooksList } from './WebhooksList';
 export type { WebhooksListProps } from './WebhooksList';
 
 export { SecuritySection } from './SecuritySection';
+
+export { ProviderSettingsForm } from './ProviderSettingsForm';
+export type { ProviderSettingsFormProps } from './ProviderSettingsForm';

@@ -34,6 +34,8 @@ from app.auth.deps import (
 from app.db import get_db
 from app.models import Setting, User
 from app.security.csrf import verify_csrf
+from app.security.settings_store import SettingsStore
+from app.services import audit
 
 # 조직 설정은 admin 전용
 router = APIRouter(
@@ -238,3 +240,185 @@ def list_webhooks() -> dict:
         "data": [],
         "meta": {"total": 0, "featurePending": True},
     }
+
+
+# ── Provider 설정 (msghub / Keycloak / app) ─────────────────────────────────
+# 기존 HTMX /admin/settings 에서 처리하던 민감 설정을 JSON API 로 재구성.
+# 시크릿(비밀번호/클라이언트시크릿/세션키)은 쓰기 전용 — GET 에서 "설정됨/비어
+# 있음" 만 반환하고 평문은 절대 응답에 포함하지 않는다. 빈 값 PATCH 는 기존
+# 값을 보존(삭제 아님).
+
+_PROVIDER_PUBLIC_KEYS: dict[str, str] = {
+    # TS 필드 → Setting key 매핑
+    "keycloakIssuer": "keycloak.issuer",
+    "keycloakClientId": "keycloak.client_id",
+    "appPublicUrl": "app.public_url",
+    "msghubEnv": "msghub.env",
+    "msghubBrandId": "msghub.brand_id",
+    "msghubChatbotId": "msghub.chatbot_id",
+}
+_PROVIDER_SECRET_KEYS: dict[str, str] = {
+    "keycloakClientSecret": "keycloak.client_secret",
+    "msghubApiKey": "msghub.api_key",
+    "msghubApiPwd": "msghub.api_pwd",
+    "sessionSecret": "session.secret",
+}
+
+
+class ProviderPatchBody(BaseModel):
+    """PATCH /settings/provider — 모두 optional. 빈 문자열은 None 과 동일하게 취급."""
+
+    # 공개 (평문 저장)
+    keycloakIssuer: Optional[str] = None
+    keycloakClientId: Optional[str] = None
+    appPublicUrl: Optional[str] = None
+    msghubEnv: Optional[str] = None  # production | staging | sandbox 등
+    msghubBrandId: Optional[str] = None
+    msghubChatbotId: Optional[str] = None
+    # 시크릿 (Fernet 암호화 저장) — 빈 값/미제공 시 기존 값 보존
+    keycloakClientSecret: Optional[str] = None
+    msghubApiKey: Optional[str] = None
+    msghubApiPwd: Optional[str] = None
+    sessionSecret: Optional[str] = None
+
+
+@router.get("/settings/provider")
+def get_provider_settings(db: Session = Depends(get_db)) -> dict:
+    """Provider 설정 현재값 — 시크릿은 마스킹 또는 '설정됨/비어있음' 플래그만."""
+    store = SettingsStore(db)
+    public: dict[str, str] = {}
+    for ts_key, skey in _PROVIDER_PUBLIC_KEYS.items():
+        public[ts_key] = store.get(skey, "") or ""
+    secrets_info: dict[str, dict] = {}
+    for ts_key, skey in _PROVIDER_SECRET_KEYS.items():
+        value = store.get(skey, "") or ""
+        secrets_info[ts_key] = {
+            "configured": bool(value),
+            # UI 표시용 마스킹 — 값 자체는 절대 내려주지 않음.
+            "masked": SettingsStore.mask(value) if value else "",
+        }
+    return {"data": {"public": public, "secrets": secrets_info}}
+
+
+@router.patch(
+    "/settings/provider",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+async def patch_provider_settings(
+    body: ProviderPatchBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Provider 설정 일부 업데이트.
+
+    - 공개 필드는 비어있어도 저장하지 않음(= 삭제 방지). 값이 있을 때만 upsert.
+    - 시크릿은 값이 있을 때만 재암호화/재저장. 비어있으면 기존 값 유지.
+    - msghub.* 가 바뀌면 in-memory msghub 클라이언트 리셋 → 다음 요청부터
+      새 자격증명으로 재인증.
+
+    async def 로 둔 이유: reset_msghub_client 가 coroutine 이라 await 필요.
+    threading.Lock 은 여전히 cross-thread 직렬화를 보장하며 async 핸들러
+    내부에서도 안전하게 쓰인다 (짧게 잡히는 lock 이라 event loop 영향 미미).
+    """
+    with _settings_lock:
+        store = SettingsStore(db)
+        updates = body.model_dump(exclude_none=True)
+
+        # 공개 필드 저장 — 빈 문자열은 skip.
+        for ts_key, skey in _PROVIDER_PUBLIC_KEYS.items():
+            val = updates.get(ts_key)
+            if isinstance(val, str):
+                val = val.strip()
+                if val:
+                    store.set(skey, val, is_secret=False, updated_by=user.sub)
+
+        # 시크릿 저장 — 빈 문자열도 skip (기존 값 보존).
+        msghub_creds_changed = False
+        for ts_key, skey in _PROVIDER_SECRET_KEYS.items():
+            val = updates.get(ts_key)
+            if isinstance(val, str) and val.strip():
+                store.set(skey, val.strip(), is_secret=True, updated_by=user.sub)
+                if skey.startswith("msghub."):
+                    msghub_creds_changed = True
+
+        # msghub.env 같은 공개 필드도 클라이언트 재초기화 필요.
+        if any(
+            isinstance(updates.get(k), str) and updates[k].strip()
+            for k in ("msghubEnv", "msghubBrandId", "msghubChatbotId")
+        ):
+            msghub_creds_changed = True
+
+        audit.log(db, actor_sub=user.sub, action=audit.SETTINGS_UPDATE)
+        db.commit()
+
+    # msghub 재초기화는 락 밖에서 — 다른 요청의 settings GET 을 블록하지 않도록.
+    if msghub_creds_changed:
+        try:
+            from app.main import reset_msghub_client
+            await reset_msghub_client()
+        except ImportError:
+            # dev/test 환경에서 app.main 미로드 — 무시.
+            pass
+
+    return get_provider_settings(db=db)
+
+
+@router.post(
+    "/settings/test-msghub",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+async def test_msghub_auth(
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """현재 저장된 msghub 자격증명으로 인증 테스트.
+
+    성공 시 `{data: {ok: true, message: ...}}`, 실패 시 422 envelope.
+    네트워크 오류와 인증 오류를 구분해 프론트에 표시할 수 있게.
+    """
+    store = SettingsStore(db)
+    api_key = store.get("msghub.api_key")
+    api_pwd = store.get("msghub.api_pwd")
+    env = store.get("msghub.env") or "production"
+
+    if not (api_key and api_pwd):
+        return JSONResponse(
+            {"error": {
+                "code": "not_configured",
+                "message": "msghub API key/password 가 설정되지 않았습니다",
+            }},
+            status_code=422,
+        )
+
+    try:
+        from app.msghub.auth import AuthError
+        from app.msghub.client import MsghubClient
+    except ImportError:
+        return JSONResponse(
+            {"error": {
+                "code": "msghub_unavailable",
+                "message": "msghub 모듈을 로드할 수 없습니다",
+            }},
+            status_code=503,
+        )
+
+    client = MsghubClient(env=env, api_key=api_key, api_pwd=api_pwd)
+    try:
+        await client.test_auth()
+        return {"data": {"ok": True, "message": "msghub 인증 성공", "env": env}}
+    except AuthError as exc:
+        return JSONResponse(
+            {"error": {"code": "auth_failed", "message": f"인증 실패: {exc}"}},
+            status_code=422,
+        )
+    except Exception as exc:  # 네트워크/타임아웃 등
+        return JSONResponse(
+            {"error": {"code": "connect_failed", "message": f"연결 실패: {exc}"}},
+            status_code=502,
+        )
+    finally:
+        try:
+            await client.aclose()
+        except Exception:
+            pass

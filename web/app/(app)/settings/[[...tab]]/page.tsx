@@ -4,6 +4,7 @@ import {
   ApiKeysList,
   MembersList,
   OrgSettingsForm,
+  ProviderSettingsForm,
   SecuritySection,
   SettingsSidebar,
   WebhooksList,
@@ -14,6 +15,7 @@ import {
   fetchApiKeys,
   fetchMembers,
   fetchOrg,
+  fetchProviderSettings,
   fetchWebhooks,
 } from '@/lib/settings';
 
@@ -106,20 +108,9 @@ async function MembersListWrapper() {
   return <MembersList members={members} />;
 }
 
-function MessagingTabContent() {
-  return (
-    <div className="rounded-lg border border-line bg-surface p-5">
-      <h2 className="text-base font-semibold text-ink">메시징 설정</h2>
-      <p className="mt-1 text-sm text-ink-muted">
-        msghub API 인증·기본 채널·실패 알림 임계값 등.
-      </p>
-      <div className="mt-4 rounded border border-dashed border-line bg-gray-1 p-4 text-[12.5px] text-ink-dim">
-        Phase 후속에 msghub 실제 설정과 연결됩니다. 현재는 부팅 시{' '}
-        <span className="font-mono">/setup</span>에서 저장된 값이 암호화 상태로
-        보관됩니다.
-      </div>
-    </div>
-  );
+async function MessagingTabContent() {
+  const provider = await fetchProviderSettings();
+  return <ProviderSettingsForm initial={provider} section="messaging" />;
 }
 
 async function DevelopersTabContent() {
@@ -165,6 +156,12 @@ async function DevelopersTabContent() {
   );
 }
 
-function SecurityTabContent() {
-  return <SecuritySection />;
+async function SecurityTabContent() {
+  const provider = await fetchProviderSettings();
+  return (
+    <div className="flex flex-col gap-5">
+      <ProviderSettingsForm initial={provider} section="security" />
+      <SecuritySection />
+    </div>
+  );
 }
