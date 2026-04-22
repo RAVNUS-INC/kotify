@@ -263,33 +263,58 @@ def list_webhooks(db: Session = Depends(get_db)) -> dict:
     mo_last = db.execute(select(func.max(MoMessage.received_at))).scalar_one_or_none()
 
     now_utc = datetime.now(UTC)
-    day_ago_utc_iso = (now_utc - timedelta(hours=24)).isoformat()
+    day_ago_utc = now_utc - timedelta(hours=24)
 
-    def _fmt(iso_ts: str | None) -> str | None:
-        if not iso_ts:
+    def _parse_any(raw: str | None) -> datetime | None:
+        """ISO 8601 우선, 실패 시 msghub 원본 'yyyyMMddHHmmss' 포맷 시도.
+
+        report_dt 는 msghub 원본 문자열(예: "20260422043000") 이거나
+        우리가 기록한 ISO 둘 중 하나. lexicographic 비교는 포맷이 섞이면
+        잘못된 순서가 나오므로 datetime 으로 정규화해 비교.
+        """
+        if not raw:
             return None
         try:
-            dt = datetime.fromisoformat(iso_ts)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-            return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M")
+            dt = datetime.fromisoformat(raw)
         except (ValueError, TypeError):
-            return None
+            # msghub 원본 — 14자리 숫자. KST 로 간주 (msghub 규약).
+            digits = "".join(c for c in raw if c.isdigit())
+            if len(digits) == 14:
+                try:
+                    naive = datetime.strptime(digits, "%Y%m%d%H%M%S")
+                    dt = naive.replace(tzinfo=KST)
+                except ValueError:
+                    return None
+            else:
+                return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
 
-    def _status(last_iso: str | None) -> str:
+    def _fmt(raw: str | None) -> str | None:
+        dt = _parse_any(raw)
+        if dt is None:
+            return None
+        return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M")
+
+    def _status(raw: str | None) -> str:
         if not configured:
             return "not_configured"
-        if not last_iso:
+        if not raw:
             return "never_received"
-        # 24시간 이내 = ok, 그 이전 = stale.
-        if last_iso >= day_ago_utc_iso:
+        dt = _parse_any(raw)
+        if dt is None:
+            # 기록은 있는데 파싱 실패 — "수신된 적 있음" 으로 보수적 해석.
             return "ok"
-        return "stale"
+        return "ok" if dt >= day_ago_utc else "stale"
 
     def _url(suffix: str) -> str:
         if not configured:
             return ""
-        return f"{public_url}/webhook/msghub/{token}/{suffix}"
+        # ⚠️ 반드시 `/api/` 접두 — Next.js next.config.mjs 의 rewrite 는
+        # source: '/api/:path*' 만 FastAPI 로 프록시한다. 접두 없이 내보내면
+        # msghub 요청이 Next.js 404 handler 에 걸려 FastAPI 엔 도달조차 못 함.
+        return f"{public_url}/api/webhook/msghub/{token}/{suffix}"
 
     inbound = [
         {

@@ -72,7 +72,10 @@ def _verify_token(token: str, db: Session) -> bool:
         log.error("msghub.webhook_token 미설정 — 프로덕션 환경에서 웹훅 요청 거부")
         return False
 
-    return _secrets.compare_digest(token, expected)
+    # defense-in-depth: 양쪽 strip — URL path 는 브라우저/프록시가 trailing
+    # whitespace 넣지 않지만, 저장 경로에 따라 expected 에 공백이 섞여 저장된
+    # 이력이 있으면 대조 실패로 이어질 수 있어 명시 정규화.
+    return _secrets.compare_digest(token.strip(), (expected or "").strip())
 
 
 async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
