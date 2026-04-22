@@ -21,18 +21,44 @@ type MeResponse = {
   error?: { code: string; message: string };
 };
 
+type SetupStatusResponse = {
+  data?: {
+    completed?: boolean;
+    csrfToken?: string;
+  };
+  error?: { code: string; message: string };
+};
+
 async function fetchToken(): Promise<string> {
+  // 1) 인증된 사용자 — /auth/me 에서 토큰 회수.
   const res = await fetch('/api/auth/me', { cache: 'no-store' });
   const body = (await res.json()) as MeResponse;
-  if (!res.ok || body.error) {
-    throw new Error(body.error?.message ?? `CSRF 토큰을 가져올 수 없습니다 (HTTP ${res.status})`);
+  if (res.ok && !body.error) {
+    const token = body.data?.csrfToken ?? '';
+    if (token) {
+      cached = token;
+      return token;
+    }
   }
-  const token = body.data?.csrfToken ?? '';
-  if (!token) {
-    throw new Error('CSRF 토큰이 응답에 없습니다');
+
+  // 2) 비로그인 상태(401) 또는 토큰 누락 — setup wizard 경로.
+  //    /setup/status 는 공용 엔드포인트로 csrf_token 을 내려준다.
+  if (res.status === 401) {
+    const setupRes = await fetch('/api/setup/status', { cache: 'no-store' });
+    const setupBody = (await setupRes.json()) as SetupStatusResponse;
+    if (setupRes.ok && !setupBody.error) {
+      const setupToken = setupBody.data?.csrfToken ?? '';
+      if (setupToken) {
+        cached = setupToken;
+        return setupToken;
+      }
+    }
   }
-  cached = token;
-  return token;
+
+  // 3) 어느 쪽에서도 못 얻으면 의미 있는 에러.
+  throw new Error(
+    body.error?.message ?? `CSRF 토큰을 가져올 수 없습니다 (HTTP ${res.status})`,
+  );
 }
 
 /**

@@ -170,11 +170,13 @@ from app.routes.numbers import router as numbers_router
 from app.routes.reports import router as reports_router
 from app.routes.search import router as search_router
 from app.routes.settings import router as settings_router
+from app.routes.setup import router as setup_router
 from app.routes.threads import router as threads_router
 from app.routes.webhook import router as webhook_router
 
 app.include_router(health_router)
 app.include_router(webhook_router)
+app.include_router(setup_router)  # require_setup_mode 가 자체 보호 — fresh install 전용
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(campaigns_router)
