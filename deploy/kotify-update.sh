@@ -72,7 +72,9 @@ case "${1:-}" in
         pnpm install --frozen-lockfile --silent
 
         echo '{"phase": "build_web"}'
-        pnpm build >/dev/null
+        # FASTAPI_URL 은 빌드 타임에 next.config.mjs rewrites destination 에 baked 된다.
+        # 누락 시 localhost:8000 로 빠지는 과거 버그 재발 방지 목적으로 명시.
+        FASTAPI_URL=http://127.0.0.1:8080 pnpm build >/dev/null
 
         # standalone 산출물에 필요한 정적 자원 복사
         # (Next.js output: 'standalone' 은 server.js 만 만들고 static/public 을

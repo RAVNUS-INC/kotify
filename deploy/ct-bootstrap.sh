@@ -259,7 +259,10 @@ info "pnpm 의존성 설치 (--frozen-lockfile)..."
 pnpm install --frozen-lockfile --silent
 
 info "pnpm build (next build)..."
-pnpm build
+# next.config.mjs 의 rewrites destination 이 빌드 타임에 평가되므로 FASTAPI_URL 을
+# 명시해 build 에 주입. 누락 시 lib/*.ts 의 기본값은 살아있지만 rewrites URL 이
+# 잘못된 기본값(localhost:8000)으로 baked 되는 문제가 있었다.
+FASTAPI_URL=http://127.0.0.1:8080 pnpm build
 
 # standalone 산출물에 정적 자원 복사.
 # Next.js `output: 'standalone'`은 server.js만 만들고 .next/static 과 public/ 은

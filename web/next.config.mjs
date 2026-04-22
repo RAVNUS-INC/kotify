@@ -1,6 +1,9 @@
 import createBundleAnalyzer from '@next/bundle-analyzer';
 
-const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://localhost:8000';
+// 기본값은 production 경로(kotify.service가 8080에 바인딩). dev는 .env.local에서
+// FASTAPI_URL=http://localhost:8000 등으로 override. next.config.mjs 는 빌드 타임에
+// 평가되어 rewrites destination에 baked되므로, 올바른 기본값을 두는 게 중요.
+const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://127.0.0.1:8080';
 
 const withBundleAnalyzer = createBundleAnalyzer({
   // ANALYZE=true 로 실행하면 .next/analyze/*.html 리포트 생성

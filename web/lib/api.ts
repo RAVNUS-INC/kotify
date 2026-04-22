@@ -37,7 +37,7 @@ export class ApiError extends Error {
   }
 }
 
-const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://localhost:8000';
+const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://127.0.0.1:8080';
 
 /**
  * FastAPI에 절대 URL로 fetch. envelope `{ data, error }`를 파싱해 `data`만

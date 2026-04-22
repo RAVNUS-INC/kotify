@@ -12,7 +12,7 @@ export type SessionUser = {
 
 export const SESSION_COOKIE = 'sms_session';
 
-const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://localhost:8000';
+const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://127.0.0.1:8080';
 
 export function isAuthDisabled(): boolean {
   // production에서는 AUTH_DISABLED 무조건 무시 (실수 방지)

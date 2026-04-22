@@ -23,7 +23,7 @@ export async function fetchNotifications(
   if (params.unread) qs.set('unread', 'true');
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
 
-  const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://localhost:8000';
+  const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://127.0.0.1:8080';
   const res = await fetch(`${FASTAPI_URL}/notifications${suffix}`, {
     cache: 'no-store',
   });
