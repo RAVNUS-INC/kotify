@@ -1,4 +1,5 @@
 import { apiFetch } from './api';
+import { apiSend } from './csrf-client';
 import type { ChatMessage, ChatThread, ChatThreadDetail } from '@/types/chat';
 
 export type FetchThreadsParams = {
@@ -27,7 +28,7 @@ export async function sendMessageClient(
   id: string,
   text: string,
 ): Promise<ChatMessage> {
-  const res = await fetch(
+  const res = await apiSend(
     `/api/threads/${encodeURIComponent(id)}/messages`,
     {
       method: 'POST',
@@ -47,7 +48,7 @@ export async function sendMessageClient(
 }
 
 export async function markReadClient(id: string): Promise<void> {
-  await fetch(`/api/threads/${encodeURIComponent(id)}/read`, {
+  await apiSend(`/api/threads/${encodeURIComponent(id)}/read`, {
     method: 'POST',
   });
 }

@@ -1,4 +1,5 @@
 import { apiFetch } from './api';
+import { apiSend } from './csrf-client';
 import type { ApiKey, Member, Org, Webhook } from '@/types/settings';
 
 export async function fetchOrg(): Promise<Org> {
@@ -27,7 +28,7 @@ export async function fetchWebhooks(): Promise<Webhook[]> {
 export async function patchOrgClient(
   updates: Partial<Pick<Org, 'name' | 'service' | 'contact' | 'timezone'>>,
 ): Promise<Org> {
-  const res = await fetch('/api/org', {
+  const res = await apiSend('/api/org', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),

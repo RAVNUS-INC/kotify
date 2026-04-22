@@ -16,6 +16,7 @@ import {
   Radio,
 } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { apiSend } from '@/lib/csrf-client';
 import type { SenderNumber } from '@/types/number';
 import { DeviceMockup } from './DeviceMockup';
 
@@ -114,7 +115,7 @@ export function ComposeForm() {
     setError(null);
     let succeeded = false;
     try {
-      const res = await fetch('/api/campaigns', {
+      const res = await apiSend('/api/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

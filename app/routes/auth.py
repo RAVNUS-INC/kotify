@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth.oidc import get_oauth_client, parse_user_from_claims
 from app.db import get_db
 from app.models import User
-from app.security.csrf import verify_csrf
+from app.security.csrf import get_csrf_token, verify_csrf
 from app.services import audit
 
 router = APIRouter(prefix="/auth")
@@ -24,7 +24,12 @@ def _now_iso() -> str:
 
 @router.get("/me")
 async def me(request: Request) -> JSONResponse:
-    """현재 로그인한 사용자 정보를 envelope 형식으로 반환한다."""
+    """현재 로그인한 사용자 정보 + CSRF 토큰을 envelope 형식으로 반환한다.
+
+    Next.js 클라이언트가 POST/PATCH 시 이 토큰을 X-CSRF-Token 헤더로 돌려보내
+    verify_csrf 를 통과한다. 세션에 csrf_token 이 없으면 여기서 새로 생성해
+    저장한다 (double-submit 패턴).
+    """
     sub = request.session.get("user_sub") if "session" in request.scope else None
     if not sub:
         return JSONResponse(
@@ -47,6 +52,9 @@ async def me(request: Request) -> JSONResponse:
         except (TypeError, ValueError, json.JSONDecodeError):
             roles = []
 
+    # CSRF 토큰: 로그인 후 첫 /me 호출에서 발급되어 세션에 저장된다.
+    csrf_token = get_csrf_token(request)
+
     return JSONResponse(
         {
             "data": {
@@ -57,7 +65,8 @@ async def me(request: Request) -> JSONResponse:
                     "display": request.session.get("user_display", "")
                     or request.session.get("user_name", ""),
                     "roles": roles,
-                }
+                },
+                "csrfToken": csrf_token,
             }
         }
     )
