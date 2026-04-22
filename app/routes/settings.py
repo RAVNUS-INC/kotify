@@ -15,14 +15,14 @@
 from __future__ import annotations
 
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import (
@@ -234,11 +234,116 @@ def list_api_keys() -> dict:
 
 
 @router.get("/webhooks")
-def list_webhooks() -> dict:
-    """아웃바운드 웹훅 구독 — 스키마 미구현. 빈 목록과 featurePending 시그널."""
+def list_webhooks(db: Session = Depends(get_db)) -> dict:
+    """웹훅 현황 — msghub 인바운드 진단 + 아웃바운드 구독 (미구현) 표기.
+
+    **인바운드 (msghub → 우리 서버)**: 2개 엔드포인트 (report / mo) 의 URL 과
+    작동 여부를 보여준다. admin 이 이 URL 을 그대로 msghub 콘솔에 등록하면
+    되고, "작동 중인지" 를 아래 status 로 확인:
+
+      - not_configured : msghub.webhook_token 또는 app.public_url 미설정
+      - never_received : 구성은 됐지만 여태 한 번도 수신 못 함 (msghub 콘솔의
+                         URL 등록이 잘못됐거나 외부 접근이 차단된 경우)
+      - stale          : 마지막 수신이 24시간 이상 전 (발송 활동 대비 의심)
+      - ok             : 최근 24시간 이내에 수신 이력이 있음
+
+    **아웃바운드**: 스키마 미구현 (webhooks 테이블 없음).
+    """
+    from app.models import Message, MoMessage
+
+    store = SettingsStore(db)
+    token = store.get("msghub.webhook_token", "") or ""
+    public_url = (store.get("app.public_url", "") or "").rstrip("/")
+    configured = bool(token and public_url)
+
+    # 마지막 수신 시각 — 진단용만 사용 (카운트는 노출 안 함).
+    report_last = db.execute(
+        select(func.max(Message.report_dt)).where(Message.report_dt.isnot(None))
+    ).scalar_one_or_none()
+    mo_last = db.execute(select(func.max(MoMessage.received_at))).scalar_one_or_none()
+
+    now_utc = datetime.now(UTC)
+    day_ago_utc_iso = (now_utc - timedelta(hours=24)).isoformat()
+
+    def _fmt(iso_ts: str | None) -> str | None:
+        if not iso_ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(iso_ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError):
+            return None
+
+    def _status(last_iso: str | None) -> str:
+        if not configured:
+            return "not_configured"
+        if not last_iso:
+            return "never_received"
+        # 24시간 이내 = ok, 그 이전 = stale.
+        if last_iso >= day_ago_utc_iso:
+            return "ok"
+        return "stale"
+
+    def _url(suffix: str) -> str:
+        if not configured:
+            return ""
+        return f"{public_url}/webhook/msghub/{token}/{suffix}"
+
+    inbound = [
+        {
+            "id": "msghub-report",
+            "name": "msghub 발송 리포트",
+            "description": (
+                "msghub 가 발송 결과를 이 URL 로 POST 합니다. "
+                "msghub 콘솔의 '리포트 수신 URL' 에 이 주소를 등록하세요."
+            ),
+            "url": _url("report"),
+            "configured": configured,
+            "status": _status(report_last),
+            "lastReceivedAt": _fmt(report_last),
+        },
+        {
+            "id": "msghub-mo",
+            "name": "msghub 고객 회신 (MO)",
+            "description": (
+                "고객의 RCS 양방향/SMS MO 를 이 URL 로 수신합니다. "
+                "msghub 콘솔의 'MO 수신 URL' 에 등록."
+            ),
+            "url": _url("mo"),
+            "configured": configured,
+            "status": _status(mo_last),
+            "lastReceivedAt": _fmt(mo_last),
+        },
+    ]
+
+    # 진단 힌트 — 무엇을 고쳐야 할지 한 줄로.
+    hint: str | None = None
+    if not token and not public_url:
+        hint = (
+            "msghub.webhook_token 과 app.public_url 이 모두 비어 있습니다. "
+            "설정 → 메시징 / 보안 탭에서 먼저 입력하세요."
+        )
+    elif not token:
+        hint = "msghub.webhook_token 이 설정되지 않아 웹훅 수신이 거부됩니다."
+    elif not public_url:
+        hint = "app.public_url 이 비어 URL 을 완성할 수 없습니다. 보안 탭에서 설정하세요."
+
     return {
-        "data": [],
-        "meta": {"total": 0, "featurePending": True},
+        "data": inbound,
+        "meta": {
+            "total": len(inbound),
+            "hint": hint,
+            # outbound: 별개 섹션 — 프론트가 "아웃바운드 미구현" 안내 렌더.
+            "outbound": {
+                "featurePending": True,
+                "note": (
+                    "아웃바운드 웹훅 구독(send.completed, audit.* 등)은 아직 "
+                    "구현되지 않았습니다."
+                ),
+            },
+        },
     }
 
 
@@ -262,6 +367,10 @@ _PROVIDER_SECRET_KEYS: dict[str, str] = {
     "msghubApiKey": "msghub.api_key",
     "msghubApiPwd": "msghub.api_pwd",
     "sessionSecret": "session.secret",
+    # msghub 가 우리 서버로 report/MO 를 POST 할 때 path 에 포함하는 공유
+    # 시크릿. msghub 콘솔에 등록하는 URL 에 같이 들어가고, 수신 시 우리가
+    # 일치 여부를 검증. 새로 쓰면 기존 콘솔 등록 URL 이 즉시 무효화됨.
+    "msghubWebhookToken": "msghub.webhook_token",
 }
 
 
@@ -280,6 +389,9 @@ class ProviderPatchBody(BaseModel):
     msghubApiKey: Optional[str] = None
     msghubApiPwd: Optional[str] = None
     sessionSecret: Optional[str] = None
+    # msghub 웹훅 토큰 — msghub 콘솔의 report/MO 수신 URL 에 포함된다. 새 값
+    # 저장 시 기존 msghub 등록 URL 이 무효화되니 콘솔 URL 도 같이 교체 필요.
+    msghubWebhookToken: Optional[str] = None
 
 
 @router.get("/settings/provider")

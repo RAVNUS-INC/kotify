@@ -1,6 +1,12 @@
 import { apiFetch } from './api';
 import { apiSend } from './csrf-client';
-import type { ApiKey, Member, Org, Webhook } from '@/types/settings';
+import type {
+  ApiKey,
+  Member,
+  Org,
+  Webhook,
+  WebhookListMeta,
+} from '@/types/settings';
 
 export type ProviderPublicFields = {
   keycloakIssuer: string;
@@ -23,6 +29,7 @@ export type ProviderSettings = {
     msghubApiKey: ProviderSecretInfo;
     msghubApiPwd: ProviderSecretInfo;
     sessionSecret: ProviderSecretInfo;
+    msghubWebhookToken: ProviderSecretInfo;
   };
 };
 
@@ -32,6 +39,7 @@ export type ProviderPatchInput = Partial<
     msghubApiKey: string;
     msghubApiPwd: string;
     sessionSecret: string;
+    msghubWebhookToken: string;
   }
 >;
 
@@ -49,6 +57,52 @@ export async function fetchApiKeys(): Promise<ApiKey[]> {
 
 export async function fetchWebhooks(): Promise<Webhook[]> {
   return apiFetch<Webhook[]>('/webhooks');
+}
+
+export type WebhookListResult = {
+  webhooks: Webhook[];
+  meta: WebhookListMeta;
+};
+
+/**
+ * meta(힌트·아웃바운드 미구현 안내)까지 같이 받는 버전. 서버 응답 envelope
+ * 에서 data + meta 를 동시에 파싱하려면 apiFetch 대신 fetch 를 직접.
+ */
+export async function fetchWebhooksWithMeta(): Promise<WebhookListResult> {
+  const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://127.0.0.1:8080';
+  // Server component 에서 호출 — cookies 수동 forward (lib/api.ts 와 동일 패턴).
+  let cookieHeader = '';
+  try {
+    const { cookies } = await import('next/headers');
+    const all = cookies().getAll();
+    cookieHeader = all.map((c) => `${c.name}=${c.value}`).join('; ');
+  } catch (err) {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'digest' in err &&
+      typeof (err as { digest?: unknown }).digest === 'string' &&
+      (err as { digest: string }).digest.startsWith('DYNAMIC_SERVER_USAGE')
+    ) {
+      throw err;
+    }
+  }
+  const res = await fetch(`${FASTAPI_URL}/webhooks`, {
+    cache: 'no-store',
+    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+  });
+  const body = (await res.json()) as {
+    data?: Webhook[];
+    meta?: WebhookListMeta;
+    error?: { code: string; message: string };
+  };
+  if (!res.ok || body.error || !body.data) {
+    throw new Error(body.error?.message ?? `HTTP ${res.status}`);
+  }
+  return {
+    webhooks: body.data,
+    meta: body.meta ?? { total: body.data.length },
+  };
 }
 
 /**

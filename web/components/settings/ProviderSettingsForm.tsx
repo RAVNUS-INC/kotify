@@ -43,6 +43,7 @@ export function ProviderSettingsForm({
   const [msghubApiKey, setMsghubApiKey] = useState('');
   const [msghubApiPwd, setMsghubApiPwd] = useState('');
   const [sessionSecret, setSessionSecret] = useState('');
+  const [msghubWebhookToken, setMsghubWebhookToken] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -62,6 +63,7 @@ export function ProviderSettingsForm({
       if (msghubChatbotId.trim()) payload.msghubChatbotId = msghubChatbotId.trim();
       if (msghubApiKey) payload.msghubApiKey = msghubApiKey;
       if (msghubApiPwd) payload.msghubApiPwd = msghubApiPwd;
+      if (msghubWebhookToken) payload.msghubWebhookToken = msghubWebhookToken;
     } else {
       if (keycloakIssuer.trim()) payload.keycloakIssuer = keycloakIssuer.trim();
       if (keycloakClientId.trim()) payload.keycloakClientId = keycloakClientId.trim();
@@ -77,6 +79,7 @@ export function ProviderSettingsForm({
       setMsghubApiKey('');
       setMsghubApiPwd('');
       setSessionSecret('');
+      setMsghubWebhookToken('');
       setMsg({ kind: 'ok', text: '저장됨' });
       router.refresh();
     } catch (err) {
@@ -171,6 +174,55 @@ export function ProviderSettingsForm({
                 disabled={submitting}
               />
             </Field>
+            <Field
+              label="웹훅 토큰"
+              hint={`${secretHint(initial.secrets.msghubWebhookToken)} · msghub 콘솔 수신 URL 의 경로에 포함됩니다. 변경 시 콘솔 URL 도 반드시 재등록.`}
+            >
+              <div className="flex items-stretch gap-2">
+                <Input
+                  type="text"
+                  value={msghubWebhookToken}
+                  onChange={(e) => setMsghubWebhookToken(e.target.value)}
+                  placeholder={
+                    initial.secrets.msghubWebhookToken.configured
+                      ? '변경 시에만 입력'
+                      : '랜덤 토큰을 생성하거나 직접 입력'
+                  }
+                  autoComplete="new-password"
+                  disabled={submitting}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
+                  onClick={() => {
+                    // 32-hex 랜덤 — crypto.getRandomValues 면 충분한 엔트로피.
+                    const arr = new Uint8Array(16);
+                    crypto.getRandomValues(arr);
+                    const hex = Array.from(arr)
+                      .map((b) => b.toString(16).padStart(2, '0'))
+                      .join('');
+                    setMsghubWebhookToken(hex);
+                  }}
+                  disabled={submitting}
+                  icon={<Icon name="refresh" size={12} />}
+                >
+                  생성
+                </Button>
+              </div>
+            </Field>
+            <div className="md:col-span-2 rounded border border-line bg-gray-1 p-3 text-[12px] text-ink-muted">
+              저장 후{' '}
+              <a
+                href="/settings/developers"
+                className="text-brand underline hover:text-brand-hover"
+              >
+                설정 → 개발자
+              </a>{' '}
+              탭에서 생성된 웹훅 URL 을 복사해 msghub 콘솔의 리포트/MO
+              수신 URL 에 등록하세요.
+            </div>
           </div>
         </section>
       ) : null}

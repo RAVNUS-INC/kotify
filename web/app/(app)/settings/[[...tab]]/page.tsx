@@ -16,7 +16,7 @@ import {
   fetchMembers,
   fetchOrg,
   fetchProviderSettings,
-  fetchWebhooks,
+  fetchWebhooksWithMeta,
 } from '@/lib/settings';
 
 const VALID_TABS: ReadonlyArray<SettingsTab> = [
@@ -114,7 +114,10 @@ async function MessagingTabContent() {
 }
 
 async function DevelopersTabContent() {
-  const [keys, hooks] = await Promise.all([fetchApiKeys(), fetchWebhooks()]);
+  const [keys, hooksResult] = await Promise.all([
+    fetchApiKeys(),
+    fetchWebhooksWithMeta(),
+  ]);
   return (
     <div className="flex flex-col gap-5">
       <section
@@ -139,18 +142,17 @@ async function DevelopersTabContent() {
         aria-label="웹훅"
         className="rounded-lg border border-line bg-surface p-5"
       >
-        <header className="mb-3 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-ink">웹훅</h2>
-            <p className="mt-0.5 text-[12.5px] text-ink-muted">
-              발송 결과·감사 이벤트를 실시간으로 전달합니다.
-            </p>
-          </div>
-          <Button variant="secondary" size="sm" icon={<Icon name="plus" size={12} />} disabled>
-            웹훅 추가
-          </Button>
+        <header className="mb-3">
+          <h2 className="text-base font-semibold text-ink">웹훅</h2>
+          <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            msghub 가 발송 리포트와 고객 회신을 여기로 POST 합니다. 이 URL 을
+            msghub 콘솔에 등록하세요.
+          </p>
         </header>
-        <WebhooksList webhooks={hooks} />
+        <WebhooksList
+          webhooks={hooksResult.webhooks}
+          meta={hooksResult.meta}
+        />
       </section>
     </div>
   );
