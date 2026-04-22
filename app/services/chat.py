@@ -64,6 +64,40 @@ def _coalesce_ts(*values: str | None) -> str:
     return ""
 
 
+def _parse_ts_for_sort(raw: str | None) -> float:
+    """정렬용 통일 키 — ISO 8601 또는 msghub 네이티브(yyyyMMddHHmmss) 모두 지원.
+
+    ISO 와 msghub 네이티브 포맷이 섞이면 lexicographic 비교가 틀어진다
+    ('2026-04-22T...' vs '20260422...' 에서 '-' < '0' 이라 ISO 가 항상 앞).
+    실시간 값으로 변환 후 epoch float 를 돌려 정렬 키로 사용.
+    실패 시 0.0 반환 (가장 앞).
+    """
+    if not raw:
+        return 0.0
+    # 1차: ISO 8601 시도.
+    try:
+        from datetime import UTC as _UTC, datetime as _dt
+        s = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
+        d = _dt.fromisoformat(s)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_UTC)
+        return d.timestamp()
+    except (ValueError, TypeError):
+        pass
+    # 2차: msghub 네이티브 yyyyMMddHHmmss (또는 14자리 숫자).
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) >= 14:
+        try:
+            from datetime import datetime as _dt
+            from zoneinfo import ZoneInfo as _Zi
+            naive = _dt.strptime(digits[:14], "%Y%m%d%H%M%S")
+            kst = naive.replace(tzinfo=_Zi("Asia/Seoul"))
+            return kst.timestamp()
+        except (ValueError, TypeError):
+            pass
+    return 0.0
+
+
 def list_threads(
     db: Session, limit: int = 50, offset: int = 0
 ) -> tuple[list[ChatThread], int]:
@@ -181,7 +215,8 @@ def list_threads(
             )
         )
 
-    built.sort(key=lambda t: t.last_timestamp, reverse=True)
+    # last_timestamp 도 ISO 와 msghub 원본 섞여있어 parse 해서 정렬.
+    built.sort(key=lambda t: _parse_ts_for_sort(t.last_timestamp), reverse=True)
     total = len(built)
     return built[offset : offset + limit], total
 
@@ -234,7 +269,9 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
             )
         )
 
-    out.sort(key=lambda m: m.timestamp)
+    # ISO 와 msghub 원본 포맷 섞여 있어 lexicographic 비교는 틀어진다.
+    # _parse_ts_for_sort 로 epoch float 변환 후 정렬.
+    out.sort(key=lambda m: _parse_ts_for_sort(m.timestamp))
     return out
 
 
