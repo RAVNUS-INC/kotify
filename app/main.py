@@ -209,11 +209,25 @@ add_session_middleware(app, _session_secret)
 # ── 전역 예외 핸들러 (JSON 반환) ─────────────────────────────────────────────
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """HTTP 예외 — envelope 형식 JSON 반환."""
-    return JSONResponse(
-        {"error": {"code": f"http_{exc.status_code}", "message": exc.detail}},
-        status_code=exc.status_code,
-    )
+    """HTTP 예외 — envelope 형식 JSON 반환.
+
+    라우트에서 `HTTPException(detail={"code": ..., "message": ...})` 로 구조화된
+    에러 디테일을 전달한 경우, 이를 envelope 의 `error` 로 그대로 사용한다.
+    그렇지 않으면 기존처럼 `http_{status}` 코드와 문자열 detail 을 message 로 감싼다.
+    """
+    detail = exc.detail
+    if (
+        isinstance(detail, dict)
+        and isinstance(detail.get("code"), str)
+        and isinstance(detail.get("message"), str)
+    ):
+        # fields 등 optional 추가 정보는 그대로 보존.
+        error: dict = {"code": detail["code"], "message": detail["message"]}
+        if isinstance(detail.get("fields"), dict):
+            error["fields"] = detail["fields"]
+    else:
+        error = {"code": f"http_{exc.status_code}", "message": detail}
+    return JSONResponse({"error": error}, status_code=exc.status_code)
 
 
 @app.exception_handler(RequestValidationError)

@@ -1,150 +1,299 @@
 """스레드(대화방) API 라우트 — S5 인박스, S6 스레드 상세.
 
-Phase 6c: mock 데이터 + SSE 주소 확보.
-Phase 6d: 메시지 발송 POST + 읽음 표시. SSE 실제 이벤트 발행은 Phase 7+.
+실 DB (campaigns + messages + mo_messages) 기반. services.chat.list_threads
+/ get_thread 를 재사용해 대화방 UI 와 동일한 머지 로직 유지.
+
+api-contract.md §S5/S6 계약 — web/types/chat.ts 의 ChatThread /
+ChatThreadDetail / ChatMessage shape 반환.
+
+thread id 규약: "{caller}:{phone}" (콜론 구분, URL safe).
 """
 from __future__ import annotations
 
 import asyncio
-import uuid
-from datetime import datetime
-from typing import List, Optional
+from datetime import UTC, datetime
+from typing import Optional
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import func, select, tuple_
+from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
+from app.db import get_db
+from app.models import Campaign, Message, User
 from app.security.csrf import verify_csrf
+from app.services.chat import (
+    ChatMessage as ServiceChatMessage,
+    ChatThread as ServiceChatThread,
+    get_thread,
+    list_threads,
+)
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
 )
 
-# in-memory mock 데이터 동시성 보호 (Phase 10 실제 DB 도입 시 제거)
-_mock_lock = asyncio.Lock()
+KST = ZoneInfo("Asia/Seoul")
 
 
-_MOCK_THREADS: List[dict] = [
-    {
-        "id": "t1",
-        "name": "박지훈",
-        "phone": "010-1234-5678",
-        "preview": "언제 배송되나요?",
-        "time": "14:02",
-        "unread": True,
-        "channel": "sms",
-        "lastCampaign": "4월 공지",
-        "messages": [
-            {"id": "m1-1", "side": "us", "kind": "sms", "text": "4월 공지사항입니다. 회사 창립 기념으로 월말 휴무 안내.", "time": "12:00"},
-            {"id": "m1-2", "side": "them", "kind": "sms", "text": "언제 배송되나요?", "time": "14:02"},
-        ],
-    },
-    {
-        "id": "t2",
-        "name": "이수진",
-        "phone": "010-9876-5432",
-        "preview": "네 확인했습니다 감사합니다",
-        "time": "13:58",
-        "unread": True,
-        "channel": "rcs",
-        "lastCampaign": "마케팅 뉴스레터",
-        "messages": [
-            {"id": "m2-1", "side": "us", "kind": "rcs", "text": "구독해주셔서 감사합니다.", "time": "13:50"},
-            {"id": "m2-2", "side": "them", "kind": "rcs", "text": "네 확인했습니다 감사합니다", "time": "13:58"},
-        ],
-    },
-    {
-        "id": "t3",
-        "name": "김민재",
-        "phone": "010-3333-4444",
-        "preview": "회의 10분 뒤로 미뤄도 될까요?",
-        "time": "13:42",
-        "unread": True,
-        "channel": "sms",
-        "lastCampaign": "회의 리마인더",
-        "messages": [
-            {"id": "m3-1", "side": "us", "kind": "sms", "text": "오후 회의 14시 시작 예정입니다.", "time": "13:30"},
-            {"id": "m3-2", "side": "them", "kind": "sms", "text": "회의 10분 뒤로 미뤄도 될까요?", "time": "13:42"},
-        ],
-    },
-    {
-        "id": "t4",
-        "name": "정태영",
-        "phone": "010-5555-6666",
-        "preview": "네 알겠습니다",
-        "time": "11:30",
-        "unread": False,
-        "channel": "sms",
-        "lastCampaign": "인사팀 공지",
-        "messages": [
-            {"id": "m4-1", "side": "us", "kind": "sms", "text": "금요일 단체 회식 장소 안내드립니다.", "time": "11:20"},
-            {"id": "m4-2", "side": "them", "kind": "sms", "text": "네 알겠습니다", "time": "11:30"},
-        ],
-    },
-    {
-        "id": "t5",
-        "name": "최서연",
-        "phone": "010-7777-8888",
-        "preview": "확인 부탁드려요",
-        "time": "10:15",
-        "unread": False,
-        "channel": "kakao",
-        "lastCampaign": "카톡 공지",
-        "messages": [
-            {"id": "m5-1", "side": "them", "kind": "kakao", "text": "확인 부탁드려요", "time": "10:15"},
-        ],
-    },
-    {
-        "id": "t6",
-        "name": "김영호",
-        "phone": "010-9999-0000",
-        "preview": "감사합니다 수고하세요",
-        "time": "09:48",
-        "unread": False,
-        "channel": "sms",
-        "lastCampaign": "아침 공지",
-        "messages": [
-            {"id": "m6-1", "side": "us", "kind": "sms", "text": "아침 조회 시작합니다.", "time": "09:45"},
-            {"id": "m6-2", "side": "them", "kind": "sms", "text": "감사합니다 수고하세요", "time": "09:48"},
-        ],
-    },
-]
+# ── 공통 변환 헬퍼 ───────────────────────────────────────────────────────────
 
 
-def _summary(t: dict) -> dict:
-    return {k: v for k, v in t.items() if k != "messages"}
+def _hhmm(iso_ts: str | None) -> str:
+    """UTC ISO → 'HH:MM' KST. 실패 시 빈 문자열."""
+    if not iso_ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(KST).strftime("%H:%M")
+    except (ValueError, TypeError):
+        return ""
+
+
+def _channel_from_mt(msg_channel: str | None) -> str:
+    """Message.channel('RCS'/'SMS'/'LMS'/'MMS') → ChatChannel('rcs'/'sms'/'kakao')."""
+    if not msg_channel:
+        return "sms"
+    low = msg_channel.lower()
+    if low == "rcs":
+        return "rcs"
+    if low == "kakao":
+        return "kakao"
+    return "sms"  # SMS/LMS/MMS 모두 sms 버블로 통일
+
+
+def _thread_id(caller: str, phone: str) -> str:
+    """thread id 규약: 콜론으로 caller:phone. 역parse 는 split(':',1)."""
+    return f"{caller}:{phone}"
+
+
+def _parse_thread_id(tid: str) -> tuple[str, str] | None:
+    if ":" not in tid:
+        return None
+    caller, phone = tid.split(":", 1)
+    if not caller or not phone:
+        return None
+    return caller, phone
+
+
+def _service_thread_to_ts(t: ServiceChatThread, last_channel: str) -> dict:
+    """services.chat.ChatThread → web/types/chat.ts ChatThread shape."""
+    row: dict = {
+        "id": _thread_id(t.caller, t.phone),
+        "name": t.phone,  # 연락처 이름 미연결 — 번호로 표시
+        "phone": t.phone,
+        "preview": (t.last_body or "")[:60],
+        "time": _hhmm(t.last_timestamp),
+        "channel": last_channel,
+    }
+    if t.unanswered:
+        row["unread"] = True
+    return row
+
+
+def _batch_last_mt_channels(
+    db: Session, pairs: set[tuple[str, str]]
+) -> dict[tuple[str, str], str]:
+    """여러 (caller, phone) 의 최근 MT 채널을 2쿼리로 집계 (N+1 회피).
+
+    1) GROUP BY 로 (caller, phone) 별 max(message.id) 확보
+    2) 해당 id 들로 Message.channel 조회 후 dict 반환
+
+    NOTE: `tuple_((col1, col2)).in_(pairs)` 로 정확 매칭. 분해한 `caller IN (...)
+    AND phone IN (...)` 는 cross-product 라 유령 쌍 (A,2)(B,1) 까지 스캔/반환
+    하므로 금지.
+    """
+    if not pairs:
+        return {}
+    pair_list = list(pairs)
+
+    subq = (
+        select(
+            Campaign.caller_number.label("c"),
+            Message.to_number.label("p"),
+            func.max(Message.id).label("last_id"),
+        )
+        .join(Campaign, Campaign.id == Message.campaign_id)
+        .where(
+            tuple_(Campaign.caller_number, Message.to_number).in_(pair_list)
+        )
+        .group_by(Campaign.caller_number, Message.to_number)
+    ).subquery()
+
+    rows = db.execute(
+        select(subq.c.c, subq.c.p, Message.channel).join(
+            Message, Message.id == subq.c.last_id
+        )
+    ).all()
+    return {(r.c, r.p): _channel_from_mt(r.channel) for r in rows if r.c and r.p}
+
+
+def _service_message_to_ts(m: ServiceChatMessage) -> dict:
+    """services.chat.ChatMessage → ChatMessage TS shape."""
+    side = "us" if m.direction == "OUT" else "them"
+    kind = _channel_from_mt(m.channel) if m.direction == "OUT" else "rcs"
+    # 수신(IN) 메시지는 RCS 양방향 MO 인 경우가 많아 기본 'rcs'. 향후 product_code
+    # 기준 세밀 분기 가능 (예: SMSMO → sms).
+    if m.direction == "IN" and m.product_code:
+        pc = m.product_code.upper()
+        if pc.startswith("SMS") or pc == "SMSMO":
+            kind = "sms"
+        elif pc.startswith("KAKAO"):
+            kind = "kakao"
+
+    id_suffix = f"{m.direction.lower()}-{m.mo_id or m.msg_id or 'x'}"
+    return {
+        "id": f"m-{id_suffix}",
+        "side": side,
+        "kind": kind,
+        "text": m.body or "",
+        "time": _hhmm(m.timestamp),
+    }
+
+
+def _campaign_label(subject: str | None, content: str | None, cid: int) -> str:
+    """(subject, content, id) → 표시 라벨. list/detail 공용."""
+    if subject:
+        return subject
+    if content:
+        first = content.strip().split("\n", 1)[0]
+        return first[:24] + ("…" if len(first) > 24 else "")
+    return f"캠페인 #{cid}"
+
+
+def _batch_last_campaign_labels(
+    db: Session, pairs: set[tuple[str, str]]
+) -> dict[tuple[str, str], str]:
+    """(caller, phone) → 최근 캠페인 라벨 배치 집계 (2쿼리).
+
+    채널과 라벨이 *같은* 최근 메시지에서 파생되도록 `max(Message.id)` 로 앵커.
+    max(Campaign.id) 를 쓰면 "가장 최근 캠페인" 과 "가장 최근 전송 이벤트" 가
+    불일치할 수 있어 UX 상 채널/라벨이 다른 캠페인을 가리키는 bug 가 발생 가능.
+    """
+    if not pairs:
+        return {}
+    pair_list = list(pairs)
+
+    subq = (
+        select(
+            Campaign.caller_number.label("c"),
+            Message.to_number.label("p"),
+            func.max(Message.id).label("last_mid"),
+        )
+        .join(Campaign, Campaign.id == Message.campaign_id)
+        .where(
+            tuple_(Campaign.caller_number, Message.to_number).in_(pair_list)
+        )
+        .group_by(Campaign.caller_number, Message.to_number)
+    ).subquery()
+
+    # 최근 메시지 → 해당 메시지의 campaign 를 JOIN 으로 따라간다.
+    rows = db.execute(
+        select(subq.c.c, subq.c.p, Campaign.id, Campaign.subject, Campaign.content)
+        .join(Message, Message.id == subq.c.last_mid)
+        .join(Campaign, Campaign.id == Message.campaign_id)
+    ).all()
+    return {
+        (r.c, r.p): _campaign_label(r.subject, r.content, r.id)
+        for r in rows
+        if r.c and r.p
+    }
+
+
+# ── S5: GET /threads ─────────────────────────────────────────────────────────
 
 
 @router.get("/threads")
-async def list_threads(
+def api_list_threads(
     q: Optional[str] = None,
     unread: Optional[bool] = None,
+    db: Session = Depends(get_db),
 ) -> dict:
-    """스레드 목록. q(검색), unread(안읽음만) 필터."""
-    threads = _MOCK_THREADS
+    """스레드 목록. q(번호/본문 부분 매치), unread(미답만) 필터."""
+    threads, _total = list_threads(db, limit=200, offset=0)
+
     if q:
         ql = q.lower()
         threads = [
             t
             for t in threads
-            if ql in t["name"].lower() or ql in t["preview"].lower()
+            if ql in (t.phone or "").lower()
+            or ql in (t.last_body or "").lower()
         ]
+
     if unread:
-        threads = [t for t in threads if t.get("unread")]
-    return {"data": [_summary(t) for t in threads]}
+        threads = [t for t in threads if t.unanswered]
+
+    # N+1 회피: 필터링 후 남은 쌍을 한 번에 수집 → 2쿼리 × 2종 = 4쿼리로 고정.
+    pairs: set[tuple[str, str]] = {(t.caller, t.phone) for t in threads}
+    channels = _batch_last_mt_channels(db, pairs)
+    labels = _batch_last_campaign_labels(db, pairs)
+
+    rows: list[dict] = []
+    for t in threads:
+        key = (t.caller, t.phone)
+        last_channel = channels.get(key, "sms")
+        row = _service_thread_to_ts(t, last_channel)
+        label = labels.get(key)
+        if label:
+            row["lastCampaign"] = label
+        rows.append(row)
+
+    return {"data": rows}
 
 
-@router.get("/threads/{tid}")
-async def get_thread(tid: str):
-    """특정 스레드 상세 (메시지 포함)."""
-    for t in _MOCK_THREADS:
-        if t["id"] == tid:
-            return {"data": t}
-    return JSONResponse(
-        {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
-        status_code=404,
-    )
+# ── S6: GET /threads/{id} ────────────────────────────────────────────────────
+
+
+@router.get("/threads/{tid}", response_model=None)
+def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONResponse:
+    """스레드 상세 — 메시지 포함."""
+    parsed = _parse_thread_id(tid)
+    if parsed is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    caller, phone = parsed
+
+    messages = get_thread(db, caller, phone)
+    if not messages:
+        # 메시지 없는 thread id 는 존재하지 않음으로 처리.
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+
+    # 최근 timestamp / body / unanswered 도출 — thread 요약.
+    last = messages[-1]
+    unanswered = last.direction == "IN"
+    # 단건 조회도 batch 헬퍼 재사용 — pair 1개면 2쿼리로 동일, 코드 경로 통일.
+    pair = {(caller, phone)}
+    last_channel = _batch_last_mt_channels(db, pair).get((caller, phone), "sms")
+    label = _batch_last_campaign_labels(db, pair).get((caller, phone))
+
+    detail: dict = {
+        "id": tid,
+        "name": phone,
+        "phone": phone,
+        "preview": (last.body or "")[:60],
+        "time": _hhmm(last.timestamp),
+        "channel": last_channel,
+        "messages": [_service_message_to_ts(m) for m in messages],
+    }
+    if unanswered:
+        detail["unread"] = True
+    if label:
+        detail["lastCampaign"] = label
+    return {"data": detail}
+
+
+# ── POST /threads/{id}/messages — 답장 발송 ──────────────────────────────────
 
 
 class MessageCreateBody(BaseModel):
@@ -159,63 +308,103 @@ class MessageCreateBody(BaseModel):
         return stripped
 
 
-def _find_thread(tid: str) -> Optional[dict]:
-    for t in _MOCK_THREADS:
-        if t["id"] == tid:
-            return t
-    return None
+@router.post(
+    "/threads/{tid}/messages",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+async def api_post_message(
+    tid: str,
+    body: MessageCreateBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """답장 발송 — 단건 캠페인 생성 후 msghub 로 전송.
 
-
-@router.post("/threads/{tid}/messages", dependencies=[Depends(verify_csrf)])
-async def post_message(tid: str, body: MessageCreateBody):
-    """새 메시지 전송 (mock).
-
-    _mock_lock로 동시 append 방지. 실제 DB 도입 시 row-level lock으로 대체.
+    NOTE: 현재 구현은 단방향 RCS(RPSSAXX001) 로 발송. 양방향 CHAT(RPCSAXX001)
+    은 고객의 MO 와 연결된 replyId 가 필요해 별도 플로우 (추후 구현).
     """
-    async with _mock_lock:
-        thread = _find_thread(tid)
-        if thread is None:
-            return JSONResponse(
-                {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
-                status_code=404,
-            )
+    parsed = _parse_thread_id(tid)
+    if parsed is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    caller, phone = parsed
 
-        now_hhmm = datetime.now().strftime("%H:%M")
-        message = {
-            "id": f"m-{uuid.uuid4().hex[:8]}",
-            "side": "us",
-            "kind": thread["channel"],
-            "text": body.text,
-            "time": now_hhmm,
+    from app.main import get_msghub_client
+    from app.services.chat import send_reply
+
+    client = get_msghub_client()
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "msghub_unavailable", "message": "msghub 클라이언트 미초기화"},
+        )
+
+    try:
+        campaign = await send_reply(
+            db=db,
+            msghub_client=client,
+            user=user,
+            caller=caller,
+            phone=phone,
+            content=body.text,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_failed", "message": str(exc)},
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("send_reply failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "send_failed", "message": "답장 전송 중 오류가 발생했습니다"},
+        )
+
+    now_kst = datetime.now(UTC).astimezone(KST)
+    return {
+        "data": {
+            "message": {
+                "id": f"m-out-{campaign.id}",
+                "side": "us",
+                "kind": "sms",  # 단방향 RCS 일 수도 있지만 preview 는 sms 안전값
+                "text": body.text,
+                "time": now_kst.strftime("%H:%M"),
+            }
         }
-        thread.setdefault("messages", []).append(message)
-        thread["preview"] = body.text[:60]
-        thread["time"] = now_hhmm
-        thread["unread"] = False
-
-    return {"data": {"message": message}}
+    }
 
 
-@router.post("/threads/{tid}/read", dependencies=[Depends(verify_csrf)])
-async def mark_read(tid: str):
-    """스레드 읽음 표시."""
-    async with _mock_lock:
-        thread = _find_thread(tid)
-        if thread is None:
-            return JSONResponse(
-                {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
-                status_code=404,
-            )
-        thread["unread"] = False
+@router.post(
+    "/threads/{tid}/read",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+def api_mark_read(tid: str) -> dict | JSONResponse:
+    """스레드 읽음 표시 — 현재 스키마엔 read flag 없음. no-op 으로 200 반환.
+
+    (UI 에서 로컬 상태 갱신을 위한 확인 응답 역할. 향후 thread_reads 테이블
+    추가 시 실 DB write 로 교체.)
+    """
+    parsed = _parse_thread_id(tid)
+    if parsed is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
+            status_code=404,
+        )
     return {"data": {"id": tid, "unread": False}}
+
+
+# ── SSE stream (Phase 후속) ───────────────────────────────────────────────────
 
 
 @router.get("/chat/stream")
 async def chat_stream() -> StreamingResponse:
-    """SSE 스트림. Phase 6c에선 30초 keep-alive ping만 전송.
-
-    Phase 6d에서 message.new / thread.updated / session.expired 이벤트 발행 예정.
-    """
+    """SSE — 현재는 30초 keep-alive ping 만. 실제 이벤트(message.new,
+    thread.updated, session.expired) 는 DB trigger / PubSub 도입 후 발행."""
 
     async def gen():
         try:
