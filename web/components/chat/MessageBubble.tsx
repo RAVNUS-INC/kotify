@@ -15,15 +15,16 @@ export type MessageBubbleProps = {
 const BASE =
   'max-w-[78%] rounded-2xl px-3 py-2 text-[13px] leading-[1.55] break-words whitespace-pre-wrap';
 
-const styles: Record<MessageSide, Record<MessageKind, string>> = {
+// 채널(RCS/SMS)은 색이 아니라 타임스탬프 옆 텍스트 라벨로 표시 — 색맹/프린트
+// 환경에서도 정보 유실 없도록. 발신/수신만 색으로 구분.
+// 카카오 친구톡은 별도 플랫폼 UI 라 브랜드 인지 위해 노랑/올리브 톤 유지.
+const STYLES: Record<MessageSide, Record<'default' | 'kakao', string>> = {
   them: {
-    rcs: 'bg-gray-1 border border-gray-3 text-ink',
-    sms: 'bg-gray-2 text-ink',
+    default: 'bg-gray-1 border border-gray-3 text-ink',
     kakao: 'bg-[#fee500] text-[#2e2a1d]',
   },
   us: {
-    rcs: 'bg-brand text-white',
-    sms: 'bg-gray-11 text-white',
+    default: 'bg-brand text-white',
     kakao: 'bg-[#2e2a1d] text-white',
   },
 };
@@ -41,6 +42,10 @@ export function MessageBubble({
   children,
   className,
 }: MessageBubbleProps) {
+  const bubbleStyle = STYLES[side][kind === 'kakao' ? 'kakao' : 'default'];
+  // `01:38 / RCS` 형식 — 시간이 없으면 채널만, 채널이 없으면 시간만.
+  const meta = timestamp ? `${timestamp} / ${KIND_LABEL[kind]}` : KIND_LABEL[kind];
+
   return (
     <div
       className={cn(
@@ -49,17 +54,21 @@ export function MessageBubble({
         className,
       )}
     >
-      {side === 'us' && timestamp && (
-        <span className="font-mono text-[10px] text-ink-dim">{timestamp}</span>
+      {side === 'us' && (
+        <span className="whitespace-nowrap font-mono text-[10px] text-ink-dim">
+          {meta}
+        </span>
       )}
       <div
-        className={cn(BASE, styles[side][kind])}
+        className={cn(BASE, bubbleStyle)}
         aria-label={`${side === 'us' ? '보낸' : '받은'} ${KIND_LABEL[kind]} 메시지`}
       >
         {children}
       </div>
-      {side === 'them' && timestamp && (
-        <span className="font-mono text-[10px] text-ink-dim">{timestamp}</span>
+      {side === 'them' && (
+        <span className="whitespace-nowrap font-mono text-[10px] text-ink-dim">
+          {meta}
+        </span>
       )}
     </div>
   );
