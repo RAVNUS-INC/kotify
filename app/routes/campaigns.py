@@ -203,7 +203,7 @@ def list_campaigns(
 # ── S4: GET /campaigns/{id} ─────────────────────────────────────────────────
 
 
-@router.get("/campaigns/{cid}")
+@router.get("/campaigns/{cid}", response_model=None)
 def get_campaign(cid: str, db: Session = Depends(get_db)) -> dict | JSONResponse:
     """캠페인 상세 — 기본 정보 + 수신자 샘플 20건 + breakdown."""
     try:
