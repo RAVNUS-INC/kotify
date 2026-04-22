@@ -1,6 +1,7 @@
 import { PageHeader } from '@/components/shell';
-import { GroupCard } from '@/components/groups';
-import { Button, EmptyState, Icon, ListSearchInput } from '@/components/ui';
+import { GroupCard, GroupsAdminShell } from '@/components/groups';
+import { EmptyState, ListSearchInput } from '@/components/ui';
+import { getSession, hasRole } from '@/lib/auth';
 import { fetchGroups } from '@/lib/groups';
 
 type PageProps = {
@@ -9,23 +10,18 @@ type PageProps = {
 
 export default async function GroupsPage({ searchParams }: PageProps) {
   const q = searchParams?.q;
-  const groups = await fetchGroups({ q });
+  const [session, groups] = await Promise.all([
+    getSession(),
+    fetchGroups({ q }),
+  ]);
+  const canManage = session ? hasRole(session, 'admin', 'owner', 'sender') : false;
 
   return (
     <div className="k-page">
       <PageHeader
         title="그룹"
         sub={`${groups.length}개 그룹`}
-        actions={
-          <>
-            <Button variant="ghost" size="sm" icon={<Icon name="refresh" size={12} />}>
-              동기화
-            </Button>
-            <Button variant="primary" size="sm" icon={<Icon name="plus" size={12} />}>
-              새 그룹
-            </Button>
-          </>
-        }
+        actions={<GroupsAdminShell canManage={canManage} />}
       />
 
       <div className="mb-4">

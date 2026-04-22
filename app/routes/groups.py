@@ -18,7 +18,9 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
@@ -29,6 +31,7 @@ from app.models import (
     ContactGroup,
     ContactGroupMember,
     Message,
+    User,
 )
 from app.routes.contacts import (
     _batch_group_ids,
@@ -36,7 +39,17 @@ from app.routes.contacts import (
     _contact_to_dict,
     _fmt_kst_dt,
 )
-from app.services.groups import list_groups as svc_list_groups
+from app.security.csrf import verify_csrf
+from app.services import audit
+from app.services.groups import (
+    add_members as svc_add_members,
+    bulk_add_by_phones as svc_bulk_add_by_phones,
+    create_group as svc_create_group,
+    delete_group as svc_delete_group,
+    list_groups as svc_list_groups,
+    remove_members as svc_remove_members,
+    update_group as svc_update_group,
+)
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -234,3 +247,312 @@ def get_group_route(gid: str, db: Session = Depends(get_db)) -> dict | JSONRespo
         meta["membersHasMore"] = True
         meta["membersTruncatedTo"] = _GROUP_MEMBERS_LIMIT
     return {"data": base, **({"meta": meta} if meta else {})}
+
+
+# ── CRUD: POST /groups / PATCH /groups/{id} / DELETE /groups/{id} ─────────────
+
+
+class GroupCreateBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("이름은 비어 있을 수 없습니다")
+        return s
+
+
+class GroupUpdateBody(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name_opt(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        if not s:
+            raise ValueError("이름은 비어 있을 수 없습니다")
+        return s
+
+
+@router.post("/groups", dependencies=[Depends(verify_csrf)], response_model=None)
+def create_group_route(
+    body: GroupCreateBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """그룹 생성. name 은 UNIQUE — 충돌 시 409."""
+    try:
+        g = svc_create_group(
+            db, name=body.name, created_by=user.sub, description=body.description,
+        )
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        return JSONResponse(
+            {"error": {
+                "code": "duplicate_name",
+                "message": "같은 이름의 그룹이 이미 있습니다",
+                "fields": {"name": "중복"},
+            }},
+            status_code=409,
+        )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="GROUP_CREATE",
+        target=f"group:{g.id}",
+        detail={"name": g.name},
+    )
+    db.commit()
+    return {"data": _group_to_dict(g, counts=(0, 0), last_camp_at=None)}
+
+
+@router.patch(
+    "/groups/{gid}",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+def update_group_route(
+    gid: str,
+    body: GroupUpdateBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    gid_int = _parse_gid(gid)
+    if gid_int is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "그룹을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        # 아무 변경 없음 → 현재 상태 그대로.
+        g = db.get(ContactGroup, gid_int)
+        if g is None:
+            return JSONResponse(
+                {"error": {"code": "not_found", "message": "그룹을 찾을 수 없습니다"}},
+                status_code=404,
+            )
+        counts = _batch_member_counts(db, [g.id]).get(g.id)
+        last_camp = _batch_last_campaign_times(db, [g.id]).get(g.id)
+        return {"data": _group_to_dict(g, counts, last_camp)}
+    try:
+        g = svc_update_group(db, gid_int, **updates)
+    except ValueError:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "그룹을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    except IntegrityError:
+        db.rollback()
+        return JSONResponse(
+            {"error": {
+                "code": "duplicate_name",
+                "message": "같은 이름의 그룹이 이미 있습니다",
+            }},
+            status_code=409,
+        )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="GROUP_UPDATE",
+        target=f"group:{gid_int}",
+        detail={"fields": sorted(updates.keys())},
+    )
+    db.commit()
+    counts = _batch_member_counts(db, [g.id]).get(g.id)
+    last_camp = _batch_last_campaign_times(db, [g.id]).get(g.id)
+    return {"data": _group_to_dict(g, counts, last_camp)}
+
+
+@router.delete(
+    "/groups/{gid}",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+def delete_group_route(
+    gid: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """그룹 삭제. 멤버십(contact_group_members) 은 CASCADE 로 자동 정리."""
+    gid_int = _parse_gid(gid)
+    if gid_int is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "그룹을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    existing = db.get(ContactGroup, gid_int)
+    if existing is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "그룹을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    try:
+        svc_delete_group(db, gid_int)
+    except ValueError:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "그룹을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="GROUP_DELETE",
+        target=f"group:{gid_int}",
+        detail={"name": existing.name},
+    )
+    db.commit()
+    return {"data": {"id": gid, "deleted": True}}
+
+
+# ── 멤버 add/bulk-add/remove ─────────────────────────────────────────────────
+
+
+class GroupMembersAddBody(BaseModel):
+    """기존 연락처 id 목록을 그룹에 추가."""
+
+    contactIds: list[int] = Field(..., min_length=1, max_length=10000)
+
+
+class GroupMembersBulkAddBody(BaseModel):
+    """전화번호 목록으로 일괄 추가. autoCreate=True 면 없는 연락처는 생성."""
+
+    phones: list[str] = Field(..., min_length=1, max_length=10000)
+    autoCreate: bool = True
+
+
+class GroupMembersRemoveBody(BaseModel):
+    contactIds: list[int] = Field(..., min_length=1, max_length=10000)
+
+
+def _group_or_404(db: Session, gid: str) -> ContactGroup | JSONResponse:
+    """gid 파싱 + DB 조회 묶음 헬퍼. 실패 시 JSONResponse 반환."""
+    gid_int = _parse_gid(gid)
+    if gid_int is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "그룹을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    group = db.get(ContactGroup, gid_int)
+    if group is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "그룹을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    return group
+
+
+@router.post(
+    "/groups/{gid}/members/add",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+def add_members_route(
+    gid: str,
+    body: GroupMembersAddBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    g_or_err = _group_or_404(db, gid)
+    if isinstance(g_or_err, JSONResponse):
+        return g_or_err
+    group = g_or_err
+    added = svc_add_members(
+        db, group_id=group.id, contact_ids=body.contactIds, added_by=user.sub,
+    )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="GROUP_MEMBERS_ADD",
+        target=f"group:{group.id}",
+        detail={"added": added, "requested": len(body.contactIds)},
+    )
+    db.commit()
+    return {"data": {"added": added, "requested": len(body.contactIds)}}
+
+
+@router.post(
+    "/groups/{gid}/members/bulk-add",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+def bulk_add_members_route(
+    gid: str,
+    body: GroupMembersBulkAddBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """전화번호 리스트로 그룹에 멤버 일괄 추가.
+
+    각 번호: (1) 기존 연락처 → 그룹 추가, (2) 없음 + autoCreate=true → 생성 후
+    추가, (3) 없음 + autoCreate=false → skipped_no_contact.
+    """
+    g_or_err = _group_or_404(db, gid)
+    if isinstance(g_or_err, JSONResponse):
+        return g_or_err
+    group = g_or_err
+    # phone 정규화 — 숫자만 추출, 빈 값 제외, 중복 제거.
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for p in body.phones:
+        digits = "".join(c for c in p if c.isdigit())
+        if digits and digits not in seen:
+            seen.add(digits)
+            normalized.append(digits)
+    if not normalized:
+        return JSONResponse(
+            {"error": {"code": "no_valid_phones", "message": "유효한 번호가 없습니다"}},
+            status_code=422,
+        )
+    result = svc_bulk_add_by_phones(
+        db,
+        group_id=group.id,
+        phones=normalized,
+        added_by=user.sub,
+        auto_create=body.autoCreate,
+    )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="GROUP_MEMBERS_BULK_ADD",
+        target=f"group:{group.id}",
+        detail={**result, "requested": len(normalized)},
+    )
+    db.commit()
+    return {"data": {**result, "requested": len(normalized)}}
+
+
+@router.post(
+    "/groups/{gid}/members/remove",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+def remove_members_route(
+    gid: str,
+    body: GroupMembersRemoveBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    g_or_err = _group_or_404(db, gid)
+    if isinstance(g_or_err, JSONResponse):
+        return g_or_err
+    group = g_or_err
+    removed = svc_remove_members(
+        db, group_id=group.id, contact_ids=body.contactIds,
+    )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="GROUP_MEMBERS_REMOVE",
+        target=f"group:{group.id}",
+        detail={"removed": removed, "requested": len(body.contactIds)},
+    )
+    db.commit()
+    return {"data": {"removed": removed, "requested": len(body.contactIds)}}
