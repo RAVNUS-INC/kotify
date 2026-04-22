@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SetupWizard } from '@/components/setup';
 import { fetchSetupStatus, type SetupStatus } from '@/lib/setup';
-import '../styles/globals.css';
+import '../../styles/globals.css';
 
 /**
  * Fresh install 초기 설정 페이지. (app) 그룹 *밖* 이라 shell/sidebar 미적용.
