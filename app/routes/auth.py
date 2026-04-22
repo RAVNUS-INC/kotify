@@ -65,14 +65,31 @@ async def me(request: Request) -> JSONResponse:
 
 @router.get("/login")
 async def login(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
-    """Keycloak 인증 페이지로 리다이렉트."""
+    """Keycloak 인증 페이지로 리다이렉트.
+
+    Next.js 가 앞단에 있는 구조에서는 FastAPI 가 보는 `request.url` 이 내부
+    주소(127.0.0.1:8080)라 `request.url_for` 로 redirect_uri 를 만들면 Keycloak
+    의 Valid Redirect URIs 와 불일치. `app.public_url` 설정값 + 고정 경로
+    `/api/auth/callback` (Next.js rewrites 가 FastAPI `/auth/callback` 으로 프록시)
+    로 퍼블릭 URL 을 만든다.
+    """
     oauth = get_oauth_client(db)
     if oauth is None:
         # 설정 미완료 → setup으로
         return RedirectResponse("/setup", status_code=303)
 
     keycloak = oauth.create_client("keycloak")
-    redirect_uri = str(request.url_for("auth_callback"))
+
+    from app.security.settings_store import SettingsStore
+    store = SettingsStore(db)
+    public_url = store.get("app.public_url", "").rstrip("/")
+    if public_url:
+        # /api 접두는 Next.js rewrites 를 통과시키기 위함. FastAPI 실제 경로는 /auth/callback.
+        redirect_uri = f"{public_url}/api/auth/callback"
+    else:
+        # 설정 누락 시 fallback — dev 환경에서 FastAPI 가 직접 외부 대면하는 케이스.
+        redirect_uri = str(request.url_for("auth_callback"))
+
     return await keycloak.authorize_redirect(request, redirect_uri)
 
 
