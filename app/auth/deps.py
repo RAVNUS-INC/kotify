@@ -122,6 +122,32 @@ def require_user(
     return user
 
 
+# 역할 우선순위 — 높은 권한이 앞. 대표 role 산정, UI 표시 순서 등
+# 공용 기준으로 쓴다. `require_role` 의 권한 체크 자체는 여전히 평면적
+# intersection 이지만, "대표 역할"이 필요한 곳은 이 순서로 판정.
+ROLE_PRIORITY: tuple[str, ...] = ("owner", "admin", "sender", "operator", "viewer")
+
+
+def primary_role(roles_json: str | None, default: str = "viewer") -> str:
+    """User.roles(JSON array) → 대표 role. 배열이 비었거나 매칭 없음은 default.
+
+    파싱 실패(None, malformed JSON)도 default 로 graceful fallback.
+    """
+    if not roles_json:
+        return default
+    try:
+        arr = json.loads(roles_json)
+    except (json.JSONDecodeError, TypeError):
+        return default
+    if not isinstance(arr, list):
+        return default
+    role_set = set(arr)
+    for r in ROLE_PRIORITY:
+        if r in role_set:
+            return r
+    return default
+
+
 def require_role(*roles: str) -> Callable:
     """지정된 역할 중 하나 이상을 가진 사용자만 허용하는 의존성 팩토리.
 
