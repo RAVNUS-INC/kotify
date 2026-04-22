@@ -1,174 +1,153 @@
-"""캠페인 API 라우트 — S2 Compose 발송 / S3 이력.
+"""캠페인 API 라우트 — S2 Compose 발송 / S3 이력 / S4 상세.
 
-Phase 6b: POST /campaigns (mock).
-Phase 7a: GET /campaigns 목록 + 필터.
-Phase 10 이후 실제 msghub 호출 + DB 저장으로 교체.
+실 DB (campaigns + messages) 기반. POST /campaigns 는 services.compose.
+dispatch_campaign() 호출로 실 msghub 발송.
+
+api-contract.md §S3/S4 계약 준수 — web/types/campaign.ts 의 Campaign /
+CampaignDetail shape 반환.
 """
 from __future__ import annotations
 
-import uuid
+from datetime import UTC, datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import and_, or_, select
+from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
+from app.db import get_db
+from app.models import Campaign, Message, User
+from app.msghub.codes import SUCCESS_CODE
 from app.security.csrf import verify_csrf
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
 )
 
+KST = ZoneInfo("Asia/Seoul")
 
-_MOCK_CAMPAIGNS: List[dict] = [
-    {
-        "id": "c-001",
-        "name": "4월 공지사항",
-        "status": "sent",
-        "sender": "1588-1234",
-        "channel": "rcs",
-        "createdAt": "2026-04-21 14:02",
-        "recipients": 342,
-        "reach": 334,
-        "replies": 12,
-        "cost": 2736,
-    },
-    {
-        "id": "c-002",
-        "name": "마케팅 뉴스레터 #12",
-        "status": "sending",
-        "sender": "1588-1234",
-        "channel": "rcs",
-        "createdAt": "2026-04-21 13:40",
-        "recipients": 500,
-        "reach": 187,
-        "replies": 3,
-        "cost": 1496,
-    },
-    {
-        "id": "c-003",
-        "name": "금요 회식 공지",
-        "status": "scheduled",
-        "sender": "02-3456-7890",
-        "channel": "sms",
-        "createdAt": "2026-04-21 10:12",
-        "scheduledAt": "2026-04-22 18:00",
-        "recipients": 28,
-        "reach": None,
-        "replies": None,
-        "cost": 224,
-    },
-    {
-        "id": "c-004",
-        "name": "인사팀 공지",
-        "status": "sent",
-        "sender": "02-3456-7890",
-        "channel": "sms",
-        "createdAt": "2026-04-21 09:20",
-        "recipients": 124,
-        "reach": 121,
-        "replies": 8,
-        "cost": 992,
-    },
-    {
-        "id": "c-005",
-        "name": "월간 리포트 발송",
-        "status": "failed",
-        "sender": "1588-1234",
-        "channel": "rcs",
-        "createdAt": "2026-04-20 18:30",
-        "recipients": 892,
-        "reach": 0,
-        "replies": 0,
-        "cost": 0,
-        "failureReason": "msghub 인증 오류",
-    },
-    {
-        "id": "c-006",
-        "name": "긴급 시스템 점검",
-        "status": "cancelled",
-        "sender": "1588-1234",
-        "channel": "rcs",
-        "createdAt": "2026-04-20 15:00",
-        "recipients": 1000,
-        "reach": None,
-        "replies": None,
-        "cost": 0,
-    },
-    {
-        "id": "c-007",
-        "name": "아침 조회 안내",
-        "status": "sent",
-        "sender": "02-3456-7890",
-        "channel": "sms",
-        "createdAt": "2026-04-21 08:00",
-        "recipients": 48,
-        "reach": 47,
-        "replies": 2,
-        "cost": 384,
-    },
-    {
-        "id": "c-008",
-        "name": "점심 메뉴 투표",
-        "status": "sent",
-        "sender": "1588-1234",
-        "channel": "rcs",
-        "createdAt": "2026-04-21 11:00",
-        "recipients": 62,
-        "reach": 61,
-        "replies": 34,
-        "cost": 496,
-    },
-    {
-        "id": "c-009",
-        "name": "회의 리마인더",
-        "status": "sent",
-        "sender": "02-3456-7890",
-        "channel": "sms",
-        "createdAt": "2026-04-21 13:30",
-        "recipients": 8,
-        "reach": 8,
-        "replies": 1,
-        "cost": 64,
-    },
-    {
-        "id": "c-010",
-        "name": "주간 리포트 초안",
-        "status": "draft",
-        "sender": "1588-1234",
-        "channel": "rcs",
-        "createdAt": "2026-04-21 12:00",
-        "recipients": 0,
-        "reach": None,
-        "replies": None,
-        "cost": 0,
-    },
-    {
-        "id": "c-011",
-        "name": "카톡 이벤트 안내",
-        "status": "sent",
-        "sender": "1588-1234",
-        "channel": "kakao",
-        "createdAt": "2026-04-20 16:00",
-        "recipients": 456,
-        "reach": 430,
-        "replies": 15,
-        "cost": 3648,
-    },
-    {
-        "id": "c-012",
-        "name": "단체 회식 공지",
-        "status": "sent",
-        "sender": "02-3456-7890",
-        "channel": "sms",
-        "createdAt": "2026-04-19 14:00",
-        "recipients": 142,
-        "reach": 140,
-        "replies": 11,
-        "cost": 1136,
-    },
-]
+
+# ── Campaign.state → CampaignStatus 매핑 ─────────────────────────────────────
+# web/types/campaign.ts: 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed' | 'cancelled'
+_STATUS_MAP = {
+    "DRAFT": "draft",
+    "DISPATCHING": "sending",
+    "DISPATCHED": "sent",
+    "COMPLETED": "sent",
+    "PARTIAL_FAILED": "sent",  # UX 측면: 일부 성공이면 sent, 내부 breakdown 으로 실패분 노출
+    "FAILED": "failed",
+    "RESERVED": "scheduled",
+    "RESERVE_FAILED": "failed",
+    "RESERVE_CANCELED": "cancelled",
+}
+
+# Message/result 상태 → RecipientStatus 매핑
+# web/types/campaign.ts: 'queued' | 'delivered' | 'read' | 'replied' | 'failed' | 'fallback_sms'
+_RECIPIENT_STATUS = {
+    "REG": "queued",
+    "ING": "queued",
+    "PENDING": "queued",
+    "FB_PENDING": "fallback_sms",
+    "DONE": "delivered",  # SUCCESS_CODE 인지는 별도 분기
+    "FAILED": "failed",
+}
+
+
+def _fmt_kst(iso_utc: str | None) -> str:
+    """UTC ISO → 'YYYY-MM-DD HH:MM' KST. 실패 시 빈 문자열."""
+    if not iso_utc:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return ""
+
+
+def _campaign_name(c: Campaign) -> str:
+    """목록 표시용 이름. subject > content 앞 24자 > '캠페인 #{id}'."""
+    if c.subject:
+        return c.subject
+    if c.content:
+        first = c.content.strip().split("\n", 1)[0]
+        return first[:24] + ("…" if len(first) > 24 else "")
+    return f"캠페인 #{c.id}"
+
+
+def _campaign_channel(c: Campaign) -> str:
+    """실제 사용된 채널. rcs_count>0 → rcs, 아니면 message_type 파생."""
+    if c.rcs_count and c.rcs_count > 0:
+        return "rcs"
+    if c.message_type == "short":
+        return "sms"
+    if c.message_type == "long":
+        return "lms"
+    if c.message_type == "image":
+        return "mms"
+    return "sms"
+
+
+def _campaign_to_dict(c: Campaign) -> dict:
+    """Campaign ORM → Next.js Campaign shape."""
+    status = _STATUS_MAP.get(c.state, "sending")
+    reach: int | None = c.ok_count if status in ("sent", "failed") else None
+    replies: int | None = None  # MO 는 thread 단위라 캠페인별 매핑 필요 — 추후.
+    # reserve_time 은 services/compose.parse_reserve_time 에서 이미 KST
+    # "YYYY-MM-DD HH:MM" 포맷으로 저장됨 (UTC 재변환 금지).
+    scheduled_at = c.reserve_time if c.reserve_time else None
+    row: dict = {
+        "id": str(c.id),
+        "name": _campaign_name(c),
+        "status": status,
+        "sender": c.caller_number,
+        "channel": _campaign_channel(c),
+        "createdAt": _fmt_kst(c.created_at),
+        "recipients": c.total_count or 0,
+        "reach": reach,
+        "replies": replies,
+        "cost": c.total_cost or 0,
+    }
+    if scheduled_at:
+        row["scheduledAt"] = scheduled_at
+    # 실패 사유: state 가 failed 계열이면 첫 실패 메시지의 result_desc 를 추정.
+    # 목록 조회에서 메시지를 별도로 가져오진 않으므로 여기서는 biz 힌트만.
+    if status == "failed":
+        row["failureReason"] = "발송 실패 — 상세 페이지에서 수신자별 사유 확인"
+    return row
+
+
+def _message_to_recipient(m: Message) -> dict:
+    """Message ORM → Next.js Recipient shape."""
+    if m.status == "DONE":
+        if m.result_code == SUCCESS_CODE:
+            # 채널이 fallback(SMS/LMS/MMS)이면 fallback_sms 로 표현 (UX 의미: RCS 에서 떨어짐)
+            if m.channel in ("SMS", "LMS", "MMS"):
+                rstatus = "fallback_sms"
+            else:
+                rstatus = "delivered"
+        else:
+            rstatus = "failed"
+    else:
+        rstatus = _RECIPIENT_STATUS.get(m.status or "", "queued")
+
+    row: dict = {
+        "id": f"m-{m.id}",
+        "name": m.to_number_raw or m.to_number,
+        "phone": m.to_number,
+        "status": rstatus,
+    }
+    sent_at = _fmt_kst(m.complete_time or m.report_dt)
+    if sent_at and rstatus != "queued":
+        row["sentAt"] = sent_at
+    if rstatus == "failed" and m.result_desc:
+        row["failureReason"] = m.result_desc
+    return row
 
 
 class CampaignCreateBody(BaseModel):
@@ -178,7 +157,7 @@ class CampaignCreateBody(BaseModel):
     recipients: List[str] = Field(..., min_length=1, max_length=1000)
     message: str = Field(..., min_length=1)
     sendAt: Optional[str] = None
-    channel: Optional[str] = None
+    channel: Optional[str] = None  # 참조용, 실제로는 서버가 재분류
 
     @field_validator("sender", "message")
     @classmethod
@@ -189,169 +168,151 @@ class CampaignCreateBody(BaseModel):
         return stripped
 
 
-def _estimate_cost(message: str, count: int) -> tuple[int, int, str]:
-    """메시지 바이트·수신자 수로 per-unit 비용과 채널을 계산한다."""
-    bytes_ = len(message.encode("utf-8"))
-    if bytes_ <= 90:
-        per = 8
-        channel = "SMS"
-    elif bytes_ <= 2000:
-        per = 32
-        channel = "LMS"
-    else:
-        per = 100
-        channel = "MMS"
-    return bytes_, per * count, channel
-
-
-def _mock_recipients(campaign: dict) -> list[dict]:
-    """캠페인 상태에 따라 20명 샘플 수신자 생성."""
-    status = campaign.get("status")
-    if status in ("draft", "cancelled", "scheduled"):
-        return []
-
-    sample_names = [
-        ("박지훈", "010-1234-5678"),
-        ("이수진", "010-9876-5432"),
-        ("김민재", "010-3333-4444"),
-        ("정태영", "010-5555-6666"),
-        ("최서연", "010-7777-8888"),
-        ("김영호", "010-9999-0000"),
-        ("문지우", "010-2222-3333"),
-        ("강민지", "010-4444-5555"),
-        ("양현수", "010-6666-7777"),
-        ("한예린", "010-8888-9999"),
-        ("백지훈", "010-0000-1111"),
-        ("조승현", "010-1111-2222"),
-        ("권나연", "010-3333-5555"),
-        ("윤태호", "010-4444-6666"),
-        ("신아영", "010-5555-7777"),
-        ("배성우", "010-6666-8888"),
-        ("안지민", "010-7777-9999"),
-        ("홍은정", "010-8888-0000"),
-        ("류재원", "010-9999-1111"),
-        ("임소영", "010-0000-2222"),
-    ]
-
-    # 상태 분포 (대략적 mock)
-    if status == "sent":
-        distribution = (
-            ["replied"] * 2
-            + ["read"] * 6
-            + ["delivered"] * 8
-            + ["fallback_sms"] * 2
-            + ["failed"] * 2
-        )
-    elif status == "sending":
-        distribution = (
-            ["delivered"] * 8
-            + ["queued"] * 8
-            + ["failed"] * 2
-            + ["fallback_sms"] * 2
-        )
-    elif status == "failed":
-        distribution = ["failed"] * 18 + ["fallback_sms"] * 2
-    else:
-        distribution = ["delivered"] * 20
-
-    result = []
-    for (name, phone), rstatus in zip(sample_names, distribution, strict=False):
-        row: dict = {
-            "id": f"r-{campaign['id']}-{phone[-4:]}",
-            "name": name,
-            "phone": phone,
-            "status": rstatus,
-        }
-        sent_at = campaign.get("createdAt", "").split(" ")[-1] or "00:00"
-        row["sentAt"] = sent_at if rstatus != "queued" else None
-        if rstatus in ("read", "replied"):
-            row["readAt"] = sent_at
-        if rstatus == "replied":
-            row["repliedAt"] = sent_at
-        if rstatus == "failed":
-            row["failureReason"] = "수신 거부"
-        result.append(row)
-
-    return result
-
-
-@router.get("/campaigns/{cid}")
-async def get_campaign(cid: str):
-    """캠페인 상세 (수신자 샘플 포함)."""
-    for c in _MOCK_CAMPAIGNS:
-        if c["id"] == cid:
-            recipients = _mock_recipients(c)
-            total = c.get("recipients") or 0
-            reach = c.get("reach") or 0
-            replies = c.get("replies") or 0
-            failed = total - reach if c.get("status") in ("sent", "failed") else 0
-            fallback_count = max(1, int(total * 0.027)) if c.get("status") == "sent" else 0
-
-            return {
-                "data": {
-                    **c,
-                    "recipientsSample": recipients,
-                    "breakdown": {
-                        "total": total,
-                        "rcsDelivered": max(0, reach - fallback_count),
-                        "smsFallback": fallback_count,
-                        "failed": failed - fallback_count if failed > fallback_count else 0,
-                        "replies": replies,
-                    },
-                }
-            }
-    return JSONResponse(
-        {"error": {"code": "not_found", "message": "캠페인을 찾을 수 없습니다"}},
-        status_code=404,
-    )
+# ── S3: GET /campaigns ───────────────────────────────────────────────────────
 
 
 @router.get("/campaigns")
-async def list_campaigns(
+def list_campaigns(
     q: Optional[str] = None,
     status: Optional[str] = None,
+    db: Session = Depends(get_db),
 ) -> dict:
-    """캠페인 목록 (mock). q는 이름 부분 매치, status는 엄격 일치.
+    """캠페인 목록 — 최신순, q / status 필터."""
+    stmt = select(Campaign)
 
-    `status=all` 또는 None은 전체 반환.
-    """
-    rows = _MOCK_CAMPAIGNS
     if status and status != "all":
-        rows = [r for r in rows if r.get("status") == status]
+        # 역매핑: CampaignStatus → Campaign.state 후보들
+        state_candidates = [
+            state for state, mapped in _STATUS_MAP.items() if mapped == status
+        ]
+        if state_candidates:
+            stmt = stmt.where(Campaign.state.in_(state_candidates))
+
     if q:
-        ql = q.lower()
-        rows = [r for r in rows if ql in r["name"].lower()]
-    # 최신순
-    rows = sorted(rows, key=lambda r: r.get("createdAt", ""), reverse=True)
-    return {
-        "data": rows,
-        "meta": {"total": len(rows)},
+        pat = f"%{q}%"
+        stmt = stmt.where(or_(Campaign.subject.ilike(pat), Campaign.content.ilike(pat)))
+
+    # WHERE 뒤에 ORDER BY + LIMIT — 독자 혼동 방지 위해 필터 뒤로 배치.
+    stmt = stmt.order_by(Campaign.created_at.desc()).limit(200)
+
+    campaigns = db.execute(stmt).scalars().all()
+    rows = [_campaign_to_dict(c) for c in campaigns]
+    return {"data": rows, "meta": {"total": len(rows)}}
+
+
+# ── S4: GET /campaigns/{id} ─────────────────────────────────────────────────
+
+
+@router.get("/campaigns/{cid}")
+def get_campaign(cid: str, db: Session = Depends(get_db)) -> dict | JSONResponse:
+    """캠페인 상세 — 기본 정보 + 수신자 샘플 20건 + breakdown."""
+    try:
+        campaign_id = int(cid)
+    except (ValueError, TypeError):
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "캠페인을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+
+    campaign = db.get(Campaign, campaign_id)
+    if campaign is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "캠페인을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+
+    # 수신자 샘플 20건 (상태 다양성 고려해 id 역순)
+    messages = (
+        db.execute(
+            select(Message)
+            .where(Message.campaign_id == campaign.id)
+            .order_by(Message.id.desc())
+            .limit(20)
+        )
+        .scalars()
+        .all()
+    )
+
+    # breakdown — campaign counters 는 이미 services/report 에서 집계됨
+    total = campaign.total_count or 0
+    rcs_count = campaign.rcs_count or 0
+    fallback_count = campaign.fallback_count or 0
+    fail_count = campaign.fail_count or 0
+
+    # 기본 응답 = 목록 shape + 추가 필드
+    data = _campaign_to_dict(campaign)
+    data["recipientsSample"] = [_message_to_recipient(m) for m in messages]
+    data["breakdown"] = {
+        "total": total,
+        "rcsDelivered": rcs_count,
+        "smsFallback": fallback_count,
+        "failed": fail_count,
+        "replies": 0,
     }
+    return {"data": data}
+
+
+# ── S2: POST /campaigns ─────────────────────────────────────────────────────
 
 
 @router.post("/campaigns", dependencies=[Depends(verify_csrf)])
-async def create_campaign(body: CampaignCreateBody) -> JSONResponse:
-    """새 캠페인 생성 (mock).
+async def create_campaign(
+    body: CampaignCreateBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    """새 캠페인 생성 + msghub 발송.
 
-    필드 검증은 Pydantic + field_validator가 전담.
-    전역 validation_error_handler(app/main.py)가 envelope 422로 변환.
-
-    Returns:
-        envelope `{ data: { id, status, estimate: { reach, cost, channel } } }`.
+    services.compose.dispatch_campaign() 를 호출해 실제 RCS/SMS/LMS/MMS 발송.
+    sendAt 이 있으면 예약 발송 (KST 기준).
     """
-    cid = uuid.uuid4().hex[:12]
-    count = len(body.recipients)
-    _bytes, cost, channel = _estimate_cost(body.message, count)
+    # 순환 import 방지: 함수 내부 import
+    from app.main import get_msghub_client
+    from app.services.compose import dispatch_campaign
+
+    client = get_msghub_client()
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "msghub_unavailable", "message": "msghub 클라이언트 미초기화"},
+        )
+
+    try:
+        campaign = await dispatch_campaign(
+            db=db,
+            msghub_client=client,
+            created_by=user.sub,
+            caller_number=body.sender,
+            content=body.message,
+            recipients=list(body.recipients),
+            message_type="SMS",  # dispatch 내부에서 content 로 재분류
+            subject=None,
+            reserve_time_local=body.sendAt or None,
+        )
+    except ValueError as exc:
+        # ValueError 는 사용자 입력 검증 오류로 메시지를 그대로 노출해도 안전.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_failed", "message": str(exc)},
+        )
+    except Exception:
+        # 내부 예외는 서버 로그에만 기록, 응답엔 일반화 메시지.
+        import logging
+        logging.getLogger(__name__).exception("dispatch_campaign failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "dispatch_failed", "message": "발송 처리 중 오류가 발생했습니다"},
+        )
 
     return JSONResponse(
         {
             "data": {
-                "id": cid,
-                "status": "scheduled" if body.sendAt else "sending",
+                "id": str(campaign.id),
+                "status": _STATUS_MAP.get(campaign.state, "sending"),
                 "estimate": {
-                    "reach": count,
-                    "cost": cost,
-                    "channel": channel,
+                    "reach": campaign.total_count or 0,
+                    "cost": campaign.total_cost or 0,
+                    "channel": _campaign_channel(campaign),
                 },
             }
         }

@@ -64,18 +64,27 @@ export async function apiFetch<T>(
   //  `next/headers` 가 가능한 환경이다.)
   // 명시적 `.getAll() → name=value 조합` 방식. `.toString()` 은 일부 Next.js
   // 버전에서 `[object Object]` 반환 버그 사례가 있어 불안정.
+  //
+  // DYNAMIC_SERVER_USAGE 는 Next.js 의 정상적 시그널 (static prerender 포기
+  // 신호). try/catch 로 swallow 하면 안 된다 — 반드시 re-throw 해서 페이지가
+  // dynamic 으로 분류되도록 허용.
   let cookieHeader = '';
   try {
     const { cookies } = await import('next/headers');
     const all = cookies().getAll();
     cookieHeader = all.map((c) => `${c.name}=${c.value}`).join('; ');
   } catch (err) {
-    // next/headers 호출 불가 (test 환경 등) — cookie 없이 진행. 단,
-    // 프로덕션에서 이 경로로 빠지면 FastAPI 세션 인식 못 해 303 이 됨.
-    if (process.env.NODE_ENV === 'production') {
-      // eslint-disable-next-line no-console
-      console.warn('[apiFetch] cookies() 접근 실패 — 세션 전달 불가', err);
+    // Next.js 빌드/정적 prerender 시그널은 삼키지 않고 반드시 전파.
+    if (
+      err &&
+      typeof err === 'object' &&
+      'digest' in err &&
+      typeof (err as { digest?: unknown }).digest === 'string' &&
+      (err as { digest: string }).digest.startsWith('DYNAMIC_SERVER_USAGE')
+    ) {
+      throw err;
     }
+    // 그 외 호출 불가 환경 (test 등) — cookie 없이 진행.
   }
 
   const res = await fetch(url, {

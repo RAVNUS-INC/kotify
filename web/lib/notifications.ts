@@ -31,8 +31,18 @@ export async function fetchNotifications(
     const { cookies } = await import('next/headers');
     const all = cookies().getAll();
     cookieHeader = all.map((c) => `${c.name}=${c.value}`).join('; ');
-  } catch {
-    /* noop */
+  } catch (err) {
+    // Next.js DYNAMIC_SERVER_USAGE 시그널은 반드시 전파 — 빌드 prerender 가
+    // 이 페이지를 dynamic 으로 분류하도록 허용해야 한다 (lib/api.ts 주석 참조).
+    if (
+      err &&
+      typeof err === 'object' &&
+      'digest' in err &&
+      typeof (err as { digest?: unknown }).digest === 'string' &&
+      (err as { digest: string }).digest.startsWith('DYNAMIC_SERVER_USAGE')
+    ) {
+      throw err;
+    }
   }
   const res = await fetch(`${FASTAPI_URL}/notifications${suffix}`, {
     cache: 'no-store',
