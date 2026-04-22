@@ -1,125 +1,94 @@
 #!/usr/bin/env bash
-# deploy/kotify-update.sh
-# kotify 원클릭 업데이트 스크립트.
-# 웹 UI에서 sudo로 호출됨 (kotify-sudoers 참조).
+# deploy/kotify-update.sh — trampoline
+#
+# 웹 UI 의 "업데이트 설치" 버튼이 sudo 로 이 스크립트를 호출한다. 역할은
+# 최소한:
+#   1) flock 으로 동시 실행 차단
+#   2) persistent log 로 출력 tee
+#   3) git pull 로 최신 코드 확보
+#   4) 새로 풀한 kotify-update-worker.sh 를 exec 으로 넘겨 실제 작업 수행
+#
+# 왜 분리했나 — bash 는 실행 중 열린 스크립트 파일의 fd 를 유지한다.
+# git pull 이 파일을 unlink+rename 으로 교체해도 현재 bash 프로세스는 옛
+# inode 를 계속 읽기 때문에, 스크립트 변경사항은 **다음 실행** 에야 반영된다.
+# trampoline 은 git pull 직후 `exec worker` 로 새 프로세스를 띄워 새 worker
+# 코드가 즉시 적용되게 한다. 이후 worker 변경은 첫 배포에 바로 효력 발생.
 #
 # 사용법:
-#   sudo /opt/kotify/deploy/kotify-update.sh check   # 업데이트 확인 (JSON 출력)
-#   sudo /opt/kotify/deploy/kotify-update.sh apply   # 업데이트 적용 + 두 서비스 재시작
+#   sudo /opt/kotify/deploy/kotify-update.sh check
+#   sudo /opt/kotify/deploy/kotify-update.sh apply
 
 set -euo pipefail
 
 INSTALL_DIR="/opt/kotify"
-WEB_DIR="${INSTALL_DIR}/web"
-VENV="${INSTALL_DIR}/.venv"
-SERVICE_API="kotify"       # FastAPI
-SERVICE_WEB="kotify-web"   # Next.js
+LOCK_FILE="/var/run/kotify-update.lock"
+LOG_DIR="/var/log/kotify"
+LOG_FILE="${LOG_DIR}/update.log"
+WORKER="${INSTALL_DIR}/deploy/kotify-update-worker.sh"
 BRANCH="main"
+
+ACTION="${1:-}"
+if [[ "${ACTION}" != "check" && "${ACTION}" != "apply" ]]; then
+    echo '{"phase":"error","message":"허용되지 않은 action (check|apply 만 가능)"}' >&2
+    exit 2
+fi
+
+# check 모드는 부작용이 없어 동시 실행 허용 + 로그도 간소.
+if [[ "${ACTION}" == "check" ]]; then
+    cd "${INSTALL_DIR}"
+    git fetch origin "${BRANCH}" --quiet 2>/dev/null || true
+    LOCAL=$(git rev-parse HEAD)
+    REMOTE=$(git rev-parse "origin/${BRANCH}" 2>/dev/null || echo "${LOCAL}")
+    if [[ "${LOCAL}" == "${REMOTE}" ]]; then
+        echo '{"update_available": false, "current": "'"${LOCAL:0:7}"'", "commits": []}'
+        exit 0
+    fi
+    COMMITS=$(git log --oneline HEAD.."origin/${BRANCH}" --max-count=20 \
+        | sed 's/"/\\"/g' \
+        | awk '{printf "%s{\"hash\": \"%s\", \"message\": \"%s\"}", (NR>1?",":""), substr($1,1,7), substr($0, index($0,$2))}')
+    COUNT=$(git rev-list --count HEAD.."origin/${BRANCH}")
+    echo '{"update_available": true, "current": "'"${LOCAL:0:7}"'", "remote": "'"${REMOTE:0:7}"'", "count": '"${COUNT}"', "commits": ['"${COMMITS}"']}'
+    exit 0
+fi
+
+# apply 모드 — lock + log + git pull + exec worker.
+mkdir -p "${LOG_DIR}"
+chmod 755 "${LOG_DIR}" 2>/dev/null || true
+
+# flock 비동시 실행 — 둘째 admin 이 눌러도 즉시 409.
+exec 200>"${LOCK_FILE}"
+if ! flock -n 200; then
+    echo '{"phase":"error","code":"in_progress","message":"업데이트가 이미 진행 중입니다"}' >&2
+    exit 9
+fi
+
+# 모든 stdout/stderr 을 log 에 동시 기록 (persistent post-mortem).
+# stdout 은 tee -a 로 log + 원래 stdout (Python subprocess 가 parse 함).
+# stderr 는 log 에만 append.
+exec > >(tee -a "${LOG_FILE}") 2> >(tee -a "${LOG_FILE}" >&2)
+
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] === kotify-update apply start ===" >&2
 
 cd "${INSTALL_DIR}"
 
-case "${1:-}" in
-    check)
-        # 원격 fetch
-        git fetch origin "${BRANCH}" --quiet 2>/dev/null
+# Phase 1 (trampoline): git pull.
+# `--ff-only` 는 force-push (history 재작성) 시 실패하므로 fetch + reset 으로
+# 대체해 prod CT 에 로컬 변경 없다는 전제 하에 항상 원격과 일치시킨다.
+git fetch origin "${BRANCH}" --quiet
+echo '{"phase": "pull"}'
+git reset --hard "origin/${BRANCH}" --quiet
 
-        LOCAL=$(git rev-parse HEAD)
-        REMOTE=$(git rev-parse "origin/${BRANCH}")
+# Worker 존재 확인 — 최초 배포 시 없을 수 있음.
+if [[ ! -x "${WORKER}" ]]; then
+    # 실행 권한 부여 후 재확인.
+    chmod +x "${WORKER}" 2>/dev/null || true
+    if [[ ! -f "${WORKER}" ]]; then
+        echo '{"phase":"error","code":"worker_missing","message":"kotify-update-worker.sh 가 리포에 없습니다"}' >&2
+        exit 3
+    fi
+fi
 
-        if [[ "${LOCAL}" == "${REMOTE}" ]]; then
-            echo '{"update_available": false, "current": "'"${LOCAL:0:7}"'", "commits": []}'
-            exit 0
-        fi
-
-        # 새 커밋 목록 (최대 20개)
-        COMMITS=$(git log --oneline HEAD.."origin/${BRANCH}" --max-count=20 \
-            | sed 's/"/\\"/g' \
-            | awk '{printf "%s{\"hash\": \"%s\", \"message\": \"%s\"}", (NR>1?",":""), substr($1,1,7), substr($0, index($0,$2))}')
-
-        COUNT=$(git rev-list --count HEAD.."origin/${BRANCH}")
-
-        echo '{"update_available": true, "current": "'"${LOCAL:0:7}"'", "remote": "'"${REMOTE:0:7}"'", "count": '"${COUNT}"', "commits": ['"${COMMITS}"']}'
-        ;;
-
-    apply)
-        # 롤백 지점: git pull 전 HEAD 기록. 이후 단계에서 실패하면
-        # trap ERR 에서 자동으로 이 커밋으로 되돌린다.
-        PREV_HEAD=$(git -C "${INSTALL_DIR}" rev-parse HEAD)
-        trap '
-            echo "{\"phase\": \"error\", \"rollback\": true, \"to\": \"'"${PREV_HEAD:0:7}"'\"}"
-            git -C "'"${INSTALL_DIR}"'" reset --hard "'"${PREV_HEAD}"'" >/dev/null 2>&1 || true
-        ' ERR
-
-        # Phase 1: git pull
-        echo '{"phase": "pull"}'
-        git pull --ff-only origin "${BRANCH}" --quiet
-
-        # Phase 2a: Python 의존성 설치 (변경 없어도 빠름)
-        echo '{"phase": "install_backend"}'
-        "${VENV}/bin/pip" install -e "${INSTALL_DIR}" --quiet
-
-        # Phase 2b: DB 마이그레이션 — 실패 시 중단 (silent swallow 금지).
-        # 실패를 숨기면 신규 코드가 구 스키마로 구동되어 모든 요청이 크래시한다.
-        echo '{"phase": "migrate"}'
-        if ! "${VENV}/bin/alembic" -c "${INSTALL_DIR}/alembic.ini" upgrade head 2>&1; then
-            echo '{"phase": "error", "step": "migrate", "message": "alembic upgrade failed"}'
-            exit 1
-        fi
-
-        # Phase 3: Next.js 의존성 + 빌드
-        echo '{"phase": "install_web"}'
-        cd "${WEB_DIR}"
-        pnpm install --frozen-lockfile --silent
-
-        echo '{"phase": "build_web"}'
-        # FASTAPI_URL 은 빌드 타임에 next.config.mjs rewrites destination 에 baked 된다.
-        # 누락 시 localhost:8000 로 빠지는 과거 버그 재발 방지 목적으로 명시.
-        FASTAPI_URL=http://127.0.0.1:8080 pnpm build >/dev/null
-
-        # standalone 산출물에 정적 자원 merge
-        # (Next.js output: 'standalone' 은 server.js 만 만들고 static/public 을
-        # 따로 두지 않는다. 런타임에 필요한 파일이 빠져 있으면 404 가 뜸.)
-        #
-        # ⚠ race 주의: 과거엔 `rm -rf static && cp -R ...` 였는데 systemctl
-        # restart 가 2초 뒤 비동기라, rm~restart 사이의 짧은 window 에 구
-        # process 가 메모리의 옛 hash 를 디스크에서 못 찾아 **404** 발생.
-        # 브라우저가 이 404 를 캐시하면 지속적으로 CSS 가 깨져 보임.
-        #
-        # 해결: 삭제하지 않고 `cp -R <src>/. <dst>/` 로 내용물만 merge.
-        # 새/옛 hash 는 파일명이 달라 충돌 없고, 재시작 후에는 신규 HTML 이
-        # 신규 hash 를 참조. 옛 hash 파일들은 누적되지만 ct-bootstrap 재실행
-        # 시 fresh install 로 정리됨 (문제없음).
-        mkdir -p "${WEB_DIR}/.next/standalone/.next/static"
-        cp -R "${WEB_DIR}/.next/static/." "${WEB_DIR}/.next/standalone/.next/static/"
-        if [[ -d "${WEB_DIR}/public" ]]; then
-            mkdir -p "${WEB_DIR}/.next/standalone/public"
-            # public 은 파일명 충돌 가능하지만 덮어쓰기가 정답 (새 우선).
-            cp -R "${WEB_DIR}/public/." "${WEB_DIR}/.next/standalone/public/"
-        fi
-
-        # 빌드 성공까지 왔으니 ERR trap 해제 (재시작 단계에서는 롤백 불필요)
-        trap - ERR
-
-        NEW_HASH=$(git -C "${INSTALL_DIR}" rev-parse --short HEAD)
-
-        # Phase 4: 재시작 (2초 지연, 비동기)
-        # 응답을 먼저 돌려받게 해서 웹 UI 에 '업데이트 실패' 오해 방지.
-        # 두 서비스를 동시에 재시작(uvicorn 먼저, 직후 Next.js).
-        echo '{"phase": "restart_scheduled"}'
-        if command -v systemd-run >/dev/null 2>&1; then
-            systemd-run --on-active=2s --unit="kotify-restart-$$" \
-                /bin/systemctl restart "${SERVICE_API}" "${SERVICE_WEB}" >/dev/null 2>&1 || \
-                (nohup bash -c "sleep 2 && systemctl restart ${SERVICE_API} ${SERVICE_WEB}" >/dev/null 2>&1 &)
-        else
-            nohup bash -c "sleep 2 && systemctl restart ${SERVICE_API} ${SERVICE_WEB}" >/dev/null 2>&1 &
-        fi
-        disown 2>/dev/null || true
-
-        echo '{"phase": "done", "version": "'"${NEW_HASH}"'"}'
-        ;;
-
-    *)
-        echo "Usage: $0 {check|apply}" >&2
-        exit 1
-        ;;
-esac
+# Phase 이후는 WORKER 에 위임 — exec 으로 새 프로세스 교체. git pull 로
+# 새로 쓰여진 파일 내용이 exec 의 새 프로세스에 적용됨.
+# lock fd 200 은 exec 해도 유지되어 WORKER 내부에서도 mutex 보장.
+exec bash "${WORKER}"
