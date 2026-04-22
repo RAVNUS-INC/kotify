@@ -20,6 +20,24 @@
 
 set -euo pipefail
 
+# ── Env 명시 (sudo invoke 경로 독립화) ──────────────────────────────────────
+# 이 스크립트는 두 가지 경로로 실행된다:
+#   A) 터미널 수동: 관리자가 `sudo /opt/kotify/deploy/kotify-update.sh apply`
+#   B) 웹 UI 버튼 : kotify 서비스(systemd)가 subprocess 로 `sudo ...` 호출
+#
+# sudo 는 env_reset 기본 + /etc/sudoers 의 secure_path 로 PATH 만 세팅하는데,
+# HOME 처리가 배포판마다 다르다 (always_set_home on/off). kotify 사용자는
+# nologin + HOME=/var/lib/kotify 라 경로 B 에서 HOME 이 거기로 유지되면
+# pnpm store/cache 가 /var/lib/kotify 하위로 튀어 권한/상태 꼬임 → rc=254
+# (pnpm internal failure) 가 재현된다.
+#
+# 해결: invoke 경로와 무관하게 worker 내부에서 PATH/HOME 을 **항상** 동일
+# 하게 고정. /usr/local/bin 은 ct-bootstrap 의 `npm install -g pnpm` 설치
+# 위치. HOME=/root 로 두면 pnpm store 는 /root/.local/share/pnpm, cache 는
+# /root/.cache/pnpm — root 소유라 권한 충돌 없음.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export HOME="/root"
+
 INSTALL_DIR="/opt/kotify"
 WEB_DIR="${INSTALL_DIR}/web"
 VENV="${INSTALL_DIR}/.venv"
