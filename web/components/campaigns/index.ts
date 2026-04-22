@@ -21,3 +21,6 @@ export type { FallbackFlowProps } from './FallbackFlow';
 
 export { CampaignMessagePreview } from './CampaignMessagePreview';
 export type { CampaignMessagePreviewProps } from './CampaignMessagePreview';
+
+export { CampaignDetailActions } from './CampaignDetailActions';
+export type { CampaignDetailActionsProps } from './CampaignDetailActions';

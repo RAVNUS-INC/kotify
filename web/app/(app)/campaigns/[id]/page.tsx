@@ -1,16 +1,16 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PageHeader } from '@/components/shell';
 import {
+  CampaignDetailActions,
   CampaignKpis,
   CampaignMessagePreview,
   FallbackFlow,
   RecipientsTable,
   StatusBadge,
 } from '@/components/campaigns';
-import { Button, Icon } from '@/components/ui';
-import { fetchCampaign } from '@/lib/campaigns';
 import { ApiError } from '@/lib/api';
+import { getSession, hasRole } from '@/lib/auth';
+import { fetchCampaign } from '@/lib/campaigns';
 
 type PageProps = {
   params: { id: string };
@@ -19,6 +19,12 @@ type PageProps = {
 export default async function CampaignDetail({ params }: PageProps) {
   const id = decodeURIComponent(params.id);
 
+  const session = await getSession();
+  // 예약 취소는 sender/admin/owner. viewer/operator 는 버튼 숨김.
+  const canCancel = session
+    ? hasRole(session, 'sender', 'admin', 'owner')
+    : false;
+
   let campaign;
   try {
     campaign = await fetchCampaign(id);
@@ -26,9 +32,6 @@ export default async function CampaignDetail({ params }: PageProps) {
     if (err instanceof ApiError && err.status === 404) notFound();
     throw err;
   }
-
-  const isCancellable = campaign.status === 'scheduled' || campaign.status === 'sending';
-  const isRetryable = campaign.status === 'failed';
 
   return (
     <div className="k-page">
@@ -43,25 +46,11 @@ export default async function CampaignDetail({ params }: PageProps) {
           </span>
         }
         actions={
-          <>
-            <Link
-              href="/campaigns"
-              className="inline-flex h-8 items-center gap-1 rounded border border-gray-4 bg-surface px-2.5 text-sm text-ink-muted transition-colors duration-fast ease-out hover:bg-gray-1"
-            >
-              <Icon name="arrowLeft" size={12} />
-              목록
-            </Link>
-            {isRetryable && (
-              <Button variant="primary" size="sm" icon={<Icon name="refresh" size={12} />}>
-                재발송
-              </Button>
-            )}
-            {isCancellable && (
-              <Button variant="danger" size="sm" icon={<Icon name="x" size={12} />}>
-                취소
-              </Button>
-            )}
-          </>
+          <CampaignDetailActions
+            campaignId={campaign.id}
+            status={campaign.status}
+            canCancel={canCancel}
+          />
         }
       />
 

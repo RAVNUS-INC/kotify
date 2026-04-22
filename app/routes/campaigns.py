@@ -12,8 +12,12 @@ from datetime import UTC, datetime
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
+import csv
+import io
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
@@ -23,6 +27,8 @@ from app.db import get_db
 from app.models import Campaign, Message, User
 from app.msghub.codes import SUCCESS_CODE
 from app.security.csrf import verify_csrf
+from app.services import audit
+from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -316,4 +322,188 @@ async def create_campaign(
                 },
             }
         }
+    )
+
+
+# ── POST /campaigns/{id}/cancel — 예약 발송 취소 ─────────────────────────────
+
+
+def _user_has_role(user: User, *roles: str) -> bool:
+    """User.roles(JSON) 파싱 후 주어진 role 중 하나라도 보유하면 True."""
+    try:
+        parsed = set(json.loads(user.roles))
+    except (json.JSONDecodeError, TypeError):
+        parsed = set()
+    return bool(parsed & set(roles))
+
+
+@router.post(
+    "/campaigns/{cid}/cancel",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+async def cancel_campaign(
+    cid: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """예약(`RESERVED`) 상태 캠페인을 취소한다.
+
+    권한: sender/admin/owner. viewer/operator 는 403.
+    상태: RESERVED 만 허용. 이미 실행/완료/이미취소는 400.
+    """
+    try:
+        campaign_id = int(cid)
+    except (ValueError, TypeError):
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "캠페인을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    campaign = db.get(Campaign, campaign_id)
+    if campaign is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "캠페인을 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    if not _user_has_role(user, "sender", "admin", "owner"):
+        return JSONResponse(
+            {"error": {"code": "forbidden", "message": "예약 취소 권한이 없습니다"}},
+            status_code=403,
+        )
+    if campaign.state != "RESERVED":
+        return JSONResponse(
+            {"error": {
+                "code": "not_reserved",
+                "message": (
+                    f"예약 상태가 아니므로 취소할 수 없습니다 (현재: {campaign.state})"
+                ),
+            }},
+            status_code=400,
+        )
+    if not campaign.web_req_id:
+        return JSONResponse(
+            {"error": {"code": "no_reservation_id", "message": "예약 ID 가 없습니다"}},
+            status_code=400,
+        )
+
+    # msghub client 는 app.main 의 싱글톤 — 순환 import 방지 위해 함수 내부 import.
+    from app.main import get_msghub_client
+    from app.msghub.schemas import MsghubBadRequest, MsghubError
+
+    msghub_client = get_msghub_client()
+    if msghub_client is None:
+        return JSONResponse(
+            {"error": {
+                "code": "msghub_unavailable",
+                "message": "msghub 설정이 완료되지 않았습니다",
+            }},
+            status_code=503,
+        )
+
+    try:
+        await msghub_client.cancel_reservation(
+            campaign.web_req_id, reason="사용자 취소"
+        )
+        campaign.state = "RESERVE_CANCELED"
+        msg = "예약이 취소되었습니다"
+    except MsghubBadRequest as exc:
+        # 이미 실행됐거나 취소된 경우 — state 는 정리해두되 경고 메시지.
+        campaign.state = "RESERVE_CANCELED"
+        msg = f"예약이 이미 처리되었습니다: {exc}"
+    except MsghubError as exc:
+        db.rollback()
+        return JSONResponse(
+            {"error": {
+                "code": "cancel_failed",
+                "message": f"예약 취소 실패: {exc}",
+            }},
+            status_code=502,
+        )
+
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="CANCEL_RESERVE",
+        target=f"campaign:{campaign.id}",
+        detail={"web_req_id": campaign.web_req_id},
+    )
+    db.commit()
+    return {
+        "data": {
+            "id": str(campaign.id),
+            "status": _STATUS_MAP.get(campaign.state, "cancelled"),
+            "message": msg,
+        }
+    }
+
+
+# ── GET /campaigns/{id}/export.csv — 수신자 CSV 다운로드 ─────────────────────
+
+
+@router.get("/campaigns/{cid}/export.csv")
+def export_campaign_csv(
+    cid: str,
+    status: Optional[str] = None,  # fail 등 필터 (Message.status 또는 파생)
+    db: Session = Depends(get_db),
+) -> Response:
+    """캠페인의 수신자별 결과를 CSV 로. UTF-8 BOM + formula-safe."""
+    try:
+        campaign_id = int(cid)
+    except (ValueError, TypeError):
+        return Response(
+            content='{"error":{"code":"not_found","message":"캠페인을 찾을 수 없습니다"}}',
+            status_code=404,
+            media_type="application/json",
+        )
+    campaign = db.get(Campaign, campaign_id)
+    if campaign is None:
+        return Response(
+            content='{"error":{"code":"not_found","message":"캠페인을 찾을 수 없습니다"}}',
+            status_code=404,
+            media_type="application/json",
+        )
+
+    stmt = select(Message).where(Message.campaign_id == campaign_id)
+    # 필터: fail = result_code != SUCCESS_CODE (DONE 상태) 또는 status=FAILED
+    if status == "fail":
+        stmt = stmt.where(
+            or_(
+                Message.status == "FAILED",
+                and_(Message.status == "DONE", Message.result_code != SUCCESS_CODE),
+            )
+        )
+    elif status == "ok":
+        stmt = stmt.where(
+            and_(Message.status == "DONE", Message.result_code == SUCCESS_CODE)
+        )
+    stmt = stmt.order_by(Message.id.asc())
+    rows = db.execute(stmt).scalars().all()
+
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    writer = csv.writer(buf)
+    writer.writerow([
+        "수신번호", "상태", "채널", "결과코드", "결과설명", "비용", "완료시각",
+    ])
+    for m in rows:
+        writer.writerow([
+            _safe_csv_cell(m.to_number_raw or m.to_number or ""),
+            _safe_csv_cell(m.status or ""),
+            _safe_csv_cell(m.channel or ""),
+            _safe_csv_cell(m.result_code or ""),
+            _safe_csv_cell(m.result_desc or ""),
+            str(m.cost or 0),
+            _safe_csv_cell(m.complete_time or m.report_dt or ""),
+        ])
+
+    subject_safe = (campaign.subject or f"campaign-{campaign.id}")[:40]
+    # 파일명은 간단한 ascii 로 — RFC 5987 encoded 파일명 브라우저 호환 부담 회피.
+    filename = f"kotify-campaign-{campaign.id}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Campaign-Subject": subject_safe.encode("ascii", "replace").decode(),
+        },
     )
