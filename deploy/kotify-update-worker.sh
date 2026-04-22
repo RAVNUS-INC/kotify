@@ -81,13 +81,17 @@ if ! runuser -u "${SERVICE_USER}" -- \
 fi
 
 # Phase 3a: Next.js 의존성 (변경 없으면 fast no-op).
+# --silent 제거 — 이전에 rc=254 나는데 원인이 로그에 안 남아 디버깅 불가
+# 했던 이슈. 에러 세부는 /var/log/kotify/update.log 로 전부 tee.
 echo '{"phase": "install_web"}'
 cd "${WEB_DIR}"
-pnpm install --frozen-lockfile --silent
+pnpm install --frozen-lockfile 2>&1
 
 # Phase 3b: Next.js 빌드.
+# >/dev/null 도 제거 — 빌드 출력(chunk 크기, 에러) 은 log 에 남겨야 post-mortem
+# 가능. stderr 는 set -e 가 비정상 종료 트리거 하므로 exit code 로 실패 감지.
 echo '{"phase": "build_web"}'
-FASTAPI_URL=http://127.0.0.1:8080 pnpm build >/dev/null
+FASTAPI_URL=http://127.0.0.1:8080 pnpm build 2>&1
 
 # Phase 3c: standalone 에 static/public **merge** (race-safe).
 # 삭제하지 않는다 — 옛 hash 가 재시작 전까지 디스크에 살아있어 구 process 가
