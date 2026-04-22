@@ -1,7 +1,7 @@
-"""주소록 API — S7 목록 / S8 상세.
+"""주소록 API — S7 목록 / S8 상세 + CRUD + CSV.
 
 실 DB (contacts + contact_group_members + messages/campaigns + mo_messages)
-기반. services.contacts.list_contacts 를 재사용해 검색/필터 중복 구현 회피.
+기반. services.contacts 를 재사용해 검색/필터 중복 구현 회피.
 
 api-contract.md §S7/S8 — web/types/contact.ts 의 Contact / ContactDetail shape.
 
@@ -14,8 +14,9 @@ from datetime import UTC, datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -27,8 +28,17 @@ from app.models import (
     ContactGroupMember,
     Message,
     MoMessage,
+    User,
 )
-from app.services.contacts import list_contacts as svc_list_contacts
+from app.security.csrf import verify_csrf
+from app.services import audit, csv_import
+from app.services.contacts import (
+    create_contact as svc_create_contact,
+    delete_contact as svc_delete_contact,
+    get_contact as svc_get_contact,
+    list_contacts as svc_list_contacts,
+    update_contact as svc_update_contact,
+)
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -329,3 +339,254 @@ def get_contact_route(cid: str, db: Session = Depends(get_db)) -> dict | JSONRes
     if replies:
         detail["replyHistory"] = replies
     return {"data": detail}
+
+
+# ── CRUD: POST / PATCH / DELETE ─────────────────────────────────────────────
+
+
+class ContactCreateBody(BaseModel):
+    """POST /contacts 요청 body. phone 은 선택(이메일만 보유한 연락처 허용)."""
+
+    name: str = Field(..., min_length=1, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    email: Optional[str] = Field(default=None, max_length=200)
+    team: Optional[str] = Field(default=None, max_length=120)  # → department
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("이름은 비어 있을 수 없습니다")
+        return s
+
+    @field_validator("phone")
+    @classmethod
+    def _normalize_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        digits = "".join(c for c in v if c.isdigit())
+        return digits or None  # 숫자 없으면 없는 값으로 취급
+
+
+class ContactUpdateBody(BaseModel):
+    """PATCH /contacts/{id} — 모두 optional. None 필드는 "변경 없음"."""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    email: Optional[str] = Field(default=None, max_length=200)
+    team: Optional[str] = Field(default=None, max_length=120)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name_opt(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        if not s:
+            raise ValueError("이름은 비어 있을 수 없습니다")
+        return s
+
+    @field_validator("phone")
+    @classmethod
+    def _normalize_phone_opt(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        digits = "".join(c for c in v if c.isdigit())
+        return digits
+
+
+@router.post("/contacts", dependencies=[Depends(verify_csrf)], response_model=None)
+def create_contact_route(
+    body: ContactCreateBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """새 연락처 등록."""
+    c = svc_create_contact(
+        db,
+        name=body.name,
+        created_by=user.sub,
+        phone=body.phone,
+        email=body.email,
+        department=body.team,  # TS team → DB department alias
+        notes=body.notes,
+    )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="CONTACT_CREATE",
+        target=f"contact:{c.id}",
+        detail={"name": c.name, "phone": c.phone or ""},
+    )
+    db.commit()
+    return {"data": _contact_to_dict(c, group_ids=None, last_campaign=None)}
+
+
+@router.patch(
+    "/contacts/{cid}",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+def update_contact_route(
+    cid: str,
+    body: ContactUpdateBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """연락처 일부 업데이트. None 필드는 기존 값 보존."""
+    try:
+        contact_id = int(cid)
+    except (ValueError, TypeError):
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "연락처를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+
+    # model_dump 로 None 제외 — 실제로 전달된 필드만 업데이트.
+    updates = body.model_dump(exclude_none=True)
+    # TS team → DB department 치환.
+    if "team" in updates:
+        updates["department"] = updates.pop("team")
+
+    try:
+        c = svc_update_contact(db, contact_id, **updates)
+    except ValueError:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "연락처를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="CONTACT_UPDATE",
+        target=f"contact:{contact_id}",
+        detail={"fields": sorted(updates.keys())},
+    )
+    db.commit()
+    return {"data": _contact_to_dict(c, group_ids=None, last_campaign=None)}
+
+
+@router.delete(
+    "/contacts/{cid}",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+def delete_contact_route(
+    cid: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """연락처 삭제. 그룹 멤버십은 CASCADE 로 자동 정리."""
+    try:
+        contact_id = int(cid)
+    except (ValueError, TypeError):
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "연락처를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    existing = svc_get_contact(db, contact_id)
+    if existing is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "연락처를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    try:
+        svc_delete_contact(db, contact_id)
+    except ValueError:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "연락처를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="CONTACT_DELETE",
+        target=f"contact:{contact_id}",
+        detail={"name": existing.name, "phone": existing.phone or ""},
+    )
+    db.commit()
+    return {"data": {"id": cid, "deleted": True}}
+
+
+# ── CSV import / export ─────────────────────────────────────────────────────
+
+
+@router.post(
+    "/contacts/import",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+async def import_contacts_route(
+    file: UploadFile = File(...),
+    mode: str = Form("skip"),  # skip | update | create
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """CSV 파일 업로드 → 연락처 일괄 등록.
+
+    mode:
+      - skip    : phone 중복 행은 건너뜀 (기본, 안전)
+      - update  : phone 중복 행의 기존 레코드를 덮어씀
+      - create  : 중복 검사 없이 전부 새로 생성
+    """
+    if mode not in ("skip", "update", "create"):
+        return JSONResponse(
+            {"error": {"code": "invalid_mode", "message": "mode 값이 올바르지 않습니다"}},
+            status_code=422,
+        )
+    # UTF-8 BOM 대응 — Excel 저장본은 BOM 으로 시작.
+    try:
+        raw = await file.read()
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return JSONResponse(
+            {"error": {"code": "encoding", "message": "UTF-8 CSV 만 지원합니다"}},
+            status_code=422,
+        )
+    valid_rows, invalid_rows = csv_import.parse_csv(content)
+    result = csv_import.import_contacts(
+        db, valid_rows, created_by=user.sub, mode=mode,
+    )
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="CONTACT_IMPORT",
+        detail={
+            "mode": mode,
+            "created": result["created"],
+            "updated": result["updated"],
+            "skipped": result["skipped"],
+            "invalid": len(invalid_rows),
+        },
+    )
+    db.commit()
+    # 프론트 계약 — {created, updated, skipped, invalid, errors}.
+    return {
+        "data": {
+            "created": result["created"],
+            "updated": result["updated"],
+            "skipped": result["skipped"],
+            "invalid": len(invalid_rows),
+            "errors": result.get("errors", [])[:20],
+            "invalidPreview": invalid_rows[:20],
+        }
+    }
+
+
+@router.get("/contacts/export.csv")
+def export_contacts_route(
+    db: Session = Depends(get_db),
+) -> Response:
+    """전체 연락처 CSV 다운로드. UTF-8 BOM + formula-safe."""
+    csv_text = csv_import.export_contacts(db)
+    return Response(
+        content="\ufeff" + csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="kotify-contacts.csv"',
+        },
+    )

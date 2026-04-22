@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { Route } from 'next';
 import type { ContactDetail } from '@/types/contact';
@@ -10,16 +11,27 @@ import {
   Icon,
   Pill,
 } from '@/components/ui';
+import { deleteContactClient } from '@/lib/contacts-client';
+import { ContactFormDialog } from './ContactFormDialog';
 
 export type ContactDrawerProps = {
   contact: ContactDetail | null;
   basePath: string;
+  /** admin 이 아니면 편집/삭제 버튼 숨김. */
+  canManage?: boolean;
 };
 
-export function ContactDrawer({ contact, basePath }: ContactDrawerProps) {
+export function ContactDrawer({
+  contact,
+  basePath,
+  canManage = false,
+}: ContactDrawerProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const open = contact !== null;
+  const [editOpen, setEditOpen] = useState(false);
+  const [busy, setBusy] = useState<'delete' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const handleOpenChange = (next: boolean) => {
     if (next) return;
@@ -30,6 +42,22 @@ export function ContactDrawer({ contact, basePath }: ContactDrawerProps) {
     router.push((qs ? `${basePath}?${qs}` : basePath) as Route);
   };
 
+  const onDelete = async () => {
+    if (!contact || busy) return;
+    if (!confirm(`${contact.name} 연락처를 삭제하시겠습니까?`)) return;
+    setBusy('delete');
+    setActionError(null);
+    try {
+      await deleteContactClient(contact.id);
+      // drawer 닫고 목록 새로고침.
+      handleOpenChange(false);
+      router.refresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '삭제 실패');
+      setBusy(null);
+    }
+  };
+
   return (
     <Drawer
       open={open}
@@ -38,21 +66,39 @@ export function ContactDrawer({ contact, basePath }: ContactDrawerProps) {
       title={contact?.name ?? ''}
       description={contact?.phone ?? ''}
       footer={
-        contact && (
-          <div className="flex items-center justify-between gap-2">
-            <Button variant="ghost" size="sm" icon={<Icon name="edit" size={12} />}>
-              편집
-            </Button>
-            <div className="flex gap-2">
-              <Button variant="secondary" size="sm">
-                그룹 이동
+        contact && canManage ? (
+          <div className="flex flex-col gap-2">
+            {actionError ? (
+              <div
+                className="text-[12px] text-danger"
+                role="alert"
+              >
+                {actionError}
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Icon name="edit" size={12} />}
+                onClick={() => setEditOpen(true)}
+                disabled={busy !== null}
+              >
+                편집
               </Button>
-              <Button variant="danger" size="sm" icon={<Icon name="trash" size={12} />}>
+              <Button
+                variant="danger"
+                size="sm"
+                icon={<Icon name="trash" size={12} />}
+                onClick={onDelete}
+                disabled={busy !== null}
+                loading={busy === 'delete'}
+              >
                 삭제
               </Button>
             </div>
           </div>
-        )
+        ) : null
       }
     >
       {contact && (
@@ -141,6 +187,13 @@ export function ContactDrawer({ contact, basePath }: ContactDrawerProps) {
           </Section>
         </div>
       )}
+      {canManage && contact ? (
+        <ContactFormDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          contact={contact}
+        />
+      ) : null}
     </Drawer>
   );
 }

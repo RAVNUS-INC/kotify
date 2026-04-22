@@ -1,12 +1,13 @@
 import { PageHeader } from '@/components/shell';
 import {
   ContactDrawer,
+  ContactsAdminShell,
   ContactsFilters,
   ContactsTable,
 } from '@/components/contacts';
-import { Button, Icon } from '@/components/ui';
-import { fetchContact, fetchContacts } from '@/lib/contacts';
 import { ApiError } from '@/lib/api';
+import { getSession, hasRole } from '@/lib/auth';
+import { fetchContact, fetchContacts } from '@/lib/contacts';
 
 type PageProps = {
   searchParams?: {
@@ -19,7 +20,11 @@ export default async function ContactsPage({ searchParams }: PageProps) {
   const q = searchParams?.q;
   const selectedId = searchParams?.selected;
 
-  const contacts = await fetchContacts({ q });
+  const [session, contacts] = await Promise.all([
+    getSession(),
+    fetchContacts({ q }),
+  ]);
+  const canManage = session ? hasRole(session, 'admin', 'owner', 'sender') : false;
 
   let selected = null;
   if (selectedId) {
@@ -35,16 +40,7 @@ export default async function ContactsPage({ searchParams }: PageProps) {
       <PageHeader
         title="주소록"
         sub={`${contacts.length}명`}
-        actions={
-          <>
-            <Button variant="ghost" size="sm" icon={<Icon name="upload" size={12} />}>
-              CSV 가져오기
-            </Button>
-            <Button variant="primary" size="sm" icon={<Icon name="plus" size={12} />}>
-              새 연락처
-            </Button>
-          </>
-        }
+        actions={<ContactsAdminShell canManage={canManage} />}
       />
 
       <div className="mb-4">
@@ -57,7 +53,11 @@ export default async function ContactsPage({ searchParams }: PageProps) {
         filter={{ q }}
       />
 
-      <ContactDrawer contact={selected} basePath="/contacts" />
+      <ContactDrawer
+        contact={selected}
+        basePath="/contacts"
+        canManage={canManage}
+      />
     </div>
   );
 }
