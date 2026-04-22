@@ -1,10 +1,13 @@
 import type { SenderNumber } from '@/types/number';
 import { EmptyState, Pill } from '@/components/ui';
 import { Progress } from '@/components/motion';
+import { NumberActions } from './NumberActions';
 import { NumberStatusBadge } from './NumberStatusBadge';
 
 export type NumbersTableProps = {
   numbers: ReadonlyArray<SenderNumber>;
+  /** admin 이면 행 단위 액션 노출. 생략 시 false (기존 호출부 호환). */
+  canManage?: boolean;
 };
 
 const KIND_LABEL = {
@@ -19,7 +22,7 @@ const SUPPORT_LABEL = {
   mms: 'MMS',
 } as const;
 
-export function NumbersTable({ numbers }: NumbersTableProps) {
+export function NumbersTable({ numbers, canManage = false }: NumbersTableProps) {
   if (numbers.length === 0) {
     return (
       <div className="rounded-lg border border-line bg-surface">
@@ -45,6 +48,7 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
               <th>브랜드</th>
               <th>상태</th>
               <th className="num">일 사용량</th>
+              {canManage ? <th className="text-right">관리</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -102,6 +106,11 @@ export function NumbersTable({ numbers }: NumbersTableProps) {
                       <span className="text-ink-dim">—</span>
                     )}
                   </td>
+                  {canManage ? (
+                    <td>
+                      <NumberActions number={n} canManage={canManage} />
+                    </td>
+                  ) : null}
                 </tr>
               );
             })}
