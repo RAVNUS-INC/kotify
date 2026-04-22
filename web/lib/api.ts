@@ -62,12 +62,20 @@ export async function apiFetch<T>(
   // (webpack 은 `await import()` 를 코드 스플리팅 지점으로 처리해 client bundle
   //  에서 제외. 이 함수는 server component 에서만 호출되므로 런타임엔 항상
   //  `next/headers` 가 가능한 환경이다.)
+  // 명시적 `.getAll() → name=value 조합` 방식. `.toString()` 은 일부 Next.js
+  // 버전에서 `[object Object]` 반환 버그 사례가 있어 불안정.
   let cookieHeader = '';
   try {
     const { cookies } = await import('next/headers');
-    cookieHeader = cookies().toString();
-  } catch {
-    // next/headers 호출 불가 환경 (e.g., test 환경) — cookie 없이 진행
+    const all = cookies().getAll();
+    cookieHeader = all.map((c) => `${c.name}=${c.value}`).join('; ');
+  } catch (err) {
+    // next/headers 호출 불가 (test 환경 등) — cookie 없이 진행. 단,
+    // 프로덕션에서 이 경로로 빠지면 FastAPI 세션 인식 못 해 303 이 됨.
+    if (process.env.NODE_ENV === 'production') {
+      // eslint-disable-next-line no-console
+      console.warn('[apiFetch] cookies() 접근 실패 — 세션 전달 불가', err);
+    }
   }
 
   const res = await fetch(url, {
@@ -92,6 +100,19 @@ export async function apiFetch<T>(
 
   if (!res.ok || body.error) {
     const err = body.error ?? { code: 'http_error', message: `HTTP ${res.status}` };
+    // 진단: 인증 계열 실패는 쿠키 forward 정황을 확인할 수 있도록 로깅.
+    if (process.env.NODE_ENV === 'production' && (res.status === 401 || res.status === 303)) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[apiFetch] ${res.status} on ${path} — cookie 길이=${cookieHeader.length}, keys=[${
+          cookieHeader
+            .split(';')
+            .map((c) => c.trim().split('=')[0])
+            .filter(Boolean)
+            .join(',')
+        }]`,
+      );
+    }
     throw new ApiError(res.status, err.code, err.message, err.fields);
   }
 

@@ -29,7 +29,8 @@ export async function fetchNotifications(
   let cookieHeader = '';
   try {
     const { cookies } = await import('next/headers');
-    cookieHeader = cookies().toString();
+    const all = cookies().getAll();
+    cookieHeader = all.map((c) => `${c.name}=${c.value}`).join('; ');
   } catch {
     /* noop */
   }
