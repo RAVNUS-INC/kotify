@@ -7,6 +7,7 @@ import {
   ProviderSettingsForm,
   SecuritySection,
   SettingsSidebar,
+  SystemUpdatePanel,
   WebhooksList,
   type SettingsTab,
 } from '@/components/settings';
@@ -154,6 +155,8 @@ async function DevelopersTabContent() {
           meta={hooksResult.meta}
         />
       </section>
+
+      <SystemUpdatePanel />
     </div>
   );
 }

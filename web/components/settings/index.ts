@@ -17,3 +17,5 @@ export { SecuritySection } from './SecuritySection';
 
 export { ProviderSettingsForm } from './ProviderSettingsForm';
 export type { ProviderSettingsFormProps } from './ProviderSettingsForm';
+
+export { SystemUpdatePanel } from './SystemUpdatePanel';

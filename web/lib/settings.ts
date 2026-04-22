@@ -184,3 +184,86 @@ export async function testMsghubClient(): Promise<{
   if (!body.data) throw new Error('API 응답에 data가 없습니다');
   return body.data;
 }
+
+// ── 시스템 업데이트 (git pull + rebuild + 재시작) ──────────────────────────
+
+export type UpdateCheckResult = {
+  updateAvailable: boolean;
+  current: string;
+  remote: string;
+  count: number;
+  commits: Array<{ hash: string; message: string }>;
+};
+
+export async function checkSystemUpdate(): Promise<UpdateCheckResult> {
+  // GET 이지만 쿠키 필요 — apiSend 로 통일 (method 명시 없으면 POST 이므로 GET 명시).
+  const res = await fetch('/api/system/update/check', { cache: 'no-store' });
+  const body = (await res.json()) as {
+    data?: UpdateCheckResult;
+    error?: { code: string; message: string };
+  };
+  if (!res.ok || body.error) {
+    throw new Error(body.error?.message ?? `HTTP ${res.status}`);
+  }
+  if (!body.data) throw new Error('API 응답에 data가 없습니다');
+  return body.data;
+}
+
+export async function applySystemUpdate(): Promise<{
+  status: 'ok';
+  version: string;
+}> {
+  const res = await apiSend('/api/system/update/apply', { method: 'POST' });
+  const body = (await res.json()) as {
+    data?: { status: 'ok'; version: string };
+    error?: { code: string; message: string };
+  };
+  if (!res.ok || body.error) {
+    throw new Error(body.error?.message ?? `HTTP ${res.status}`);
+  }
+  if (!body.data) throw new Error('API 응답에 data가 없습니다');
+  return body.data;
+}
+
+/**
+ * /healthz 를 polling 하여 서버 버전이 target 과 일치하는지 감시.
+ * target 이 '?' 면 prev 와 달라지는 순간을 완료로 본다.
+ */
+export async function waitForVersion(
+  target: string,
+  prev: string | null,
+  options: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<string> {
+  const interval = options.intervalMs ?? 1000;
+  const timeout = options.timeoutMs ?? 60_000;
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch('/api/healthz', { cache: 'no-store' });
+      if (res.ok) {
+        const j = (await res.json()) as { version?: string };
+        const v = j.version ?? '';
+        const done =
+          target !== '?'
+            ? v === target
+            : prev !== null && v !== '' && v !== prev;
+        if (done) return v;
+      }
+    } catch {
+      // 재시작 중 fetch 실패는 정상 — 다음 tick 재시도.
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  throw new Error('재시작 대기 시간 초과');
+}
+
+export async function fetchCurrentVersion(): Promise<string | null> {
+  try {
+    const res = await fetch('/api/healthz', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { version?: string };
+    return j.version ?? null;
+  } catch {
+    return null;
+  }
+}

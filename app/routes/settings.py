@@ -14,8 +14,12 @@
 """
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import threading
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -559,3 +563,170 @@ async def test_msghub_auth(
             await client.aclose()
         except Exception:
             pass
+
+
+# ── 시스템 업데이트 (git pull + rebuild + restart) ──────────────────────────
+# sudoers (deploy/kotify-sudoers) 가 kotify 사용자에게 비밀번호 없이
+# /opt/kotify/deploy/kotify-update.sh 실행을 허용. 여기서 subprocess 로
+# `sudo <script> check|apply` 호출.
+
+_UPDATE_SCRIPT = Path("/opt/kotify/deploy/kotify-update.sh")
+_UPDATE_TIMEOUT = 180  # 초. 배포 전체 (pnpm install + build 포함) 시간.
+_update_log = logging.getLogger("kotify.update")
+
+
+async def _run_update_script(action: str) -> tuple[int, str, str]:
+    """`sudo kotify-update.sh <action>` 실행. shell 거치지 않아 injection 안전.
+
+    반환: (exit_code, stdout, stderr). action 은 'check' 또는 'apply' 만 허용.
+    """
+    if action not in ("check", "apply"):
+        raise ValueError("허용되지 않은 action")
+    proc = await asyncio.create_subprocess_exec(
+        "sudo",
+        str(_UPDATE_SCRIPT),
+        action,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(
+        proc.communicate(), timeout=_UPDATE_TIMEOUT,
+    )
+    return proc.returncode or 0, stdout.decode(), stderr.decode()
+
+
+@router.get("/system/update/check", response_model=None)
+async def check_system_update() -> dict | JSONResponse:
+    """원격 main 브랜치와 비교해 업데이트 가능 여부와 신규 커밋 목록을 반환."""
+    if not _UPDATE_SCRIPT.exists():
+        return JSONResponse(
+            {"error": {
+                "code": "script_missing",
+                "message": "업데이트 스크립트를 찾을 수 없습니다 (dev 환경?)",
+            }},
+            status_code=503,
+        )
+    try:
+        rc, stdout, stderr = await _run_update_script("check")
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            {"error": {"code": "timeout", "message": "원격 확인 시간 초과"}},
+            status_code=504,
+        )
+    except Exception as exc:
+        _update_log.exception("check-update 실행 실패")
+        return JSONResponse(
+            {"error": {"code": "exec_failed", "message": str(exc)}},
+            status_code=500,
+        )
+    if rc != 0:
+        return JSONResponse(
+            {"error": {
+                "code": "script_failed",
+                "message": stderr.strip()[:400] or f"exit {rc}",
+            }},
+            status_code=502,
+        )
+    # 스크립트는 마지막 줄에 JSON 한 줄.
+    last_line = ""
+    for line in stdout.strip().splitlines()[::-1]:
+        if line.strip():
+            last_line = line.strip()
+            break
+    try:
+        data = json.loads(last_line)
+    except json.JSONDecodeError:
+        return JSONResponse(
+            {"error": {"code": "parse_failed", "message": "응답 파싱 실패"}},
+            status_code=502,
+        )
+    # snake_case → camelCase 로 API 계약 정규화.
+    return {
+        "data": {
+            "updateAvailable": bool(data.get("update_available")),
+            "current": data.get("current", ""),
+            "remote": data.get("remote", ""),
+            "count": int(data.get("count", 0)),
+            "commits": data.get("commits", []),
+        }
+    }
+
+
+@router.post(
+    "/system/update/apply",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+async def apply_system_update(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """업데이트 실행 — git pull + backend/web 설치 + DB migrate + 재시작 스케줄.
+
+    스크립트 apply 는 여러 phase 를 JSON-line 으로 찍고 'done' 에서 버전 반환.
+    프런트는 이 응답의 `version` 을 기억해 /healthz 를 polling → version 이
+    바뀌면 새로고침.
+    """
+    if not _UPDATE_SCRIPT.exists():
+        return JSONResponse(
+            {"error": {"code": "script_missing", "message": "스크립트 없음"}},
+            status_code=503,
+        )
+
+    audit.log(db, actor_sub=user.sub, action="SYSTEM_UPDATE_APPLY")
+    db.commit()
+
+    try:
+        rc, stdout, stderr = await _run_update_script("apply")
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            {"error": {"code": "timeout", "message": "업데이트 시간 초과"}},
+            status_code=504,
+        )
+    except Exception as exc:
+        _update_log.exception("apply-update 실행 실패")
+        return JSONResponse(
+            {"error": {"code": "exec_failed", "message": str(exc)}},
+            status_code=500,
+        )
+
+    # stdout 을 역순으로 훑어 phase=done 의 version 을 찾는다. systemctl restart
+    # 가 비동기 스케줄이라 rc 가 비정상이어도 done 이 찍혔다면 성공으로 해석.
+    target_version: str | None = None
+    error_info: dict | None = None
+    for line in stdout.strip().splitlines()[::-1]:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("phase") == "done":
+            target_version = obj.get("version")
+            break
+        if obj.get("phase") == "error":
+            # 첫 error 만 캡처 (역순이라 실제로는 마지막 error).
+            if error_info is None:
+                error_info = obj
+
+    if target_version:
+        return {"data": {"status": "ok", "version": target_version}}
+
+    if error_info:
+        return JSONResponse(
+            {"error": {
+                "code": error_info.get("step", "unknown"),
+                "message": error_info.get("message", "업데이트 실패"),
+                "fields": {"rollback": str(error_info.get("rollback", False))},
+            }},
+            status_code=500,
+        )
+
+    if rc != 0:
+        return JSONResponse(
+            {"error": {
+                "code": "script_failed",
+                "message": stderr.strip()[:400] or f"exit {rc}",
+            }},
+            status_code=500,
+        )
+
+    return {"data": {"status": "ok", "version": "?"}}
