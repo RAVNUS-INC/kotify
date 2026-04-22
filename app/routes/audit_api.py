@@ -1,104 +1,171 @@
 """감사 로그 API — S13.
 
-Phase 8c: mock. 실제 app.services.audit 로그는 DB에 있지만 현재 리플레이
-테이블 연결은 Phase 10+. 지금은 화면 개발용 mock 고정 데이터.
+실 DB (audit_logs LEFT JOIN users) 기반. services.audit.log() 로 기록된
+모든 액션을 최신순으로 조회. CSV export 는 CSV injection 방어.
+
+api-contract.md §S13 — web/types/audit.ts AuditEntry shape.
 """
 from __future__ import annotations
 
 import csv
 import io
-from typing import List, Optional
+from datetime import UTC, datetime
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
 
 from app.auth.deps import require_role, require_setup_complete
+from app.db import get_db
+from app.models import AuditLog, User
+from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
 
 # 감사 로그는 admin 전용
 router = APIRouter(
     dependencies=[Depends(require_role("admin")), Depends(require_setup_complete)],
 )
 
+KST = ZoneInfo("Asia/Seoul")
 
-_MOCK_AUDIT: List[dict] = [
-    {"id": "a-001", "time": "2026-04-21 14:02:11", "actor": "김운영", "actorEmail": "hello@ravnus.kr", "action": "CREATE_CAMPAIGN", "target": "c-001 (4월 공지사항)", "ip": "203.0.113.42"},
-    {"id": "a-002", "time": "2026-04-21 13:40:02", "actor": "이수진", "actorEmail": "marketing@ravnus.kr", "action": "CREATE_CAMPAIGN", "target": "c-002 (마케팅 뉴스레터 #12)", "ip": "203.0.113.17"},
-    {"id": "a-003", "time": "2026-04-21 13:30:00", "actor": "박지훈", "actorEmail": "ops@ravnus.kr", "action": "LOGIN", "target": "-", "ip": "203.0.113.42"},
-    {"id": "a-004", "time": "2026-04-21 11:22:45", "actor": "김민재", "actorEmail": "dev@ravnus.kr", "action": "CREATE_API_KEY", "target": "k-001 (배포 서버)", "ip": "198.51.100.8"},
-    {"id": "a-005", "time": "2026-04-21 10:15:30", "actor": "김운영", "actorEmail": "hello@ravnus.kr", "action": "PATCH_ORG", "target": "org (name)", "ip": "203.0.113.42"},
-    {"id": "a-006", "time": "2026-04-21 09:20:00", "actor": "박지훈", "actorEmail": "ops@ravnus.kr", "action": "CREATE_CAMPAIGN", "target": "c-004 (인사팀 공지)", "ip": "203.0.113.42"},
-    {"id": "a-007", "time": "2026-04-21 08:02:18", "actor": "이수진", "actorEmail": "marketing@ravnus.kr", "action": "LOGIN", "target": "-", "ip": "203.0.113.17"},
-    {"id": "a-008", "time": "2026-04-20 18:30:22", "actor": "김운영", "actorEmail": "hello@ravnus.kr", "action": "CAMPAIGN_FAILED", "target": "c-005 (월간 리포트 발송)", "ip": "203.0.113.42"},
-    {"id": "a-009", "time": "2026-04-20 17:15:08", "actor": "박지훈", "actorEmail": "ops@ravnus.kr", "action": "CANCEL_CAMPAIGN", "target": "c-006 (긴급 시스템 점검)", "ip": "203.0.113.42"},
-    {"id": "a-010", "time": "2026-04-20 16:00:00", "actor": "이수진", "actorEmail": "marketing@ravnus.kr", "action": "CREATE_CAMPAIGN", "target": "c-011 (카톡 이벤트 안내)", "ip": "203.0.113.17"},
-    {"id": "a-011", "time": "2026-04-20 14:30:55", "actor": "김민재", "actorEmail": "dev@ravnus.kr", "action": "CREATE_WEBHOOK", "target": "w-002 (internal audit)", "ip": "198.51.100.8"},
-    {"id": "a-012", "time": "2026-04-20 10:00:00", "actor": "김운영", "actorEmail": "hello@ravnus.kr", "action": "INVITE_MEMBER", "target": "m-005 (reader@ravnus.kr)", "ip": "203.0.113.42"},
-    {"id": "a-013", "time": "2026-04-19 14:00:00", "actor": "박지훈", "actorEmail": "ops@ravnus.kr", "action": "CREATE_CAMPAIGN", "target": "c-012 (단체 회식 공지)", "ip": "203.0.113.42"},
-    {"id": "a-014", "time": "2026-04-19 09:00:12", "actor": "김운영", "actorEmail": "hello@ravnus.kr", "action": "LOGIN", "target": "-", "ip": "203.0.113.42"},
-    {"id": "a-015", "time": "2026-04-18 15:22:01", "actor": "김민재", "actorEmail": "dev@ravnus.kr", "action": "REGISTER_NUMBER", "target": "n-003 (070-1234-5678)", "ip": "198.51.100.8"},
-    {"id": "a-016", "time": "2026-04-18 10:30:00", "actor": "김운영", "actorEmail": "hello@ravnus.kr", "action": "UPLOAD_CSV", "target": "g-vip (128명)", "ip": "203.0.113.42"},
-    {"id": "a-017", "time": "2026-04-17 16:45:30", "actor": "이전직원", "actorEmail": "former@ravnus.kr", "action": "LOGIN_FAILED", "target": "-", "ip": "198.51.100.55"},
-    {"id": "a-018", "time": "2026-04-17 11:10:08", "actor": "김운영", "actorEmail": "hello@ravnus.kr", "action": "DEACTIVATE_MEMBER", "target": "m-006 (former@ravnus.kr)", "ip": "203.0.113.42"},
-    {"id": "a-019", "time": "2026-04-16 17:00:42", "actor": "박지훈", "actorEmail": "ops@ravnus.kr", "action": "EXPORT_CSV", "target": "audit (last 30 days)", "ip": "203.0.113.42"},
-    {"id": "a-020", "time": "2026-04-16 09:02:15", "actor": "박지훈", "actorEmail": "ops@ravnus.kr", "action": "LOGIN", "target": "-", "ip": "203.0.113.42"},
-]
+# 상한 — ORDER BY id DESC 는 PK 인덱스 사용, LIMIT 1000 은 MVP 규모에서 충분.
+# action/q 필터는 현재 전체 스캔(audit_logs 에 별도 인덱스 없음). 규모가 커지면
+# action + created_at 복합 인덱스를 추가 마이그레이션으로 도입.
+_AUDIT_PAGE_SIZE = 1000
 
 
-from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
+def _escape_like(s: str) -> str:
+    """LIKE 와일드카드(%, _, \\) 이스케이프. 리터럴 검색 보장.
+
+    사용자가 '100%' 로 검색하면 '%' 를 와일드카드가 아닌 리터럴로 취급해야
+    '1000'/'10000' 같은 오매칭을 막는다. 백슬래시는 반드시 먼저 치환
+    (그래야 뒤이어 추가되는 \\% / \\_ 이 두 번 이스케이프되지 않음).
+    """
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _filter(rows: List[dict], q: Optional[str], action: Optional[str]) -> List[dict]:
+def _fmt_kst_full(iso_utc: str | None) -> str:
+    """UTC ISO → 'YYYY-MM-DD HH:MM:SS' KST. 실패 시 빈 문자열."""
+    if not iso_utc:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return ""
+
+
+def _actor_fallback(actor_sub: str | None) -> str:
+    """User JOIN 실패 시 대체 표시.
+
+    - actor_sub NULL (시스템 액션) → "시스템"
+    - actor_sub 는 있는데 users row 없음(탈퇴한 사용자) → "(탈퇴:xxxxxxxx)"
+      로 앞 8자 노출해 감사 추적 가능하게.
+    """
+    if actor_sub is None:
+        return "시스템"
+    return f"(탈퇴:{actor_sub[:8]})"
+
+
+def _entry_to_dict(
+    log: AuditLog, actor_name: str | None, actor_email: str | None
+) -> dict:
+    """AuditLog + joined User → web/types/audit.ts AuditEntry shape."""
+    return {
+        "id": f"a-{log.id}",
+        "time": _fmt_kst_full(log.created_at),
+        "actor": actor_name or _actor_fallback(log.actor_sub),
+        "actorEmail": actor_email or "",
+        "action": log.action,
+        "target": log.target or "-",
+        "ip": log.ip or "-",
+    }
+
+
+def _query_audit(
+    db: Session, q: Optional[str], action: Optional[str]
+) -> list[tuple[AuditLog, str | None, str | None]]:
+    """SELECT audit_logs LEFT JOIN users ORDER BY id DESC.
+
+    id 는 autoincrement PK 라 insert 순 == 조회 역순. services.audit.log 가
+    항상 now() 로 created_at 을 채우므로 id DESC 와 created_at DESC 가 일치,
+    그리고 id DESC 는 PK 인덱스 활용이라 정렬 비용이 없다.
+
+    q 는 actor name/email/target 에 부분매치(LIKE wildcard 이스케이프).
+    action 은 정확일치.
+    """
+    stmt = (
+        select(AuditLog, User.name, User.email)
+        .select_from(AuditLog)
+        .outerjoin(User, User.sub == AuditLog.actor_sub)
+    )
     if action and action != "all":
-        rows = [r for r in rows if r.get("action") == action]
+        stmt = stmt.where(AuditLog.action == action)
     if q:
-        ql = q.lower()
-        rows = [
-            r
-            for r in rows
-            if ql in r["actor"].lower()
-            or ql in r["actorEmail"].lower()
-            or ql in r["target"].lower()
-        ]
-    return rows
+        pat = f"%{_escape_like(q)}%"
+        stmt = stmt.where(
+            or_(
+                User.name.ilike(pat, escape="\\"),
+                User.email.ilike(pat, escape="\\"),
+                AuditLog.target.ilike(pat, escape="\\"),
+            )
+        )
+    stmt = stmt.order_by(AuditLog.id.desc()).limit(_AUDIT_PAGE_SIZE)
+    rows = db.execute(stmt).all()
+    return [(r[0], r[1], r[2]) for r in rows]
+
+
+# ── S13: GET /audit ──────────────────────────────────────────────────────────
 
 
 @router.get("/audit")
-async def list_audit(
+def list_audit(
     q: Optional[str] = None,
     action: Optional[str] = None,
+    db: Session = Depends(get_db),
 ) -> dict:
-    rows = _filter(_MOCK_AUDIT, q, action)
-    return {"data": rows, "meta": {"total": len(rows)}}
+    """감사 로그 목록 — created_at DESC, 최대 1000건."""
+    rows = _query_audit(db, q, action)
+    return {
+        "data": [_entry_to_dict(log, name, email) for log, name, email in rows],
+        "meta": {
+            "total": len(rows),
+            "hasMore": len(rows) >= _AUDIT_PAGE_SIZE,
+        },
+    }
 
 
 @router.get("/audit/export.csv")
-async def export_audit_csv(
+def export_audit_csv(
     q: Optional[str] = None,
     action: Optional[str] = None,
-):
-    rows = _filter(_MOCK_AUDIT, q, action)
+    db: Session = Depends(get_db),
+) -> Response:
+    """CSV 다운로드 — UTF-8 BOM + CSV injection 방어 (util.csv_safe)."""
+    rows = _query_audit(db, q, action)
 
     buf = io.StringIO()
-    # UTF-8 BOM으로 Excel 한글 호환
+    # UTF-8 BOM 으로 Excel 한글 호환
     buf.write("\ufeff")
     writer = csv.writer(buf)
     writer.writerow(["시간", "주체", "이메일", "액션", "대상", "IP"])
-    for r in rows:
-        writer.writerow(
-            [
-                _safe_csv_cell(r["time"]),
-                _safe_csv_cell(r["actor"]),
-                _safe_csv_cell(r["actorEmail"]),
-                _safe_csv_cell(r["action"]),
-                _safe_csv_cell(r["target"]),
-                _safe_csv_cell(r["ip"]),
-            ]
-        )
+    for log, name, email in rows:
+        entry = _entry_to_dict(log, name, email)
+        writer.writerow([
+            _safe_csv_cell(entry["time"]),
+            _safe_csv_cell(entry["actor"]),
+            _safe_csv_cell(entry["actorEmail"]),
+            _safe_csv_cell(entry["action"]),
+            _safe_csv_cell(entry["target"]),
+            _safe_csv_cell(entry["ip"]),
+        ])
 
     return Response(
         content=buf.getvalue(),
         media_type="text/csv; charset=utf-8",
-        headers={
-            "Content-Disposition": 'attachment; filename="kotify-audit.csv"',
-        },
+        headers={"Content-Disposition": 'attachment; filename="kotify-audit.csv"'},
     )
