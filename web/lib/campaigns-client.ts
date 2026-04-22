@@ -46,3 +46,29 @@ export function buildCampaignExportHref(
   const qs = options.status ? `?status=${options.status}` : '';
   return `/api/campaigns/${encodeURIComponent(id)}/export.csv${qs}`;
 }
+
+export type UploadedAttachment = {
+  attachmentId: number;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  originalFilename: string;
+  /** <img src> 용 */
+  url: string;
+};
+
+/**
+ * MMS 첨부 이미지 업로드 — 서버 전처리 후 msghub 업로드 + DB BLOB 저장.
+ * 성공 시 attachmentId + 미리보기 URL 반환.
+ */
+export async function uploadCampaignAttachmentClient(
+  file: File,
+): Promise<UploadedAttachment> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await apiSend('/api/campaigns/attachments', {
+    method: 'POST',
+    body: form,
+  });
+  return parse<UploadedAttachment>(res);
+}

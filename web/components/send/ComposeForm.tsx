@@ -16,8 +16,10 @@ import {
   Radio,
 } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import type { UploadedAttachment } from '@/lib/campaigns-client';
 import { apiSend } from '@/lib/csrf-client';
 import type { SenderNumber } from '@/types/number';
+import { AttachmentPicker } from './AttachmentPicker';
 import { DeviceMockup } from './DeviceMockup';
 
 type SendMode = 'now' | 'schedule';
@@ -59,6 +61,7 @@ export function ComposeForm() {
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [attachment, setAttachment] = useState<UploadedAttachment | null>(null);
 
   // 발신번호 로딩 (승인된 번호만). stale response race 방어를 위해 cancelled flag.
   useEffect(() => {
@@ -123,6 +126,7 @@ export function ComposeForm() {
           recipients,
           message,
           sendAt: mode === 'schedule' ? sendAt : null,
+          attachmentId: attachment?.attachmentId ?? null,
           channel,
         }),
       });
@@ -275,6 +279,14 @@ export function ComposeForm() {
                 </span>
               </>
             }
+          />
+        </Field>
+
+        <Field label="첨부 이미지" hint="선택 — 첨부 시 MMS 로 전송됩니다. JPEG/PNG/WebP 허용, 최대 10MB.">
+          <AttachmentPicker
+            value={attachment}
+            onChange={setAttachment}
+            disabled={submitting}
           />
         </Field>
 

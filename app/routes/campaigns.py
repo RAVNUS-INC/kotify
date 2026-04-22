@@ -15,8 +15,9 @@ from zoneinfo import ZoneInfo
 import csv
 import io
 import json
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, or_, select
@@ -24,11 +25,16 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, Message, User
+from app.models import Attachment, Campaign, Message, User
 from app.msghub.codes import SUCCESS_CODE
 from app.security.csrf import verify_csrf
 from app.services import audit
+from app.services.image import ImageProcessingError, preprocess_mms_image
 from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
+
+# MMS 원본 업로드 상한 (전처리 전). 프론트가 초과분을 차단해도 서버가
+# 최종 방어선. 10 MiB.
+_MAX_RAW_UPLOAD_BYTES = 10 * 1024 * 1024
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -164,6 +170,8 @@ class CampaignCreateBody(BaseModel):
     message: str = Field(..., min_length=1)
     sendAt: Optional[str] = None
     channel: Optional[str] = None  # 참조용, 실제로는 서버가 재분류
+    # MMS 첨부 — POST /campaigns/attachments 업로드 후 돌려받은 attachmentId.
+    attachmentId: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("sender", "message")
     @classmethod
@@ -294,6 +302,7 @@ async def create_campaign(
             message_type="SMS",  # dispatch 내부에서 content 로 재분류
             subject=None,
             reserve_time_local=body.sendAt or None,
+            attachment_id=body.attachmentId,
         )
     except ValueError as exc:
         # ValueError 는 사용자 입력 검증 오류로 메시지를 그대로 노출해도 안전.
@@ -505,5 +514,150 @@ def export_campaign_csv(
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "X-Campaign-Subject": subject_safe.encode("ascii", "replace").decode(),
+        },
+    )
+
+
+# ── MMS 첨부 업로드 + 서빙 ──────────────────────────────────────────────────
+
+
+@router.post(
+    "/campaigns/attachments",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+async def upload_attachment(
+    file: UploadFile = File(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """MMS 첨부 이미지 업로드 — sender/admin 전용.
+
+    파이프라인:
+      1) 원본 읽기 (≤10 MiB)
+      2) preprocess_mms_image() — JPEG 300KB/1920x1080 변환
+      3) msghub upload_file(channel='mms') — fileId 발급
+      4) attachments 테이블에 BLOB + 메타 저장
+      5) 응답: {attachmentId, width, height, sizeBytes, originalFilename, url}
+    """
+    if not _user_has_role(user, "sender", "admin", "owner"):
+        return JSONResponse(
+            {"error": {"code": "forbidden", "message": "첨부 업로드 권한이 없습니다"}},
+            status_code=403,
+        )
+
+    raw = await file.read()
+    if not raw:
+        return JSONResponse(
+            {"error": {"code": "empty_file", "message": "빈 파일입니다"}},
+            status_code=400,
+        )
+    if len(raw) > _MAX_RAW_UPLOAD_BYTES:
+        limit_mb = _MAX_RAW_UPLOAD_BYTES // (1024 * 1024)
+        return JSONResponse(
+            {"error": {
+                "code": "file_too_large",
+                "message": f"원본이 너무 큽니다 (최대 {limit_mb}MB)",
+            }},
+            status_code=413,
+        )
+
+    try:
+        processed, width, height = preprocess_mms_image(raw)
+    except ImageProcessingError as exc:
+        return JSONResponse(
+            {"error": {"code": "image_error", "message": str(exc)}},
+            status_code=400,
+        )
+
+    # msghub 싱글톤 — 순환 import 방지 위해 함수 내부 import.
+    from app.main import get_msghub_client
+    from app.msghub.schemas import MsghubError
+
+    msghub_client = get_msghub_client()
+    if msghub_client is None:
+        return JSONResponse(
+            {"error": {
+                "code": "msghub_unavailable",
+                "message": "msghub 설정이 완료되지 않았습니다",
+            }},
+            status_code=503,
+        )
+
+    file_id = uuid.uuid4().hex
+    stored_filename = f"{file_id}.jpg"
+    try:
+        upload_resp = await msghub_client.upload_file(
+            channel="mms",
+            file_id=f"mms-{file_id}",
+            file_bytes=processed,
+            content_type="image/jpeg",
+        )
+    except MsghubError as exc:
+        return JSONResponse(
+            {"error": {"code": "upload_failed", "message": f"msghub 업로드 실패: {exc}"}},
+            status_code=502,
+        )
+
+    from datetime import UTC as _UTC
+    now_iso = datetime.now(_UTC).isoformat()
+    attachment = Attachment(
+        campaign_id=None,  # 발송 시점에 연결됨
+        msghub_file_id=getattr(upload_resp, "file_id", None),
+        original_filename=file.filename or stored_filename,
+        stored_filename=stored_filename,
+        content_blob=processed,
+        file_size_bytes=len(processed),
+        width=width,
+        height=height,
+        uploaded_by=user.sub,
+        uploaded_at=now_iso,
+        file_expires_at=getattr(upload_resp, "file_exp_dt", None),
+        channel="mms",
+    )
+    db.add(attachment)
+    db.flush()
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action="CAMPAIGN_ATTACHMENT_UPLOAD",
+        target=f"attachment:{attachment.id}",
+        detail={"size": len(processed), "width": width, "height": height},
+    )
+    db.commit()
+
+    return {
+        "data": {
+            "attachmentId": attachment.id,
+            "width": width,
+            "height": height,
+            "sizeBytes": len(processed),
+            "originalFilename": attachment.original_filename,
+            "url": f"/api/campaigns/attachments/{attachment.id}",
+        }
+    }
+
+
+@router.get("/campaigns/attachments/{aid}")
+def serve_attachment(aid: str, db: Session = Depends(get_db)) -> Response:
+    """첨부 이미지 바이트 스트림 — 프리뷰 <img> 용.
+
+    권한: 라우터 레벨 require_user 로 로그인된 사용자만. 공개 URL 아님.
+    """
+    try:
+        att_id = int(aid)
+    except (ValueError, TypeError):
+        return Response(status_code=404)
+    att = db.get(Attachment, att_id)
+    if att is None:
+        return Response(status_code=404)
+    return Response(
+        content=att.content_blob,
+        media_type="image/jpeg",
+        headers={
+            # 이 URL 은 사용자별이 아니므로 public 이라고 봐도 무방하지만 세션
+            # 쿠키 뒤라 사실상 인증된 사용자에게만 노출. 5분 캐시.
+            "Cache-Control": "private, max-age=300",
+            "Content-Disposition": f'inline; filename="{att.original_filename}"',
         },
     )
