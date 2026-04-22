@@ -38,6 +38,12 @@ set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export HOME="/root"
 
+# pnpm 은 store/cache 를 `$HOME/.local/share/pnpm`, `$HOME/.cache/pnpm` 에
+# 만드는데 내부적으로 `fs.mkdir` 호출 시 `{recursive: true}` 를 주지 않아
+# 부모 디렉토리 (`.local`, `.cache`) 가 없으면 `ENOENT` 로 rc=254 실패.
+# 일부 최소 컨테이너 이미지는 root 홈에 이 경로가 없으니 pre-create.
+mkdir -p "${HOME}/.local/share" "${HOME}/.cache"
+
 INSTALL_DIR="/opt/kotify"
 WEB_DIR="${INSTALL_DIR}/web"
 VENV="${INSTALL_DIR}/.venv"
