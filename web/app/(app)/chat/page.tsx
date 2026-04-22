@@ -48,7 +48,11 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
   }
 
   return (
-    <div className="k-page flex h-full flex-col">
+    // 뷰포트-앵커 height — `.k-page flex:1 + .k-shell min-height:100%` 체인은
+    // 콘텐츠가 길어지면 전체가 늘어나 내부 overflow-y-auto 가 먹히지 않는다.
+    // 100dvh - topbar(52px) 로 고정하면 메시지가 수천 건이어도 ThreadView 의
+    // `flex-1 min-h-0 overflow-y-auto` 가 정상 동작 (내부에서만 스크롤).
+    <div className="k-page flex h-[calc(100dvh_-_52px)] min-h-0 flex-col">
       <PageHeader
         title="대화방"
         sub={`${threads.length}개 대화 · 미답 ${unreadCount}건`}
