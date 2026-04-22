@@ -269,10 +269,14 @@ FASTAPI_URL=http://127.0.0.1:8080 pnpm build
 # 따로 두지 않는다. 런타임에 필요한 파일이 빠져 있으면 HTTP 404가 발생하므로
 # 부트스트랩 시점에 한 번 복사해둔다.
 info "standalone 산출물에 static/public 복사..."
-mkdir -p "${INSTALL_DIR}/web/.next/standalone/.next"
-cp -R "${INSTALL_DIR}/web/.next/static" "${INSTALL_DIR}/web/.next/standalone/.next/"
+# update.sh 와 동일 패턴 — 내용물만 merge 로 복사해 재실행 시 디렉토리 중첩
+# (e.g. .next/standalone/.next/static/static) 방지. fresh install 에선
+# 빈 디렉토리에 복사하는 것과 동일 효과.
+mkdir -p "${INSTALL_DIR}/web/.next/standalone/.next/static"
+cp -R "${INSTALL_DIR}/web/.next/static/." "${INSTALL_DIR}/web/.next/standalone/.next/static/"
 if [[ -d "${INSTALL_DIR}/web/public" ]]; then
-    cp -R "${INSTALL_DIR}/web/public" "${INSTALL_DIR}/web/.next/standalone/"
+    mkdir -p "${INSTALL_DIR}/web/.next/standalone/public"
+    cp -R "${INSTALL_DIR}/web/public/." "${INSTALL_DIR}/web/.next/standalone/public/"
 fi
 
 # 소유권 정리 — systemd(kotify-web.service)가 kotify 유저로 읽을 수 있도록

@@ -76,15 +76,25 @@ case "${1:-}" in
         # 누락 시 localhost:8000 로 빠지는 과거 버그 재발 방지 목적으로 명시.
         FASTAPI_URL=http://127.0.0.1:8080 pnpm build >/dev/null
 
-        # standalone 산출물에 필요한 정적 자원 복사
+        # standalone 산출물에 정적 자원 merge
         # (Next.js output: 'standalone' 은 server.js 만 만들고 static/public 을
         # 따로 두지 않는다. 런타임에 필요한 파일이 빠져 있으면 404 가 뜸.)
-        # 재빌드 시 기존 static 이 있으면 제거 후 복사 (cp -R 덮어쓰기 충돌 회피).
-        rm -rf "${WEB_DIR}/.next/standalone/.next/static"
-        cp -R "${WEB_DIR}/.next/static" "${WEB_DIR}/.next/standalone/.next/"
+        #
+        # ⚠ race 주의: 과거엔 `rm -rf static && cp -R ...` 였는데 systemctl
+        # restart 가 2초 뒤 비동기라, rm~restart 사이의 짧은 window 에 구
+        # process 가 메모리의 옛 hash 를 디스크에서 못 찾아 **404** 발생.
+        # 브라우저가 이 404 를 캐시하면 지속적으로 CSS 가 깨져 보임.
+        #
+        # 해결: 삭제하지 않고 `cp -R <src>/. <dst>/` 로 내용물만 merge.
+        # 새/옛 hash 는 파일명이 달라 충돌 없고, 재시작 후에는 신규 HTML 이
+        # 신규 hash 를 참조. 옛 hash 파일들은 누적되지만 ct-bootstrap 재실행
+        # 시 fresh install 로 정리됨 (문제없음).
+        mkdir -p "${WEB_DIR}/.next/standalone/.next/static"
+        cp -R "${WEB_DIR}/.next/static/." "${WEB_DIR}/.next/standalone/.next/static/"
         if [[ -d "${WEB_DIR}/public" ]]; then
-            rm -rf "${WEB_DIR}/.next/standalone/public"
-            cp -R "${WEB_DIR}/public" "${WEB_DIR}/.next/standalone/"
+            mkdir -p "${WEB_DIR}/.next/standalone/public"
+            # public 은 파일명 충돌 가능하지만 덮어쓰기가 정답 (새 우선).
+            cp -R "${WEB_DIR}/public/." "${WEB_DIR}/.next/standalone/public/"
         fi
 
         # 빌드 성공까지 왔으니 ERR trap 해제 (재시작 단계에서는 롤백 불필요)
