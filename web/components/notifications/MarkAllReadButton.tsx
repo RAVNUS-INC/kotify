@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Icon } from '@/components/ui';
-import { markAllNotificationsReadClient } from '@/lib/notifications';
+import { markAllNotificationsReadClient } from '@/lib/notifications-client';
 
 export type MarkAllReadButtonProps = {
   disabled?: boolean;

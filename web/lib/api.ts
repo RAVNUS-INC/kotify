@@ -5,6 +5,13 @@
  * 적용된다. Server Component에서는 rewrite가 적용되지 않으므로 절대 URL로
  * 직접 호출해야 한다. 이 함수는 server-side 전용.
  *
+ * ⚠️  중요: Next.js 서버 컴포넌트에서 외부 fetch 호출은 **브라우저의
+ * Cookie 를 자동으로 forward 하지 않는다**. FastAPI 가 세션을 인식하려면
+ * `next/headers.cookies()` 에서 현재 요청의 쿠키를 읽어 `Cookie` 헤더로
+ * 직접 전달해야 한다. 이 모듈은 client component에서도 import될 수 있으니
+ * `next/headers` 는 **함수 내부에서 동적 import**해 클라이언트 번들에
+ * 포함되지 않도록 한다.
+ *
  * Client component에서는 상대 경로 `/api/...`로 fetch하면 된다 (rewrite 탐).
  */
 
@@ -48,9 +55,28 @@ export async function apiFetch<T>(
   init?: RequestInit,
 ): Promise<T> {
   const url = path.startsWith('http') ? path : `${FASTAPI_URL}${path}`;
+
+  // 서버 컴포넌트의 요청 쿠키를 FastAPI 로 forward. 이거 없으면 FastAPI 가
+  // 세션 인식 못 해서 보호 엔드포인트가 303 을 반환 → 페이지 렌더 실패.
+  // 동적 import로 `next/headers`가 **클라이언트 번들에 포함되지 않게** 한다.
+  // (webpack 은 `await import()` 를 코드 스플리팅 지점으로 처리해 client bundle
+  //  에서 제외. 이 함수는 server component 에서만 호출되므로 런타임엔 항상
+  //  `next/headers` 가 가능한 환경이다.)
+  let cookieHeader = '';
+  try {
+    const { cookies } = await import('next/headers');
+    cookieHeader = cookies().toString();
+  } catch {
+    // next/headers 호출 불가 환경 (e.g., test 환경) — cookie 없이 진행
+  }
+
   const res = await fetch(url, {
     cache: 'no-store',
     ...init,
+    headers: {
+      ...(cookieHeader ? { cookie: cookieHeader } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
 
   let body: ApiEnvelope<T>;

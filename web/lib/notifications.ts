@@ -24,8 +24,18 @@ export async function fetchNotifications(
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
 
   const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://127.0.0.1:8080';
+  // apiFetch 와 동일: 서버 컴포넌트에서 FastAPI 로 세션 쿠키 수동 forward 필요.
+  // 동적 import 로 client bundle 에 next/headers 가 포함되지 않도록 한다.
+  let cookieHeader = '';
+  try {
+    const { cookies } = await import('next/headers');
+    cookieHeader = cookies().toString();
+  } catch {
+    /* noop */
+  }
   const res = await fetch(`${FASTAPI_URL}/notifications${suffix}`, {
     cache: 'no-store',
+    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
   });
   const body = (await res.json()) as ApiEnvelope<Notification[]> & {
     meta?: NotificationListMeta;
@@ -39,14 +49,6 @@ export async function fetchNotifications(
   };
 }
 
-export async function markNotificationReadClient(id: string): Promise<void> {
-  await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
-    method: 'POST',
-  });
-}
-
-export async function markAllNotificationsReadClient(): Promise<number> {
-  const res = await fetch('/api/notifications/read-all', { method: 'POST' });
-  const body = (await res.json()) as { data?: { readCount: number } };
-  return body.data?.readCount ?? 0;
-}
+// 클라이언트 전용 헬퍼는 `./notifications-client.ts` 로 분리.
+// (이 파일은 next/headers 를 import 하므로 client component 에서 직접 import 시
+//  webpack 빌드가 깨진다. server/client 경계 분리.)
