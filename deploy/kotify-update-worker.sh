@@ -75,10 +75,14 @@ cleanup_on_error() {
         rm -f "${DB_PATH}-wal" "${DB_PATH}-shm" 2>/dev/null || true
         chown "${SERVICE_USER}:${SERVICE_GROUP}" "${DB_PATH}" 2>/dev/null || true
     fi
-    # 3. .next/standalone 정리 — 버전 불일치 하이브리드 상태 방지.
-    #    rollback 후엔 standalone 이 미완 빌드일 수 있어 제거. 서비스 재시작
-    #    시 ExecStartPre 나 다음 update 에서 새로 빌드하도록 강제.
-    rm -rf "${WEB_DIR}/.next/standalone" 2>/dev/null || true
+    # 3. .next/standalone 은 **건드리지 않는다**.
+    #    과거엔 "rollback 후 미완 빌드 제거" 명분으로 `rm -rf` 했는데 오히려
+    #    서비스를 무너뜨린다: 빌드 실패 시 git 은 직전 성공 커밋으로 되돌아
+    #    갔지만, 이 성공 커밋이 만들어낸 standalone 까지 지우면 구동 중인
+    #    Next.js 가 static chunk 를 못 찾아 "Loading chunk failed" 500 에러
+    #    가 사용자에게 노출됨. Next 빌드는 standalone 을 매번 새로 덮어
+    #    씌우므로 미완 빌드가 남을 가능성도 거의 없다 (build 최종 단계에서
+    #    한 번에 copy). 다음 apply 가 성공하면 자연히 덮여진다.
     exit "${rc}"
 }
 trap cleanup_on_error ERR
