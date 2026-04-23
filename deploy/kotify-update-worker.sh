@@ -20,28 +20,28 @@
 
 set -euo pipefail
 
-# ── Env 명시 (sudo invoke 경로 독립화) ──────────────────────────────────────
+# ── Env 명시 (sudo invoke 경로 독립화 + systemd hardening 우회) ────────────
 # 이 스크립트는 두 가지 경로로 실행된다:
 #   A) 터미널 수동: 관리자가 `sudo /opt/kotify/deploy/kotify-update.sh apply`
 #   B) 웹 UI 버튼 : kotify 서비스(systemd)가 subprocess 로 `sudo ...` 호출
 #
-# sudo 는 env_reset 기본 + /etc/sudoers 의 secure_path 로 PATH 만 세팅하는데,
-# HOME 처리가 배포판마다 다르다 (always_set_home on/off). kotify 사용자는
-# nologin + HOME=/var/lib/kotify 라 경로 B 에서 HOME 이 거기로 유지되면
-# pnpm store/cache 가 /var/lib/kotify 하위로 튀어 권한/상태 꼬임 → rc=254
-# (pnpm internal failure) 가 재현된다.
+# 두 경로에서 환경이 달라 pnpm/alembic 이 다른 지점에서 실패하는 증상이
+# 반복됐다. 핵심은 **HOME**:
+#   - sudo 는 `always_set_home` on/off 에 따라 HOME 을 (invoking user) 로
+#     유지하거나 (target root) 로 덮어씀 — 배포판별로 다름.
+#   - 경로 B 는 systemd 의 `ProtectHome=true` + `ProtectSystem=strict` 라
+#     `/root`, `/home` 등 대부분의 시스템 경로가 ReadOnly. pnpm 이 store
+#     를 만들려다 EROFS 로 죽는다.
+#   - ReadWritePaths 에 있는 경로(`/opt/kotify`, `/var/lib/kotify`,
+#     `/var/log/kotify`) 만 쓰기 가능.
 #
-# 해결: invoke 경로와 무관하게 worker 내부에서 PATH/HOME 을 **항상** 동일
-# 하게 고정. /usr/local/bin 은 ct-bootstrap 의 `npm install -g pnpm` 설치
-# 위치. HOME=/root 로 두면 pnpm store 는 /root/.local/share/pnpm, cache 는
-# /root/.cache/pnpm — root 소유라 권한 충돌 없음.
+# 해결: HOME 을 `/opt/kotify/.worker-home` 으로 고정. pnpm 은
+# `$HOME/.local/share/pnpm` 에 store, `$HOME/.cache/pnpm` 에 cache 를
+# 만드는데 이 경로는 ReadWritePaths 에 포함되므로 모든 배포판/모든 invoke
+# 경로에서 확실히 동작. pnpm 은 내부적으로 `fs.mkdir` 를 `recursive:false`
+# 로 호출하니 조부모 (`.local`, `.cache`) 까지는 미리 만들어야 한다.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-export HOME="/root"
-
-# pnpm 은 store/cache 를 `$HOME/.local/share/pnpm`, `$HOME/.cache/pnpm` 에
-# 만드는데 내부적으로 `fs.mkdir` 호출 시 `{recursive: true}` 를 주지 않아
-# 부모 디렉토리 (`.local`, `.cache`) 가 없으면 `ENOENT` 로 rc=254 실패.
-# 일부 최소 컨테이너 이미지는 root 홈에 이 경로가 없으니 pre-create.
+export HOME="/opt/kotify/.worker-home"
 mkdir -p "${HOME}/.local/share" "${HOME}/.cache"
 
 INSTALL_DIR="/opt/kotify"
