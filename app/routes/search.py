@@ -15,7 +15,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
@@ -121,13 +121,20 @@ def _search_campaigns(db: Session, pat_like: str) -> tuple[list[dict], int]:
 
 
 def _search_audit(db: Session, pat_like: str) -> tuple[list[dict], int]:
-    """actor name/email + action + target 부분매치. 최신순."""
+    """actor 표시명/email + action + target 부분매치. 최신순.
+
+    표시는 `display_name` 우선, 없으면 `name` fallback. 검색 LIKE 는
+    display_name/name 둘 다 매칭 (과거 데이터에서 name 만 있는 row 도 검색
+    가능하게).
+    """
+    actor_display = func.coalesce(User.display_name, User.name)
     stmt = (
-        select(AuditLog, User.name, User.email)
+        select(AuditLog, actor_display, User.email)
         .select_from(AuditLog)
         .outerjoin(User, User.sub == AuditLog.actor_sub)
         .where(
             or_(
+                User.display_name.ilike(pat_like, escape="\\"),
                 User.name.ilike(pat_like, escape="\\"),
                 User.email.ilike(pat_like, escape="\\"),
                 AuditLog.action.ilike(pat_like, escape="\\"),

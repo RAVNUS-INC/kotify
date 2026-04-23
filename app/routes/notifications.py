@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
@@ -234,9 +234,10 @@ def _build_notifications(db: Session) -> list[dict]:
     ).scalars().all()
     notifs = [n for n in (_campaign_notif(c) for c in camps) if n is not None]
 
-    # 최근 audit_logs — User JOIN 으로 actor name 동시 수집.
+    # 최근 audit_logs — User JOIN 으로 actor 표시명 동시 수집.
+    # display_name 우선, 없으면 name (레거시/백필 row) 사용.
     rows = db.execute(
-        select(AuditLog, User.name)
+        select(AuditLog, func.coalesce(User.display_name, User.name))
         .select_from(AuditLog)
         .outerjoin(User, User.sub == AuditLog.actor_sub)
         .order_by(AuditLog.id.desc())

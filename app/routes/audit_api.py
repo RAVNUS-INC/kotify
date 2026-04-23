@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_role, require_setup_complete
@@ -98,8 +98,11 @@ def _query_audit(
     q 는 actor name/email/target 에 부분매치(LIKE wildcard 이스케이프).
     action 은 정확일치.
     """
+    # 표시는 display_name 우선 (fallback name). 검색 LIKE 는 display_name/name
+    # 둘 다 매칭 — 백필 전 레거시 row 에서 name 만 있어도 필터링 가능.
+    actor_display = func.coalesce(User.display_name, User.name)
     stmt = (
-        select(AuditLog, User.name, User.email)
+        select(AuditLog, actor_display, User.email)
         .select_from(AuditLog)
         .outerjoin(User, User.sub == AuditLog.actor_sub)
     )
@@ -109,6 +112,7 @@ def _query_audit(
         pat = f"%{_escape_like(q)}%"
         stmt = stmt.where(
             or_(
+                User.display_name.ilike(pat, escape="\\"),
                 User.name.ilike(pat, escape="\\"),
                 User.email.ilike(pat, escape="\\"),
                 AuditLog.target.ilike(pat, escape="\\"),
