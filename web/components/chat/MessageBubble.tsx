@@ -2,7 +2,9 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 export type MessageSide = 'us' | 'them';
-export type MessageKind = 'rcs' | 'sms' | 'kakao';
+// RCS/SMS/LMS/MMS/카카오 세분화. 색상은 발/수신만 구분하고 채널은 텍스트
+// 라벨 (`01:38 / RCS`) 로 표시.
+export type MessageKind = 'rcs' | 'sms' | 'lms' | 'mms' | 'kakao';
 
 export type MessageBubbleProps = {
   side?: MessageSide;
@@ -32,6 +34,8 @@ const STYLES: Record<MessageSide, Record<'default' | 'kakao', string>> = {
 const KIND_LABEL: Record<MessageKind, string> = {
   rcs: 'RCS',
   sms: 'SMS',
+  lms: 'LMS',
+  mms: 'MMS',
   kakao: '카카오',
 };
 

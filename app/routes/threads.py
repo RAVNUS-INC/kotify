@@ -56,15 +56,18 @@ def _hhmm(iso_ts: str | None) -> str:
 
 
 def _channel_from_mt(msg_channel: str | None) -> str:
-    """Message.channel('RCS'/'SMS'/'LMS'/'MMS') → ChatChannel('rcs'/'sms'/'kakao')."""
+    """Message.channel('RCS'/'SMS'/'LMS'/'MMS'/'KAKAO') → ChatChannel.
+
+    RCS/SMS/LMS/MMS 를 모두 세분화해서 반환. UI 에서 라벨 `RCS`/`SMS`/`LMS`/
+    `MMS` 로 표시되므로 실제 발송 채널을 한눈에 구분 가능 (RCS 실패 → LMS
+    fallback 시 사용자가 원인 파악 쉬움).
+    """
     if not msg_channel:
         return "sms"
     low = msg_channel.lower()
-    if low == "rcs":
-        return "rcs"
-    if low == "kakao":
-        return "kakao"
-    return "sms"  # SMS/LMS/MMS 모두 sms 버블로 통일
+    if low in ("rcs", "sms", "lms", "mms", "kakao"):
+        return low
+    return "sms"  # 미지 채널은 안전값 sms
 
 
 def _thread_id(caller: str, phone: str) -> str:

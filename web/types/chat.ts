@@ -1,4 +1,6 @@
-export type ChatChannel = 'sms' | 'rcs' | 'kakao';
+// RCS/SMS/LMS/MMS 세분화 — 사용자가 어느 채널로 발송/수신했는지 구분.
+// kakao 는 친구톡.
+export type ChatChannel = 'sms' | 'lms' | 'mms' | 'rcs' | 'kakao';
 export type MessageSide = 'us' | 'them';
 
 export type ChatMessage = {
