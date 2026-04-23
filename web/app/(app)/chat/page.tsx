@@ -48,11 +48,12 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
   }
 
   return (
-    // 뷰포트-앵커 height — `.k-page flex:1 + .k-shell min-height:100%` 체인은
-    // 콘텐츠가 길어지면 전체가 늘어나 내부 overflow-y-auto 가 먹히지 않는다.
-    // 100dvh - topbar(52px) 로 고정하면 메시지가 수천 건이어도 ThreadView 의
-    // `flex-1 min-h-0 overflow-y-auto` 가 정상 동작 (내부에서만 스크롤).
-    <div className="k-page flex h-[calc(100dvh_-_52px)] min-h-0 flex-col">
+    // 뷰포트-앵커 height. `.k-page` 클래스의 `flex: 1 1 0%` 때문에 `flex-basis:
+    // 0%` 가 `height: calc(...)` 를 덮어써서 앞선 수정이 먹히지 않았다 (flex
+    // item 은 basis 가 0% 면 height 를 무시). `.k-page` 를 아예 빼고 padding/
+    // min-width 를 Tailwind 로 직접 선언해 specificity 충돌을 원천 제거.
+    // pt-8=32 / px-7=28 / pb-5=20 — `.k-page` 의 32/28/48 에서 bottom 만 축소.
+    <div className="flex h-[calc(100dvh_-_52px)] min-h-0 min-w-0 flex-col px-7 pb-5 pt-8">
       <PageHeader
         title="대화방"
         sub={`${threads.length}개 대화 · 미답 ${unreadCount}건`}
