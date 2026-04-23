@@ -171,13 +171,20 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     # #21: 매 로그인마다 Keycloak 역할로 덮어쓰기 (역할 회수 가능)
     roles_json = json.dumps(sorted(set(roles)), ensure_ascii=False)
 
-    # users 테이블 upsert
+    # users 테이블 upsert.
+    # display_name 은 format_display_name() 결과 (성+이름/CN/email 우선순위).
+    # 매 로그인마다 갱신 — 사용자가 Keycloak 프로필 이름 바꾸면 다음 로그인에
+    # 즉시 반영. fallback: name 또는 email.
+    display_name = (
+        user_info.get("display_name") or user_info.get("name") or user_info.get("email") or sub
+    )
     user = db.get(User, sub)
     if user is None:
         user = User(
             sub=sub,
             email=user_info["email"],
             name=user_info["name"],
+            display_name=display_name,
             roles=roles_json,
             created_at=now,
             last_login_at=now,
@@ -186,6 +193,7 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     else:
         user.email = user_info["email"]
         user.name = user_info["name"]
+        user.display_name = display_name
         # #21: 역할을 Keycloak에서 받은 것으로 덮어쓰기 (병합 아님)
         user.roles = roles_json
         user.last_login_at = now

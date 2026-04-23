@@ -24,7 +24,11 @@ class User(Base):
 
     sub: Mapped[str] = mapped_column(Text, primary_key=True)
     email: Mapped[str] = mapped_column(Text, nullable=False)
+    # name: Keycloak 'name' claim 원본 (감사/추적용, 로그인한 ID 그대로).
+    # display_name: UI 표시용 — format_display_name() 결과. 로그인 시 갱신.
+    # 분리 이유는 migration 0010 주석 참조.
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     roles: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     last_login_at: Mapped[str] = mapped_column(Text, nullable=False)

@@ -62,6 +62,9 @@ def get_current_user(
 
     email = request.session.get("user_email", "")
     name = request.session.get("user_name", "")
+    # user_display 는 auth.py 로그인 시 format_display_name 결과가 들어옴.
+    # 없으면 name / email fallback 으로 최소한 비어있지는 않게 유지.
+    display_name = request.session.get("user_display") or name or email or sub
     # #29: user_roles는 list로 직접 저장됨 — 타입 안전 처리
     roles_raw = request.session.get("user_roles", [])
     if isinstance(roles_raw, list):
@@ -82,6 +85,7 @@ def get_current_user(
             sub=sub,
             email=email,
             name=name,
+            display_name=display_name,
             roles=roles_json,
             created_at=now,
             last_login_at=now,
@@ -90,6 +94,7 @@ def get_current_user(
     else:
         user.email = email
         user.name = name
+        user.display_name = display_name
         user.roles = roles_json
         user.last_login_at = now
 

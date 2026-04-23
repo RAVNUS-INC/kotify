@@ -134,7 +134,9 @@ def _user_to_member(u: User) -> dict:
     return {
         "id": u.sub,
         "email": u.email,
-        "name": u.name or u.email,
+        # UI 표시는 display_name (성+이름/CN 규칙) 우선. 백필 전 레거시
+        # 레코드 대비 `u.name` / email 순 fallback.
+        "name": u.display_name or u.name or u.email,
         "role": primary_role(u.roles),
         # TODO(soft-delete): User 모델에 active/deleted_at 컬럼 추가 시 교체.
         "active": True,
