@@ -11,6 +11,8 @@ export type ThreadPreviewProps = {
 const CHANNEL_KIND_MAP: Record<ChatThread['channel'], 'brand' | 'neutral'> = {
   rcs: 'brand',
   sms: 'neutral',
+  lms: 'neutral',
+  mms: 'neutral',
   kakao: 'neutral',
 };
 

@@ -11,6 +11,8 @@ export type ThreadRowProps = {
 
 const CHANNEL_LABEL: Record<ChatThread['channel'], string> = {
   sms: 'SMS',
+  lms: 'LMS',
+  mms: 'MMS',
   rcs: 'RCS',
   kakao: 'KAKAO',
 };

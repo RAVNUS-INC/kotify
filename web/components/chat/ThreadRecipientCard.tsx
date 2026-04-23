@@ -11,6 +11,8 @@ const CHANNEL_BADGE: Record<
 > = {
   rcs: { label: 'RCS', kind: 'brand' },
   sms: { label: 'SMS', kind: 'neutral' },
+  lms: { label: 'LMS', kind: 'neutral' },
+  mms: { label: 'MMS', kind: 'neutral' },
   kakao: { label: '카카오', kind: 'neutral' },
 };
 
