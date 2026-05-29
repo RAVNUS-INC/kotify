@@ -175,6 +175,29 @@ async def receive_report(
         return JSONResponse({"error": "processing failed"}, status_code=400)
 
 
+def _active_caller_digits(db: Session) -> set[str]:
+    """활성 발신번호의 숫자만 추출한 집합 (MO callback 위변조 검증용)."""
+    from app.models import Caller
+
+    rows = db.execute(
+        select(Caller.number).where(Caller.active == 1)
+    ).scalars().all()
+    return {"".join(c for c in n if c.isdigit()) for n in rows}
+
+
+def _synth_mo_key(
+    number: str, recv_dt: str | None, msg: str | None, callback: str | None
+) -> str:
+    """moKey 누락 시 페이로드 기반 대체 멱등키 — 영구 유실 방지 + 재시도 중복 방지.
+
+    같은 MO 가 재전송되면 같은 해시가 나와 UNIQUE 제약으로 중복 저장이 차단된다.
+    """
+    import hashlib
+
+    basis = f"{number}|{recv_dt or ''}|{msg or ''}|{callback or ''}"
+    return "syn-" + hashlib.sha256(basis.encode()).hexdigest()[:24]
+
+
 @router.post("/msghub/{token}/mo")
 async def receive_mo(
     token: str,
@@ -224,22 +247,36 @@ async def receive_mo(
     now = datetime.now(UTC).isoformat()
     saved = 0
     duplicates = 0
+    rejected = 0
+    active_callbacks = _active_caller_digits(db)
 
     try:
         for item in payload.items:
-            if not item.mo_key:
-                log.warning("mo_key 누락 — skip: %s", item)
-                continue
+            # 위변조 방지 — callback 이 우리 활성 발신번호가 아니면 거부(토큰 유출 대비
+            # defense-in-depth). 발신번호 미등록 환경에서는 검증 불가하므로 통과시킨다.
+            if active_callbacks and item.callback:
+                cb_digits = "".join(c for c in item.callback if c.isdigit())
+                if cb_digits not in active_callbacks:
+                    log.warning(
+                        "MO moCallback 미등록 — 거부(위변조 의심): %s", item.callback
+                    )
+                    rejected += 1
+                    continue
+
+            # 유실 방지 — moKey 누락 시 페이로드 기반 대체 멱등키로 저장(영구 유실 방지).
+            mo_key = item.mo_key or _synth_mo_key(
+                item.number, item.mo_recv_dt, item.mo_msg, item.callback
+            )
 
             exists = db.execute(
-                select(MoMessage.id).where(MoMessage.mo_key == item.mo_key)
+                select(MoMessage.id).where(MoMessage.mo_key == mo_key)
             ).scalar_one_or_none()
             if exists is not None:
                 duplicates += 1
                 continue
 
             mo = MoMessage(
-                mo_key=item.mo_key,
+                mo_key=mo_key,
                 mo_number=item.number,
                 mo_callback=item.callback or None,
                 mo_type=item.mo_type or None,
@@ -272,9 +309,10 @@ async def receive_mo(
         )
 
     log.warning(  # WARNING — 기본 uvicorn 필터 통과용 (운영 안정화 후 INFO로 강등)
-        "MO 수신: 저장 %d건, 중복 %d건, 페이로드 %d건",
+        "MO 수신: 저장 %d건, 중복 %d건, 거부 %d건, 페이로드 %d건",
         saved,
         duplicates,
+        rejected,
         payload.mo_cnt,
     )
     return JSONResponse(
