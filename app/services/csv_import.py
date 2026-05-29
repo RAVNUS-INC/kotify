@@ -124,22 +124,32 @@ def import_contacts(
     """
     result: dict[str, Any] = {"created": 0, "updated": 0, "skipped": 0, "errors": []}
 
+    # N+1 제거: 기존 연락처를 phone 기준으로 일괄 조회 후 dict 캐싱한다.
+    # parse_csv 가 normalize_phone 으로 정규화했으므로 키가 일치한다. 대량 CSV 의
+    # SQLite IN 절 변수 한도(구버전 999)를 피하려 청크로 나눠 조회한다.
+    existing_map: dict[str, Contact] = {}
+    if mode != "create":
+        phones = [r["phone"] for r in valid_rows if r.get("phone")]
+        _CHUNK = 500
+        for i in range(0, len(phones), _CHUNK):
+            batch = phones[i : i + _CHUNK]
+            rows = db.execute(
+                select(Contact).where(Contact.phone.in_(batch))
+            ).scalars().all()
+            for c in rows:
+                if c.phone:
+                    existing_map[c.phone] = c
+
     for row in valid_rows:
         try:
             phone = row.get("phone")
-
-            if mode != "create" and phone:
-                existing = db.execute(
-                    select(Contact).where(Contact.phone == phone)
-                ).scalar_one_or_none()
-            else:
-                existing = None
+            existing = existing_map.get(phone) if (mode != "create" and phone) else None
 
             if existing is not None:
                 if mode == "skip":
                     result["skipped"] += 1
                     continue
-                elif mode == "update":
+                if mode == "update":
                     update_contact(
                         db,
                         existing.id,
@@ -152,7 +162,7 @@ def import_contacts(
                     continue
 
             # 새로 생성
-            create_contact(
+            created = create_contact(
                 db,
                 name=row["name"],
                 created_by=created_by,
@@ -162,6 +172,10 @@ def import_contacts(
                 notes=row.get("notes"),
             )
             result["created"] += 1
+            # CSV 내 동일 phone 후속 행이 방금 만든 레코드를 보도록 캐시 갱신
+            # (원래 행별 SELECT 동작 보존 — 같은 파일 내 중복 시 1건만 생성).
+            if phone and mode != "create":
+                existing_map[phone] = created
 
         except Exception as exc:
             result["errors"].append(str(exc))

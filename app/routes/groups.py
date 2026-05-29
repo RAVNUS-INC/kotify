@@ -498,17 +498,29 @@ def bulk_add_members_route(
     if isinstance(g_or_err, JSONResponse):
         return g_or_err
     group = g_or_err
-    # phone 정규화 — 숫자만 추출, 빈 값 제외, 중복 제거.
+    # phone 정규화 (테마 D) — normalize_phone 통일(휴대폰만), 무효/빈 값 분리, 중복 제거.
+    from app.util.phone import normalize_phone
+
     normalized: list[str] = []
+    invalid: list[str] = []
     seen: set[str] = set()
     for p in body.phones:
-        digits = "".join(c for c in p if c.isdigit())
-        if digits and digits not in seen:
-            seen.add(digits)
-            normalized.append(digits)
+        norm = normalize_phone(p)
+        if norm is None:
+            invalid.append(p)
+            continue
+        if norm not in seen:
+            seen.add(norm)
+            normalized.append(norm)
     if not normalized:
         return JSONResponse(
-            {"error": {"code": "no_valid_phones", "message": "유효한 번호가 없습니다"}},
+            {
+                "error": {
+                    "code": "no_valid_phones",
+                    "message": "유효한 번호가 없습니다",
+                    "invalidPhones": invalid,
+                }
+            },
             status_code=422,
         )
     result = svc_bulk_add_by_phones(
@@ -526,7 +538,7 @@ def bulk_add_members_route(
         detail={**result, "requested": len(normalized)},
     )
     db.commit()
-    return {"data": {**result, "requested": len(normalized)}}
+    return {"data": {**result, "requested": len(normalized), "invalidPhones": invalid}}
 
 
 @router.post(

@@ -364,10 +364,15 @@ class ContactCreateBody(BaseModel):
     @field_validator("phone")
     @classmethod
     def _normalize_phone(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return None
-        digits = "".join(c for c in v if c.isdigit())
-        return digits or None  # 숫자 없으면 없는 값으로 취급
+        # 테마 D: 모든 입력 경로를 normalize_phone 으로 통일(휴대폰만 허용).
+        from app.util.phone import normalize_phone
+
+        if v is None or not v.strip():
+            return None  # 빈 입력 = 번호 없음
+        normalized = normalize_phone(v)
+        if normalized is None:
+            raise ValueError("올바른 한국 휴대폰 번호 형식이 아닙니다 (예: 010-1234-5678)")
+        return normalized
 
 
 class ContactUpdateBody(BaseModel):
@@ -392,10 +397,15 @@ class ContactUpdateBody(BaseModel):
     @field_validator("phone")
     @classmethod
     def _normalize_phone_opt(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
+        # 테마 D: normalize_phone 통일. 빈 문자열도 None 처리(P3: "" 저장 방지).
+        from app.util.phone import normalize_phone
+
+        if v is None or not v.strip():
             return None
-        digits = "".join(c for c in v if c.isdigit())
-        return digits
+        normalized = normalize_phone(v)
+        if normalized is None:
+            raise ValueError("올바른 한국 휴대폰 번호 형식이 아닙니다 (예: 010-1234-5678)")
+        return normalized
 
 
 @router.post("/contacts", dependencies=[Depends(verify_csrf)], response_model=None)
