@@ -305,6 +305,10 @@ async def complete_setup(
 
     # session.secret 은 서버가 랜덤 생성. 클라이언트가 제공하지 않는다.
     session_secret = _secrets.token_hex(32)
+    # webhook_token 도 서버가 자동 생성·저장한다. 미설정 시 운영 모드에서 모든
+    # msghub 웹훅이 401 로 거부되어(webhook.py _verify_token) 발송 리포트/MO 가
+    # 유실되고 Message 가 영구 PENDING 으로 남는다. 완성 URL 은 설정>웹훅에서 노출.
+    webhook_token = _secrets.token_hex(16)
 
     payload: dict[str, tuple[str, bool]] = {
         "keycloak.issuer": (body.keycloakIssuer.strip(), False),
@@ -317,6 +321,7 @@ async def complete_setup(
         "msghub.chatbot_id": ((body.msghubChatbotId or "").strip(), False),
         "app.public_url": ((body.appPublicUrl or "").strip().rstrip("/"), False),
         "session.secret": (session_secret, True),
+        "msghub.webhook_token": (webhook_token, True),
         "setup.first_admin_email": ((body.firstAdminEmail or "").strip(), False),
         "setup.pending_first_admin": ("true", False),
     }
