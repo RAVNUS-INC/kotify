@@ -77,6 +77,19 @@ def validate_message(
 # 1회 발송 최대 수신자 수
 MAX_RECIPIENTS_PER_CAMPAIGN = 1000
 
+
+def dedupe_recipients(recipients: list[str]) -> list[str]:
+    """수신자 중복 제거 — 순서 보존 (C2).
+
+    동일 번호가 여러 번 입력돼도(엑셀 복붙 등) 1건만 발송하여
+    중복 발송·이중 과금을 방지한다. dict.fromkeys 로 첫 등장 순서를 유지한다.
+
+    주의: 문자열 동일성 기준이다. "010-1234-5678" 과 "01012345678" 은
+    서로 다른 문자열이라 별개로 취급된다. 발송 경로의 전화번호 정규화 통일
+    (normalize_phone) 은 별도 작업(테마 D)에서 처리한다.
+    """
+    return list(dict.fromkeys(recipients))
+
 # 예약 발송 최소 리드타임 (10분)
 RESERVE_MIN_LEAD_SECONDS = 10 * 60
 
@@ -355,6 +368,7 @@ async def dispatch_campaign(
     subject: str | None = None,
     reserve_time_local: str | None = None,
     attachment_id: int | None = None,
+    idempotency_key: str | None = None,
 ) -> Campaign:
     """캠페인을 생성하고 msghub를 통해 RCS 우선 발송한다.
 
@@ -365,7 +379,12 @@ async def dispatch_campaign(
 
     RCS 실패 시 msghub가 fbInfoLst로 자동 대체발송한다.
     """
-    # 0. 수신자 수 제한
+    # 0. 수신자 중복 제거 (C2) — 한도 판정 전에 수행해 실제 발송 건수 기준으로 검증.
+    original_count = len(recipients)
+    recipients = dedupe_recipients(recipients)
+    deduped_count = original_count - len(recipients)
+
+    # 0.1 수신자 수 제한 (중복 제거 후 기준)
     if len(recipients) > MAX_RECIPIENTS_PER_CAMPAIGN:
         raise ValueError(f"1회 최대 {MAX_RECIPIENTS_PER_CAMPAIGN}명까지 발송할 수 있습니다.")
     if not recipients:
@@ -432,6 +451,7 @@ async def dispatch_campaign(
         total_cost=0,
         rcs_count=0,
         fallback_count=0,
+        idempotency_key=idempotency_key,
     )
     db.add(campaign)
     db.flush()
@@ -475,6 +495,7 @@ async def dispatch_campaign(
         target=f"campaign:{campaign.id}",
         detail={
             "total": len(recipients),
+            "deduped": deduped_count,
             "chunks": total_chunks,
             "failed_chunks": failed_chunks,
             "message_type": msg_type,

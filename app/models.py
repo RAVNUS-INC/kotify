@@ -99,6 +99,10 @@ class Campaign(Base):
     total_cost: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     rcs_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fallback_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 멱등키 (C1) — 클라이언트가 보낸 Idempotency-Key. 재요청/재시도/동시요청 시
+    # 중복 발송·이중 과금을 방지한다. nullable: 기존 레코드 및 키 미전송 요청 허용.
+    # UNIQUE 인덱스로 INSERT 시점에 동시성까지 차단(NULL 은 충돌 안 함).
+    idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     creator: Mapped[User] = relationship("User", back_populates="campaigns")
     msghub_requests: Mapped[list[MsghubRequest]] = relationship(
@@ -114,6 +118,7 @@ class Campaign(Base):
     __table_args__ = (
         Index("idx_campaigns_created_by", "created_by"),
         Index("idx_campaigns_created_at", "created_at"),
+        Index("uq_campaigns_idempotency_key", "idempotency_key", unique=True),
     )
 
 

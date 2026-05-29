@@ -17,10 +17,11 @@ import io
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
@@ -269,9 +270,27 @@ def get_campaign(cid: str, db: Session = Depends(get_db)) -> dict | JSONResponse
 # ── S2: POST /campaigns ─────────────────────────────────────────────────────
 
 
+def _campaign_create_response(campaign: Campaign) -> JSONResponse:
+    """캠페인 생성/멱등 재요청의 공통 응답 형태."""
+    return JSONResponse(
+        {
+            "data": {
+                "id": str(campaign.id),
+                "status": _STATUS_MAP.get(campaign.state, "sending"),
+                "estimate": {
+                    "reach": campaign.total_count or 0,
+                    "cost": campaign.total_cost or 0,
+                    "channel": _campaign_channel(campaign),
+                },
+            }
+        }
+    )
+
+
 @router.post("/campaigns", dependencies=[Depends(verify_csrf)])
 async def create_campaign(
     body: CampaignCreateBody,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> JSONResponse:
@@ -279,10 +298,27 @@ async def create_campaign(
 
     services.compose.dispatch_campaign() 를 호출해 실제 RCS/SMS/LMS/MMS 발송.
     sendAt 이 있으면 예약 발송 (KST 기준).
+
+    멱등성(C1): Idempotency-Key 헤더로 중복 발송을 차단한다. 같은 (created_by, key)
+    캠페인이 이미 있으면 재발송 없이 기존 결과를 반환하고, 동시 요청은
+    Campaign.idempotency_key UNIQUE 제약이 INSERT(발송 전) 시점에 차단한다.
     """
     # 순환 import 방지: 함수 내부 import
     from app.main import get_msghub_client
     from app.services.compose import dispatch_campaign
+
+    idem_key = request.headers.get("Idempotency-Key") or None
+
+    # 빠른 경로: 같은 키로 이미 생성된 캠페인이 있으면 재발송 없이 반환.
+    if idem_key:
+        existing = db.execute(
+            select(Campaign).where(
+                Campaign.created_by == user.sub,
+                Campaign.idempotency_key == idem_key,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return _campaign_create_response(existing)
 
     client = get_msghub_client()
     if client is None:
@@ -303,7 +339,25 @@ async def create_campaign(
             subject=None,
             reserve_time_local=body.sendAt or None,
             attachment_id=body.attachmentId,
+            idempotency_key=idem_key,
         )
+    except IntegrityError:
+        # 동시 요청 race: 다른 요청이 같은 키로 먼저 INSERT(발송 전 차단됨).
+        # 기존 캠페인을 조회해 멱등 응답으로 반환한다.
+        db.rollback()
+        if idem_key:
+            existing = db.execute(
+                select(Campaign).where(
+                    Campaign.created_by == user.sub,
+                    Campaign.idempotency_key == idem_key,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return _campaign_create_response(existing)
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "duplicate_request", "message": "중복 요청으로 처리되었습니다"},
+        ) from None
     except ValueError as exc:
         # ValueError 는 사용자 입력 검증 오류로 메시지를 그대로 노출해도 안전.
         raise HTTPException(
@@ -319,19 +373,7 @@ async def create_campaign(
             detail={"code": "dispatch_failed", "message": "발송 처리 중 오류가 발생했습니다"},
         )
 
-    return JSONResponse(
-        {
-            "data": {
-                "id": str(campaign.id),
-                "status": _STATUS_MAP.get(campaign.state, "sending"),
-                "estimate": {
-                    "reach": campaign.total_count or 0,
-                    "cost": campaign.total_cost or 0,
-                    "channel": _campaign_channel(campaign),
-                },
-            }
-        }
-    )
+    return _campaign_create_response(campaign)
 
 
 # ── POST /campaigns/{id}/cancel — 예약 발송 취소 ─────────────────────────────

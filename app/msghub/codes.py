@@ -36,7 +36,10 @@ SUCCESS_CODE = "10000"
 PRICE_TABLE: dict[tuple[str, str], int] = {
     # (channel, productCode) → 단가
     ("RCS", "CHAT"): 8,       # RCS 양방향 — 24h 세션 상한 적용 (아래 상수 참조)
-    ("RCS", "SMS"): 17,       # RCS SMS (미사용, 양방향 우선)
+    # RCS 단문(단방향 SMS형, RPSSAXX001) — outbound 에서 실제 사용되는 단가.
+    # U+ 공식 18.7원(VAT 포함)=17원. SMS fallback(9원)보다 비싸다(비용 역전).
+    # 양방향 CHAT(8원)은 outbound 불가(compose.py:_MESSAGEBASE_MAP 주석 참조).
+    ("RCS", "SMS"): 17,
     ("RCS", "LMS"): 27,       # RCS LMS
     ("RCS", "MMS"): 85,       # RCS MMS
     ("RCS", "ITMPL"): 40,     # RCS 이미지 템플릿
@@ -63,9 +66,12 @@ def chat_session_cost(unit_count_in_window: int) -> int:
     capped = min(unit_count_in_window, CHAT_SESSION_MAX_UNITS)
     return capped * PRICE_TABLE[("RCS", "CHAT")]
 
-# 메시지 유형 → (RCS 키, Fallback 키) 매핑
+# 메시지 유형 → (RCS 키, Fallback 키). 견적은 두 단가의 min~max 범위로 계산한다.
+# 주의: 단문은 outbound 에서 양방향 CHAT(8원)을 쓸 수 없어 단방향 SMS형
+# (RCS,SMS=17원)으로 발송되므로 RCS(17) > SMS fallback(9) 이다 — 단문은 RCS 가
+# 오히려 비싸다(비용 역전). 양방향 8원 전환은 U+ 지원 확인 필요(TODO).
 _ESTIMATE_MAP: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {
-    "short": (("RCS", "CHAT"), ("SMS", "SMS")),
+    "short": (("RCS", "SMS"), ("SMS", "SMS")),
     "long": (("RCS", "LMS"), ("LMS", "LMS")),
     "image": (("RCS", "ITMPL"), ("MMS", "MMS")),
 }
@@ -122,6 +128,8 @@ def estimate_cost(msg_type: str, recipient_count: int) -> tuple[int, int]:
     if keys is None:
         fallback = PRICE_TABLE.get(("SMS", "SMS"), 9)
         return (fallback * recipient_count, fallback * recipient_count)
-    min_rate = PRICE_TABLE[keys[0]]
-    max_rate = PRICE_TABLE[keys[1]]
-    return (min_rate * recipient_count, max_rate * recipient_count)
+    # RCS 단가가 fallback 보다 비쌀 수 있으므로(단문 17 vs 9) min/max 를 정렬한다.
+    rate_rcs = PRICE_TABLE[keys[0]]
+    rate_fb = PRICE_TABLE[keys[1]]
+    lo, hi = min(rate_rcs, rate_fb), max(rate_rcs, rate_fb)
+    return (lo * recipient_count, hi * recipient_count)

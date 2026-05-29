@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { MessageBubble } from '@/components/chat';
 import {
@@ -30,15 +30,19 @@ const SMS_BYTES = 90;
 const LMS_BYTES = 2000;
 
 function computeEstimate(message: string, recipientCount: number) {
+  // 단가: U+ msghub 공식(VAT 별도, 백엔드 PRICE_TABLE 과 일치).
+  // 현재 outbound 는 RCS 단방향 발송이라 단문은 RCS 17원 > SMS fallback 9원 (비용 역전).
+  // 보수적으로 채널별 최대 단가(RCS 또는 fallback 중 큰 값)를 예상 비용으로 표시한다.
+  // 양방향 CHAT 8원 전환은 U+ 지원 확인 후 — 그때 단문이 절감된다.
   const bytes = new TextEncoder().encode(message).length;
   let channel: 'SMS' | 'LMS' | 'MMS' = 'SMS';
-  let perUnit = 8;
+  let perUnit = 17; // 단문: RCS 단방향 17 (> SMS fallback 9)
   if (bytes > LMS_BYTES) {
     channel = 'MMS';
-    perUnit = 100;
+    perUnit = 85; // 이미지: MMS 85 (> RCS ITMPL 40)
   } else if (bytes > SMS_BYTES) {
     channel = 'LMS';
-    perUnit = 32;
+    perUnit = 27; // 장문: RCS LMS = LMS fallback = 27
   }
   const cost = recipientCount * perUnit;
   const bytesState: 'warn' | 'err' | undefined =
@@ -111,16 +115,35 @@ export function ComposeForm() {
     confirmed &&
     !submitting;
 
+  // 더블클릭/연타 중복 제출 방지 (프론트 가드): setSubmitting 은 비동기 상태라
+  // 두 번째 클릭이 첫 렌더 전에 들어오면 canSubmit 의 !submitting 이 아직 true 다.
+  // useRef.current 는 동기 갱신이므로 즉시 차단한다.
+  const submittingRef = useRef(false);
+
+  // 멱등키 (C1) — 같은 발송 내용의 재시도는 동일 키를 보내 서버가 중복 발송을 차단한다.
+  // 내용(발신/수신자/본문/예약/첨부)이 바뀌면 새 발송이므로 키를 리셋한다.
+  const idemKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    idemKeyRef.current = null;
+  }, [sender, recipients, message, sendAt, mode, attachment]);
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (submittingRef.current || !canSubmit) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
+    // 재시도 시 동일 키 유지 — 네트워크 실패 후 재클릭해도 서버가 1회만 처리.
+    const idemKey = idemKeyRef.current ?? crypto.randomUUID();
+    idemKeyRef.current = idemKey;
     let succeeded = false;
     try {
       const res = await apiSend('/api/campaigns', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idemKey,
+        },
         body: JSON.stringify({
           sender,
           recipients,
@@ -138,6 +161,7 @@ export function ComposeForm() {
         throw new Error(json.error?.message ?? `HTTP ${res.status}`);
       }
       succeeded = true;
+      idemKeyRef.current = null; // 성공 — 다음 발송은 새 키 사용
       router.push('/campaigns');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -145,7 +169,10 @@ export function ComposeForm() {
       // 성공 시에도 router.push 가 동기 반환이라 navigation 직후 상태 리셋해야
       // 잔류 disabled 로 다음 진입 시 버튼이 막히는 문제를 방지한다.
       // 단 succeeded 인 경우 submitting=true 유지해 중복 제출 차단 (페이지 전환 전까지).
-      if (!succeeded) setSubmitting(false);
+      if (!succeeded) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
     }
   };
 

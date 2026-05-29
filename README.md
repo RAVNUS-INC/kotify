@@ -19,9 +19,9 @@ built specifically for Korean phone numbers and Korean operators.
 ### Features
 
 - **RCS-first messaging** via U+ msghub with SMS/LMS/MMS auto-fallback (`fbInfoLst`), up to 1,000 recipients per campaign
-  - RCS 양방향 (8원) → SMS (9원) for short text
+  - Short text: RCS one-way SMS-type (17원) → SMS fallback (9원). ⚠️ outbound cannot use two-way RCS (8원), so short text over RCS costs **more** than SMS (cost inversion). Two-way 8원 needs U+ confirmation (TODO).
   - RCS LMS (27원) → LMS (27원) for long text
-  - RCS image template (40원) → MMS (85원) for images — 53% cost saving
+  - RCS image template (40원) → MMS (85원) for images — 53% cost saving (RCS wins only for images)
 - **Webhook-based delivery reports** — no polling required, real-time updates
 - **Keycloak OIDC** authentication with role-based access (viewer / sender / admin)
 - Korean phone number normalization (010-1234-5678, +82-10-1234-5678, etc.)

@@ -8,7 +8,7 @@
 ## 0. 한 페이지 요약 (TL;DR)
 
 - **목적**: 운영자가 웹 UI에서 다수 인원에게 RCS/SMS/LMS/MMS 공지를 발송하고, 발송 이력과 결과를 영구 보관·조회한다.
-- **발송 전략**: **RCS 우선**. RCS 실패 시 msghub `fbInfoLst`로 SMS/LMS/MMS 자동 fallback. 단문: RCS 양방향(8원) → SMS(9원). 이미지: RCS 템플릿(40원) → MMS(85원, **53% 절감**).
+- **발송 전략**: **RCS 우선**. RCS 실패 시 msghub `fbInfoLst`로 SMS/LMS/MMS 자동 fallback. ⚠️ 단문은 outbound 에서 양방향(8원) 미지원이라 **단방향 RCS(17원)** 로 발송되어 SMS(9원)보다 비쌈(비용 역전). 양방향 8원 전환은 U+ 확인 필요(TODO). 이미지: RCS 템플릿(40원) → MMS(85원, **53% 절감** — 이미지만 RCS 이득).
 - **운영 도메인**: `sms.example.com`
 - **스택**: Python 3.12+ FastAPI 백엔드 + Node 20+ Next.js 14 프론트엔드 + SQLite + Authlib(Keycloak OIDC).
 - **배포**: Proxmox LXC CT (Debian 12/13, 1 vCPU / 1 GB / 8 GB). FastAPI는 내부(8080), Next.js가 외부 대면(3000). NPM이 TLS 종단.
@@ -305,9 +305,13 @@ msghub는 **UTF-8 기반**. RCS/SMS/LMS/MMS 판정 기준:
 
 | 채널 | 조건 | 요금 |
 |---|---|---|
-| RCS 양방향 (CHAT) | 본문 ≤ 90 byte, 이미지 없음 | 8원 (fallback SMS 9원) |
+| RCS 단문 (단방향 SMS형) | 본문 ≤ 90 byte, 이미지 없음 | **17원** (fallback SMS 9원) ⚠️ RCS 가 더 비쌈 |
 | RCS LMS | 본문 > 90 byte, 이미지 없음 | 27원 (fallback LMS 27원) |
 | RCS 이미지 템플릿 | 이미지 첨부 | 40원 (fallback MMS 85원) |
+
+> ⚠️ **비용 역전 주의**: 양방향 CHAT(8원)은 outbound 브로드캐스트에 사용 불가
+> (replyId 미보유 → 29003/404). 단문은 단방향 SMS형(17원)으로 발송되어 SMS
+> fallback(9원)보다 비싸다. 양방향 8원 전환은 U+ 지원 확인 필요(TODO).
 
 본문 > 2000 byte → 거부.
 
