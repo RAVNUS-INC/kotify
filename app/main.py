@@ -93,6 +93,36 @@ async def reset_msghub_client():
             logger.debug("reset_msghub_client: old client close error", exc_info=True)
 
 
+# 웹훅 유실 대비 재조정 주기 (초). 발송 후 충분히 기다린 미완료 메시지를
+# msghub 에서 능동 조회해 상태를 보정한다 (C5). 단일 uvicorn 워커 전제.
+_RECONCILE_INTERVAL_SECONDS = 300
+
+
+async def _reconcile_loop() -> None:
+    """주기적으로 미완료 메시지를 재조정하는 self-healing 백그라운드 루프.
+
+    msghub 미설정(setup 전)이면 건너뛰고, 일시 오류는 로그만 남기고 다음 주기로
+    넘어가 한 번의 장애가 루프를 영구 중단시키지 않게 한다.
+    """
+    from app.services.reconcile import reconcile_pending_messages
+
+    while True:
+        try:
+            await asyncio.sleep(_RECONCILE_INTERVAL_SECONDS)
+            client = await aget_msghub_client()
+            if client is None:
+                continue  # setup 전 — msghub 미설정이면 건너뜀
+            db = SessionLocal()
+            try:
+                await reconcile_pending_messages(db, client)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("재조정 루프 오류 — 다음 주기 계속")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """앱 생명주기 — 시작/종료 처리."""
@@ -119,7 +149,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("메시징 시스템 시작 (dev_mode=%s)", settings.dev_mode)
 
+    # 웹훅 유실 대비 재조정 백그라운드 태스크 시작 (C5, 단일 워커 전제)
+    reconcile_task = asyncio.create_task(_reconcile_loop())
+
     yield
+
+    # 재조정 태스크 정리 (graceful shutdown)
+    reconcile_task.cancel()
+    try:
+        await reconcile_task
+    except asyncio.CancelledError:
+        pass
 
     # 종료
     if _msghub_client is not None:
