@@ -20,7 +20,7 @@
 - ~~**H5** 예약 캠페인 영구 RESERVED 우려~~ → **코드 추적 결과 기존 경로가 이미 정확**(`_refresh_campaign_counters` 전이대상에 RESERVED 포함 + reconcile는 메시지 status/sent_at으로만 필터). production 무변경, 웹훅·재조정 양쪽 완료 전이를 **회귀 테스트로 고정**. ✅ `d3afe80` (테스트 3건)
 
 ### B. 미해결 🔴 (다른 Phase, 제약 있음)
-- **C3** `compose.py:262` 29002 재시도 중복발송 — msghub 부분수락 의미론 **외부 확인 필요**(C4처럼 msghub 스펙). 확인 전엔 보수적 처리(재시도 시 query_sent로 기접수분 제외).
+- ~~**C3** 29002 재시도 중복발송~~ → **❌ 반증(false positive)**. LG U+ 공식 스펙 확인: CPS=요청 단위 레이트리밋, 29002=HTTP 400 최상위 code(요청 전체 거부)라 접수분 0 → `-fb` 재시도 중복 불가. 부분수락은 HTTP 200+`data[].code`(H1) 경로뿐. 코드 무변경 + 확정 주석 + 회귀 1건. ✅ `553ddd3` (검증: `c3-verification.md`)
 - ~~**CSV injection** — export 일관성이 근본 방어~~ → **전 4개 export 경로(audit_api/campaigns/reports/contacts) 인스펙션 결과 모든 사용자 입력 컬럼이 `safe_csv_cell` 적용됨**(숫자 컬럼은 서버 계산값이라 안전). 방어 완전·일관 확인, 누락 0. `safe_csv_cell` 테스트 커버리지 0 → 회귀 고정. ✅ `039b285` (테스트 3건)
 - **window.confirm** `ContactDrawer.tsx:47`, `SystemUpdatePanel.tsx:55` — Radix Dialog 기반 ConfirmDialog로 교체. ⚠️ 프론트 테스트 인프라 없음(tsc/eslint만). **남은 유일한 프론트 🔴**.
 - ~~**배포** `kotify-update.sh`(JSON 파괴)/`worker.sh`(alembic 롤백)~~ → ✅ `e26047b`. #15 sed+awk→`python3 json.dumps`(악성 메시지 valid JSON 검증), #16 `if ! alembic` 가드 제거→bare 명령으로 ERR trap 롤백 발동(trap 발동 차이 재현 검증). 정적 검증만(배포 환경 부재).
@@ -46,7 +46,8 @@
 
 ## 다음 단계 (바로 시작)
 이번 resume 세션: 상태머신 P2-E(H4/H1/H5) + CSV injection + PII 마스킹 + 배포 스크립트
-완료 (테스트 **248→270**, 7 fix/test 커밋 + docs). 남은 항목 (검증 제약별):
-1. **ruff `--fix` 86건** (P4) — 스타일 일괄정리. 저위험·`pytest`로 검증 가능 → **다음 권장**. 단 변경분만 적용하고 기존 부채(UP045/I001/B904)는 신중히.
-2. **window.confirm → ConfirmDialog** (🔴, 프론트) — `ContactDrawer.tsx:47`/`SystemUpdatePanel.tsx:55`. ⚠️ 프론트 테스트 인프라 없어 tsc/eslint+인스펙션만 — **검증 방식을 사용자와 합의 필요**(또는 프론트 테스트 인프라 먼저).
-3. **C3** (🔴, 외부확인) — `compose.py:262` 29002 재시도 중복발송. ⚠️ **msghub 부분수락 의미론을 사용자가 확인해야 진행**(C4 교훈). 보수적 처리안: 재시도 시 `query_sent`로 기접수분 제외 후 미접수만 재발송.
++ C3 외부검증 완료 (테스트 **248→271**, 8 fix/test 커밋 + docs). **검증 가능한 백엔드
+🔴/🟠 전부 처리.** 남은 항목 (모두 검증 제약·옵트인 필요):
+1. **window.confirm → ConfirmDialog** (🔴, 프론트) — `ContactDrawer.tsx:47`/`SystemUpdatePanel.tsx:55`. ⚠️ 프론트 테스트 인프라 없어 tsc/eslint+인스펙션만 — **검증 방식 합의 또는 프론트 테스트 인프라 먼저**.
+2. **ruff `--fix` 86건** (P4) — 스타일 일괄정리. 저위험·`pytest`로 검증 가능하나 큰 noise 디프 → 옵트인 권장. 변경분만, 기존 부채(UP045/I001/B904) 신중히.
+3. P4 기타: 프론트 테스트 인프라(Vitest/Playwright) · 양방향 8원(U+ outbound 양방향 CHAT 가능 여부).
