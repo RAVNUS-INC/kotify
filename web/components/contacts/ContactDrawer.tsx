@@ -13,6 +13,7 @@ import {
   useConfirm,
 } from '@/components/ui';
 import { deleteContactClient } from '@/lib/contacts-client';
+import { formatPhone } from '@/lib/phone';
 import { ContactFormDialog } from './ContactFormDialog';
 
 export type ContactDrawerProps = {
@@ -74,7 +75,7 @@ export function ContactDrawer({
       onOpenChange={handleOpenChange}
       width={400}
       title={contact?.name ?? ''}
-      description={contact?.phone ?? ''}
+      description={formatPhone(contact?.phone)}
       footer={
         contact && canManage ? (
           <div className="flex flex-col gap-2">

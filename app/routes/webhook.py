@@ -39,7 +39,7 @@ from app.models import Campaign, Message, MoMessage
 from app.msghub.schemas import MoWebhookPayload, RecvInfo, WebhookReport
 from app.security.settings_store import SettingsStore
 from app.services.report import process_report
-from app.util.phone import mask_phone
+from app.util.phone import mask_phone, normalize_phone
 
 log = logging.getLogger(__name__)
 
@@ -253,6 +253,13 @@ async def receive_mo(
 
     try:
         for item in payload.items:
+            # 인바운드(회신) 번호도 숫자만 저장(테마 D 통일). 휴대폰은 normalize_phone,
+            # 그 외(지역/대표번호 등)는 숫자만 추출해 하이픈·공백 등 구분자를 제거한다.
+            # 표시용 하이픈은 프론트(formatPhone)에서 처리.
+            item.number = normalize_phone(item.number) or "".join(
+                c for c in item.number if c.isdigit()
+            )
+
             # 위변조 방지 — callback 이 우리 활성 발신번호가 아니면 거부(토큰 유출 대비
             # defense-in-depth). 발신번호 미등록 환경에서는 검증 불가하므로 통과시킨다.
             if active_callbacks and item.callback:

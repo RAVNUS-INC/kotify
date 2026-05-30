@@ -16,6 +16,7 @@ import {
 } from '@/components/ui';
 import type { UploadedAttachment } from '@/lib/campaigns-client';
 import { apiSend } from '@/lib/csrf-client';
+import { formatPhone } from '@/lib/phone';
 import type { SenderNumber } from '@/types/number';
 import { AttachmentPicker } from './AttachmentPicker';
 
@@ -86,7 +87,7 @@ export function ComposeForm() {
         if (cancelled) return;
         const options = (json.data ?? []).map((n) => ({
           value: n.number,
-          label: `${n.number} · ${n.brand}`,
+          label: `${formatPhone(n.number)} · ${n.brand}`,
         }));
         setSenderOptions(options);
         if (options.length > 0 && options[0]) setSender(options[0].value);

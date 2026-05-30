@@ -7,6 +7,7 @@ import {
   setDefaultNumberClient,
   toggleNumberClient,
 } from '@/lib/numbers-client';
+import { formatPhone } from '@/lib/phone';
 import type { SenderNumber } from '@/types/number';
 import { Button, Icon, useConfirm } from '@/components/ui';
 
@@ -84,7 +85,7 @@ export function NumberActions({ number, canManage }: NumberActionsProps) {
             if (
               !(await confirm({
                 title: '발신번호 삭제',
-                description: `'${number.number}' 발신번호를 삭제하시겠습니까?`,
+                description: `'${formatPhone(number.number)}' 발신번호를 삭제하시겠습니까?`,
                 tone: 'danger',
                 confirmLabel: '삭제',
               }))

@@ -3,6 +3,7 @@ import type { Route } from 'next';
 import type { Contact } from '@/types/contact';
 import { Badge, EmptyState, Pill } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { formatPhone } from '@/lib/phone';
 
 export type ContactsTableProps = {
   contacts: ReadonlyArray<Contact>;
@@ -65,7 +66,7 @@ export function ContactsTable({ contacts, selectedId, filter }: ContactsTablePro
                       <span className="truncate">{c.name}</span>
                     </Link>
                   </td>
-                  <td className="mono">{c.phone}</td>
+                  <td className="mono">{formatPhone(c.phone)}</td>
                   <td className="truncate text-ink-muted">{c.email ?? '—'}</td>
                   <td>{c.team ?? '—'}</td>
                   <td>

@@ -1,5 +1,6 @@
 import type { ChatThreadDetail } from '@/types/chat';
 import { Badge, Button, Icon } from '@/components/ui';
+import { formatPhone } from '@/lib/phone';
 
 export type ThreadRecipientCardProps = {
   thread: ChatThreadDetail;
@@ -33,7 +34,7 @@ export function ThreadRecipientCard({ thread }: ThreadRecipientCardProps) {
             {thread.name}
           </div>
           <div className="truncate font-mono text-[12.5px] text-ink-dim">
-            {thread.phone}
+            {formatPhone(thread.phone)}
           </div>
         </div>
       </div>

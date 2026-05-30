@@ -6,6 +6,7 @@ import { StatusBadge } from '@/components/campaigns';
 import type { CampaignStatus } from '@/types/campaign';
 import { AuditActionBadge } from '@/components/audit';
 import { HighlightText } from './HighlightText';
+import { formatPhone } from '@/lib/phone';
 
 export type SearchResultsViewProps = {
   q: string;
@@ -48,7 +49,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
                       <HighlightText text={c.name} q={q} />
                     </div>
                     <div className="truncate font-mono text-[11.5px] text-ink-dim">
-                      <HighlightText text={c.phone} q={q} />
+                      <HighlightText text={formatPhone(c.phone)} q={q} />
                     </div>
                   </div>
                 </Link>

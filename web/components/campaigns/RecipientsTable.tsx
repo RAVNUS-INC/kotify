@@ -1,5 +1,6 @@
 import type { Recipient } from '@/types/campaign';
 import { EmptyState } from '@/components/ui';
+import { formatPhone } from '@/lib/phone';
 import { RecipientStatusBadge } from './RecipientStatusBadge';
 
 export type RecipientsTableProps = {
@@ -38,7 +39,7 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
             {recipients.map((r) => (
               <tr key={r.id}>
                 <td>{r.name}</td>
-                <td className="mono">{r.phone}</td>
+                <td className="mono">{formatPhone(r.phone)}</td>
                 <td>
                   <RecipientStatusBadge status={r.status} />
                 </td>

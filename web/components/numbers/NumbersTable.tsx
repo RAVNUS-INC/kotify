@@ -1,5 +1,6 @@
 import type { SenderNumber } from '@/types/number';
 import { EmptyState, Pill } from '@/components/ui';
+import { formatPhone } from '@/lib/phone';
 import { Progress } from '@/components/motion';
 import { NumberActions } from './NumberActions';
 import { NumberStatusBadge } from './NumberStatusBadge';
@@ -60,7 +61,7 @@ export function NumbersTable({ numbers, canManage = false }: NumbersTableProps) 
               const usageWarn = usagePct > 90;
               return (
                 <tr key={n.id}>
-                  <td className="mono text-ink">{n.number}</td>
+                  <td className="mono text-ink">{formatPhone(n.number)}</td>
                   <td>{KIND_LABEL[n.kind]}</td>
                   <td>
                     <div className="flex flex-wrap gap-1">

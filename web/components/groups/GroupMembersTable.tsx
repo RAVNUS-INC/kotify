@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import type { Contact } from '@/types/contact';
 import { EmptyState, Pill } from '@/components/ui';
+import { formatPhone } from '@/lib/phone';
 
 export type GroupMembersTableProps = {
   members: ReadonlyArray<Contact>;
@@ -50,7 +51,7 @@ export function GroupMembersTable({ members }: GroupMembersTableProps) {
                       <span className="truncate">{m.name}</span>
                     </Link>
                   </td>
-                  <td className="mono">{m.phone}</td>
+                  <td className="mono">{formatPhone(m.phone)}</td>
                   <td className="truncate text-ink-muted">{m.email ?? '—'}</td>
                   <td>{m.team ?? '—'}</td>
                   <td>

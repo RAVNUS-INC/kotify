@@ -3,6 +3,7 @@ import type { Route } from 'next';
 import type { ChatThread } from '@/types/chat';
 import { Badge, Button, EmptyState, Icon } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { formatPhone } from '@/lib/phone';
 
 export type ThreadPreviewProps = {
   thread?: ChatThread;
@@ -55,7 +56,7 @@ export function ThreadPreview({ thread }: ThreadPreviewProps) {
                 )}
               </div>
               <div className="font-mono text-[12.5px] text-ink-dim">
-                {thread.phone}
+                {formatPhone(thread.phone)}
               </div>
             </div>
           </div>
