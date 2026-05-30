@@ -65,6 +65,8 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# .claude/ 는 OMC 플러그인의 로컬 워크트리·상태(프로젝트 소스 아님) — 린트/수정 제외.
+extend-exclude = [".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
