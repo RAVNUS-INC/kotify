@@ -277,6 +277,12 @@ async def _dispatch_rcs_chunks(
             db.commit()
 
         except MsghubRateLimited:
+            # 29002(CPS 초과)는 요청 단위 레이트리밋이다 — CPS=Calls Per Second 는
+            # 수신자가 아닌 API 호출 단위 한도. 공식 스펙상 29002 는 HTTP 400 최상위
+            # code 로, _raise_for_response 가 body["code"](요청 결과)만 보고 raise 한다.
+            # 즉 요청 전체가 ingress 에서 거부돼 접수된 수신자가 0이므로, 아래 -fb 직접
+            # 재발송이 이미 접수된 수신자에게 중복 발송할 일이 없다(부분수락은 HTTP 200 +
+            # data[].code 경로 — 여기와 무관). 검증: claudedocs/review/c3-verification.md
             db.rollback()
             await asyncio.sleep(30)
             sent_at = _now_iso()
