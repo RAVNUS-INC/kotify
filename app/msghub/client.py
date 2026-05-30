@@ -87,12 +87,12 @@ def _parse_json(resp: httpx.Response) -> dict:
         )
     try:
         return resp.json()
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError) as exc:
         raise MsghubServerError(
             f"응답 파싱 실패 (HTTP {resp.status_code})",
             code="PARSE_ERROR",
             status_code=resp.status_code,
-        )
+        ) from exc
 
 
 class MsghubClient:

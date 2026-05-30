@@ -361,15 +361,15 @@ async def create_campaign(
         raise HTTPException(
             status_code=422,
             detail={"code": "validation_failed", "message": str(exc)},
-        )
-    except Exception:
+        ) from exc
+    except Exception as exc:
         # 내부 예외는 서버 로그에만 기록, 응답엔 일반화 메시지.
         import logging
         logging.getLogger(__name__).exception("dispatch_campaign failed")
         raise HTTPException(
             status_code=500,
             detail={"code": "dispatch_failed", "message": "발송 처리 중 오류가 발생했습니다"},
-        )
+        ) from exc
 
     return _campaign_create_response(campaign)
 

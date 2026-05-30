@@ -165,8 +165,8 @@ class OrgPatchBody(BaseModel):
             return None
         try:
             ZoneInfo(v)
-        except ZoneInfoNotFoundError:
-            raise ValueError("알 수 없는 timezone 입니다")
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("알 수 없는 timezone 입니다") from exc
         return v
 
 

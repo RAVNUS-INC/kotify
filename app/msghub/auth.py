@@ -73,8 +73,8 @@ def _parse_response(resp: httpx.Response) -> dict:
         raise AuthError("HTTP_SERVER_ERROR", f"서버 오류: HTTP {resp.status_code}")
     try:
         body = resp.json()
-    except Exception:
-        raise AuthError("PARSE_ERROR", f"응답 파싱 실패 (HTTP {resp.status_code})")
+    except Exception as exc:
+        raise AuthError("PARSE_ERROR", f"응답 파싱 실패 (HTTP {resp.status_code})") from exc
     return body
 
 
