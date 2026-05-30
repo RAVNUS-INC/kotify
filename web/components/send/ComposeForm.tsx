@@ -29,17 +29,24 @@ type Sender = { value: string; label: string };
 const SMS_BYTES = 90;
 const LMS_BYTES = 2000;
 
-function computeEstimate(message: string, recipientCount: number) {
+export function computeEstimate(
+  message: string,
+  recipientCount: number,
+  hasAttachment = false,
+) {
   // 단가: U+ msghub 공식(VAT 별도, 백엔드 PRICE_TABLE 과 일치).
-  // 현재 outbound 는 RCS 단방향 발송이라 단문은 RCS 17원 > SMS fallback 9원 (비용 역전).
-  // 보수적으로 채널별 최대 단가(RCS 또는 fallback 중 큰 값)를 예상 비용으로 표시한다.
-  // 양방향 CHAT 8원 전환은 U+ 지원 확인 후 — 그때 단문이 절감된다.
+  // 채널 판정은 백엔드 _classify_msg_type 와 동일하게 — 첨부(이미지)가 있으면
+  // MMS, 아니면 본문 바이트로 단문/장문. 보수적으로 채널 단가를 표시한다.
+  // (outbound 단문은 RCS 단방향 17 > SMS fallback 9 — 비용 역전.)
   const bytes = new TextEncoder().encode(message).length;
   let channel: 'SMS' | 'LMS' | 'MMS' = 'SMS';
   let perUnit = 17; // 단문: RCS 단방향 17 (> SMS fallback 9)
-  if (bytes > LMS_BYTES) {
+  if (hasAttachment) {
     channel = 'MMS';
-    perUnit = 85; // 이미지: MMS 85 (> RCS ITMPL 40)
+    perUnit = 85; // 이미지(첨부): RCS MMS형 RPMSMMX001 = productCode MMS = 85
+  } else if (bytes > LMS_BYTES) {
+    channel = 'MMS';
+    perUnit = 85; // 초장문(>2000B)
   } else if (bytes > SMS_BYTES) {
     channel = 'LMS';
     perUnit = 27; // 장문: RCS LMS = LMS fallback = 27
@@ -97,8 +104,8 @@ export function ComposeForm() {
   }, []);
 
   const { bytes, channel, cost, bytesState } = useMemo(
-    () => computeEstimate(message, recipients.length),
-    [message, recipients.length],
+    () => computeEstimate(message, recipients.length, attachment != null),
+    [message, recipients.length, attachment],
   );
 
   const recipientsState: 'warn' | 'err' | undefined =

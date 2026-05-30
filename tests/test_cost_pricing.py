@@ -44,9 +44,13 @@ def test_estimate_short_range_is_9_to_17():
     assert estimate_cost("short", 100) == (900, 1700)
 
 
-def test_estimate_image_range_is_40_to_85():
-    """이미지 견적: RCS ITMPL 40 ~ MMS 85 (이미지는 RCS 가 이득)."""
-    assert estimate_cost("image", 100) == (4000, 8500)
+def test_estimate_image_is_flat_85():
+    """이미지: RPMSMMX001 = productCode MMS = 85 (RCS = MMS fallback) → 85~85.
+
+    ITMPL(40)은 썸네일/SNS/슬라이드형 사전등록 템플릿 전용으로 outbound 미사용
+    (스펙 §6.3 messagebaseId↔productCode 표 기준 정정 — 이전 40~85 가정 오류).
+    """
+    assert estimate_cost("image", 100) == (8500, 8500)
 
 
 def test_estimate_long_range_is_flat_27():

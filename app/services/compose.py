@@ -99,15 +99,16 @@ _MSG_TYPE_MAP = {"SMS": "short", "LMS": "long", "MMS": "image"}
 # 메시지 유형 → RCS messagebaseId (v11 통합 RCS, 모두 단방향 엔드포인트)
 # 참조: claudedocs/msghub-api-guide.md §6, 공식 스펙 "2.3.2 통합 RCS 메시지 §1"
 #
-# short: RPSSAXX001 — 통합 RCS SMS형, 9원, fbInfoLst(SMS) 자동 fallback
-# long:  RPLSAXX001 — 통합 RCS LMS형, 27원, fbInfoLst(MMS) 자동 fallback
-# image: RPMSMMX001 — 통합 RCS MMS M형, 40원, fbInfoLst(MMS) 자동 fallback
+# 단가는 webhook 리포트의 (channel, productCode) 로 calculate_cost 가 결정한다.
+# short: RPSSAXX001 — 통합 RCS SMS형, RCS 도달 17원 / SMS fallback 9원
+# long:  RPLSAXX001 — 통합 RCS LMS형, 27원 (RCS=LMS fallback 동일)
+# image: RPMSMMX001 — 통합 RCS MMS형, productCode=MMS=85원 / MMS fallback 85원
 #
 # 주의: RPCSAXX001(양방향 CHAT, 8원)은 /rcs/bi/v1.1 엔드포인트 전용으로
 # msghub 문서 §2("RCS 양방향 응답메시지를 발송합니다")에 따르면 고객의
 # MO 수신에 대한 응답 발송에만 사용 가능. outbound 브로드캐스트에 사용
 # 시 replyId(사전등록 응답 템플릿 ID)가 없어 29003/404로 거부된다.
-# outbound 단문은 단방향 SMS형(RPSSAXX001, 9원)을 사용해야 한다.
+# outbound 단문은 단방향 SMS형(RPSSAXX001, RCS 도달 시 17원)을 사용해야 한다.
 _MESSAGEBASE_MAP = {
     "short": "RPSSAXX001",   # 통합 RCS SMS형 (단방향)
     "long": "RPLSAXX001",    # 통합 RCS LMS형 (단방향)

@@ -73,7 +73,9 @@ def chat_session_cost(unit_count_in_window: int) -> int:
 _ESTIMATE_MAP: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {
     "short": (("RCS", "SMS"), ("SMS", "SMS")),
     "long": (("RCS", "LMS"), ("LMS", "LMS")),
-    "image": (("RCS", "ITMPL"), ("MMS", "MMS")),
+    # 이미지 발송은 RPMSMMX001(통합 RCS MMS형) → 리포트 productCode=MMS=85원.
+    # ITMPL(40)은 썸네일/SNS/슬라이드형 사전등록 템플릿 전용으로 outbound 미사용.
+    "image": (("RCS", "MMS"), ("MMS", "MMS")),
 }
 
 
