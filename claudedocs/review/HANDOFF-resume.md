@@ -21,7 +21,7 @@
 
 ### B. 미해결 🔴 (다른 Phase, 제약 있음)
 - **C3** `compose.py:262` 29002 재시도 중복발송 — msghub 부분수락 의미론 **외부 확인 필요**(C4처럼 msghub 스펙). 확인 전엔 보수적 처리(재시도 시 query_sent로 기접수분 제외).
-- **CSV injection** — export 일관성이 근본 방어. `audit_api.py`/`reports.py` export가 `safe_csv_cell` 쓰는지 확인 후 누락 보강(export_contacts는 이미 적용).
+- ~~**CSV injection** — export 일관성이 근본 방어~~ → **전 4개 export 경로(audit_api/campaigns/reports/contacts) 인스펙션 결과 모든 사용자 입력 컬럼이 `safe_csv_cell` 적용됨**(숫자 컬럼은 서버 계산값이라 안전). 방어 완전·일관 확인, 누락 0. `safe_csv_cell` 테스트 커버리지 0 → 회귀 고정. ✅ `039b285` (테스트 3건)
 - **window.confirm** `ContactDrawer.tsx:47`, `SystemUpdatePanel.tsx:55` — Radix Dialog 기반 ConfirmDialog로 교체. ⚠️ 프론트 테스트 인프라 없음(tsc/eslint만).
 - **배포** `deploy/kotify-update.sh`(커밋메시지 JSON 파괴), `kotify-update-worker.sh`(alembic 실패감지) — 셸, 로컬 검증 어려움. Python/jq JSON 직렬화로 교체.
 
@@ -45,9 +45,8 @@
 - 단일 워커(`--workers 1`) 전제 — lifespan 백그라운드 태스크 안전.
 
 ## 다음 단계 (바로 시작)
-상태머신 P2-E 완료. 남은 미해결 🔴/🟠 (각각 제약 있음, 권장 순):
-1. **CSV injection** (🔴) — `audit_api.py`/`reports.py` export가 `safe_csv_cell` 쓰는지 확인 후 누락 보강 (`export_contacts`는 이미 적용). 백엔드·테스트 가능 → **다음 권장**
-2. **window.confirm** (🔴/🟢) — `ContactDrawer.tsx:47`/`SystemUpdatePanel.tsx:55` → Radix ConfirmDialog. ⚠️ 프론트 테스트 인프라 없음(tsc/lint만)
-3. **배포 스크립트** (🔴) — `kotify-update.sh`(JSON 파괴)/`worker.sh`(alembic 실패감지). 셸, 로컬 검증 어려움 → Python/jq 직렬화
-4. **C3** (🔴) — `compose.py:262` 29002 재시도 중복발송. ⚠️ **msghub 부분수락 의미론 외부 확인 필요**(C4처럼). 확인 전 보수적 처리만
-5. P3/P4: PII 로그 마스킹 · ruff --fix 86건 · 프론트 테스트 인프라 · 양방향 8원
+상태머신 P2-E + CSV injection 완료(테스트 248→262). 남은 미해결 🔴 (각각 제약):
+1. **window.confirm** (🔴/🟢) — `ContactDrawer.tsx:47`/`SystemUpdatePanel.tsx:55` → Radix ConfirmDialog(이미 존재 여부 확인 필요). ⚠️ 프론트 테스트 인프라 없음(tsc/lint만)
+2. **배포 스크립트** (🔴) — `kotify-update.sh`(JSON 파괴)/`worker.sh`(alembic 실패감지). 셸, 로컬 검증 어려움 → Python/jq 직렬화
+3. **C3** (🔴) — `compose.py:262` 29002 재시도 중복발송. ⚠️ **msghub 부분수락 의미론 외부 확인 필요**(C4처럼). 확인 전 보수적 처리만
+4. P3/P4: PII 로그 마스킹 · ruff --fix 86건 · 프론트 테스트 인프라 · 양방향 8원
