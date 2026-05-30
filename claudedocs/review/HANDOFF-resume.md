@@ -27,9 +27,9 @@
 
 ### C. P3/P4
 - ~~PII 로그 마스킹~~ → ✅ `649f8da`. `mask_phone`(앞3·뒤4) + 3개 로그 사이트(webhook/report×2) + 회귀 8건.
-- ruff `--fix` 86건 (스타일 일괄, 변경 후 pytest) — **다음 권장**(저위험·검증가능)
+- ~~ruff `--fix`~~ → ✅ `e10c9f6`(safe 자동수정 106: UP045/I001/F401/UP041/UP006), `7aeab6f`(`.claude` 워크트리 lint 제외), `3840179`(B904 예외체이닝 5). **실소스 ruff 위반 0**(미커밋 threads.py 제외). pytest 271 유지.
 - ~~프론트 테스트 인프라 도입 (Vitest)~~ → ✅ `1e91337` (Vitest+RTL+jsdom, `pnpm test`). 발송 플로우 E2E(Playwright)는 별도 미도입.
-- 양방향 8원 전환 (U+ outbound 양방향 CHAT 가능 여부 확인)
+- ~~양방향 8원 전환~~ → **❌ 비가능(not viable)**. 공식 스펙(`doc.msghub.uplus.co.kr/guide/d/rcs`) 확인: 양방향 발송(`/msg/v1.1/bi/rcs`)은 `replyId`+`moRecvDt` 필수 = **MO(inbound) 응답 전용**. outbound 브로드캐스트는 응답할 MO 가 없어 불가 → 단방향 RCS SMS형 17원(C4 확정)이 유일 경로. 코드 변경 없음(compose.py 에 이미 문서화).
 
 ## 성공 패턴 (재현할 것)
 - 검증: `.venv/bin/pytest -q -p no:cacheprovider` / `(cd web && node_modules/.bin/tsc --noEmit)` / `next lint` / **`(cd web && pnpm test)`**(Vitest, 신규)
@@ -45,10 +45,11 @@
 - 단일 워커(`--workers 1`) 전제 — lifespan 백그라운드 태스크 안전.
 
 ## 다음 단계 (바로 시작)
-이번 resume 세션: 상태머신 P2-E(H4/H1/H5) + CSV injection + PII 마스킹 + 배포 스크립트
-+ C3 외부검증 + **window.confirm 교체(프론트 테스트 인프라 신규 도입 포함)** 완료
-(백엔드 테스트 **248→271**, 프론트 테스트 0→7). **리뷰의 🔴 전부 해소**(수정 또는 검증반증).
-남은 항목 (P4 옵트인):
-1. **ruff `--fix` 86건** (P4) — 스타일 일괄정리. 저위험·`pytest`로 검증 가능하나 큰 noise 디프 → 옵트인 권장. 변경분만, 기존 부채(UP045/I001/B904) 신중히.
-2. **양방향 8원 전환** (P4) — U+ outbound 양방향 CHAT(RPCSAXX001) 가능 여부 외부 확인 선행(C4/C3 교훈). 현재는 단방향 SMS형(17원) 사용.
-3. (선택) 발송 플로우 E2E(Playwright), `alert()` → toast 등 추가 UX 개선.
+**리뷰 백로그 사실상 완료.** 이번 resume 세션: 상태머신 P2-E(H4/H1/H5) + CSV injection +
+PII 마스킹 + 배포 스크립트 + C3 외부검증 + window.confirm(프론트 테스트 인프라 포함) +
+**P4 전건(ruff 정리·양방향 8원 검증)** 완료. 백엔드 271 / 프론트 7 / 실소스 ruff 0 /
+next build OK. **리뷰의 🔴 전부 해소 + P4 종결.**
+
+남은 것 (모두 선택·저우선):
+1. **미커밋 `threads.py`** — 세션 전부터 있던 변경(내 작업 아님). 커밋 시 ruff 6건(I001/F841/B904×2 등) 함께 정리 가능.
+2. (선택) 발송 플로우 E2E(Playwright), `alert()` → toast(CampaignDetailActions) 등 UX 개선.
