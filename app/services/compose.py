@@ -218,15 +218,18 @@ async def _dispatch_rcs_chunks(
     is_reserved: bool,
     reserve_utc_iso: str | None,
     msghub_reserve_time: str | None,
-) -> tuple[list[int], list[int]]:
+) -> tuple[list[int], list[int], int]:
     """단방향 RCS + fbInfoLst 청크 발송 (장문/이미지).
 
     Returns:
-        (failed_chunk_indices, failed_chunk_sizes)
+        (failed_chunk_indices, failed_chunk_sizes, item_failed)
+        item_failed 는 청크 전송은 성공(HTTP 200)했으나 응답 내 item 단위로
+        실패한 수신자 수 — 청크 전체 실패(failed_chunk_sizes)와 서로소다 (H1).
     """
     chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
     failed_chunks: list[int] = []
     failed_chunk_sizes: list[int] = []
+    item_failed = 0
 
     fb_info_lst = _build_fallback(msg_type, content, subject, mms_file_id)
 
@@ -266,9 +269,10 @@ async def _dispatch_rcs_chunks(
             if isinstance(resp, ReserveResponse) and resp.web_req_id:
                 campaign.web_req_id = resp.web_req_id
 
-            _create_messages_from_response(
+            _, n_failed = _create_messages_from_response(
                 db, campaign.id, msghub_req.id, resp, chunk, chunk_idx
             )
+            item_failed += n_failed
             db.flush()
             db.commit()
 
@@ -291,9 +295,10 @@ async def _dispatch_rcs_chunks(
                 )
                 db.add(msghub_req)
                 db.flush()
-                _create_messages_from_response(
+                _, n_failed = _create_messages_from_response(
                     db, campaign.id, msghub_req.id, resp, chunk, chunk_idx
                 )
+                item_failed += n_failed
                 db.flush()
                 db.commit()
             except Exception as retry_exc:
@@ -326,9 +331,10 @@ async def _dispatch_rcs_chunks(
                 )
                 db.add(msghub_req)
                 db.flush()
-                _create_messages_from_response(
+                _, n_failed = _create_messages_from_response(
                     db, campaign.id, msghub_req.id, resp, chunk, chunk_idx,
                 )
+                item_failed += n_failed
                 db.flush()
                 db.commit()
             except Exception as retry_exc:
@@ -354,7 +360,7 @@ async def _dispatch_rcs_chunks(
             failed_chunks.append(chunk_idx)
             failed_chunk_sizes.append(len(chunk))
 
-    return failed_chunks, failed_chunk_sizes
+    return failed_chunks, failed_chunk_sizes, item_failed
 
 
 async def dispatch_campaign(
@@ -463,7 +469,7 @@ async def dispatch_campaign(
     db.commit()
 
     # 4. 발송 — 단방향 RCS + fbInfoLst 자동 fallback (모든 유형 공통)
-    failed_chunks, failed_chunk_sizes = await _dispatch_rcs_chunks(
+    failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
         db, msghub_client, campaign, caller_number, content, subject,
         recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
         is_reserved, reserve_utc_iso, msghub_reserve_time,
@@ -471,8 +477,10 @@ async def dispatch_campaign(
     chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
 
     # 5. Campaign state + counters 업데이트 — 수신자 수 기반 판정.
+    # 청크 전체 실패(failed_chunk_sizes)뿐 아니라 HTTP 200 응답 내 item 단위
+    # 실패(item_failed)도 합산해야 웹훅 도착 전에도 fail_count 가 정확하다 (H1).
     total_chunks = len(chunks)
-    failed_recipients = sum(failed_chunk_sizes)
+    failed_recipients = sum(failed_chunk_sizes) + item_failed
     total_recipients = len(recipients)
 
     if failed_recipients == 0:
@@ -551,10 +559,20 @@ def _create_messages_from_response(
     resp: SendResponse | ReserveResponse,
     chunk: list[str],
     chunk_idx: int,
-) -> None:
-    """발송 응답에서 Message 레코드 생성."""
+) -> tuple[int, int]:
+    """발송 응답에서 Message 레코드 생성.
+
+    Returns:
+        (accepted, failed) — accepted 는 접수(REG)·예약(PENDING) 건수, failed 는
+        HTTP 200 응답 내 item 단위 실패(item.code != SUCCESS_CODE)로 즉시 FAILED
+        처리된 건수. dispatch 가 웹훅 도착 전에도 fail_count/pending_count 를
+        정확히 반영하기 위해 호출자가 사용한다 (H1).
+    """
+    accepted = 0
+    failed = 0
     if isinstance(resp, SendResponse) and resp.items:
         for item in resp.items:
+            is_ok = item.code == SUCCESS_CODE
             msg = Message(
                 campaign_id=campaign_id,
                 msghub_request_id=msghub_request_id,
@@ -562,11 +580,15 @@ def _create_messages_from_response(
                 to_number_raw=item.phone,
                 cli_key=item.cli_key,
                 msg_key=item.msg_key,
-                status="REG" if item.code == SUCCESS_CODE else "FAILED",
+                status="REG" if is_ok else "FAILED",
                 result_code=item.code,
                 result_desc=item.message,
             )
             db.add(msg)
+            if is_ok:
+                accepted += 1
+            else:
+                failed += 1
     else:
         for i, phone in enumerate(chunk):
             msg = Message(
@@ -579,6 +601,8 @@ def _create_messages_from_response(
                 status="PENDING",
             )
             db.add(msg)
+            accepted += 1
+    return accepted, failed
 
 
 def _record_failed_chunk(
