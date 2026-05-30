@@ -69,7 +69,8 @@ export function ComposeForm() {
   const [sender, setSender] = useState<string>('');
   const [recipients, setRecipients] = useState<string[]>([]);
   const [message, setMessage] = useState('');
-  const [sendChannel, setSendChannel] = useState<SendChannel>('rcs');
+  // 기본값 없음 — 사용자가 일반/RCS 를 직접 선택해야 발송 가능(침묵의 기본값 방지).
+  const [sendChannel, setSendChannel] = useState<SendChannel | null>(null);
   const [mode, setMode] = useState<SendMode>('now');
   const [sendAt, setSendAt] = useState('');
   const [confirmed, setConfirmed] = useState(false);
@@ -106,10 +107,13 @@ export function ComposeForm() {
     };
   }, []);
 
+  // bytes/bytesState 는 채널과 무관(본문 길이 한계 경고용)이라 항상 계산.
+  // cost/channel 은 전송 방식 선택 후에만 표시(아래 channelChosen 게이트).
   const { bytes, channel, cost, bytesState } = useMemo(
-    () => computeEstimate(message, recipients.length, attachment != null, sendChannel),
+    () => computeEstimate(message, recipients.length, attachment != null, sendChannel ?? 'rcs'),
     [message, recipients.length, attachment, sendChannel],
   );
+  const channelChosen = sendChannel != null;
 
   const recipientsState: 'warn' | 'err' | undefined =
     recipients.length > 1000 ? 'err' : recipients.length > 500 ? 'warn' : undefined;
@@ -122,6 +126,7 @@ export function ComposeForm() {
     message.trim() !== '' &&
     bytesState !== 'err' &&
     (mode === 'now' || sendAt !== '') &&
+    channelChosen &&
     confirmed &&
     !submitting;
 
@@ -257,17 +262,9 @@ export function ComposeForm() {
         <Field
           label="전송 방식"
           required
-          hint="RCS는 브랜드 발신·읽음확인 등 리치 기능, 일반은 표준 SMS/LMS/MMS"
+          hint="일반은 표준 SMS/LMS/MMS, RCS는 브랜드 발신·읽음확인 등 리치 기능"
         >
           <div className="flex flex-col gap-2">
-            <Radio
-              name="sendChannel"
-              value="rcs"
-              checked={sendChannel === 'rcs'}
-              onChange={() => setSendChannel('rcs')}
-              label="RCS"
-              sub="브랜드 발신·읽음확인. 단문 17원 (미지원 단말은 SMS 9원 자동 대체)"
-            />
             <Radio
               name="sendChannel"
               value="sms"
@@ -276,6 +273,14 @@ export function ComposeForm() {
               label="일반 (SMS/LMS/MMS)"
               sub="표준 문자. 단문 9원 — 단순 공지에 경제적"
             />
+            <Radio
+              name="sendChannel"
+              value="rcs"
+              checked={sendChannel === 'rcs'}
+              onChange={() => setSendChannel('rcs')}
+              label="RCS"
+              sub="브랜드 발신·읽음확인. 단문 17원 (미지원 단말은 SMS 9원 자동 대체)"
+            />
           </div>
         </Field>
 
@@ -283,7 +288,11 @@ export function ComposeForm() {
           label="메시지"
           htmlFor="msg"
           required
-          hint={`자동 채널: ${sendChannel === 'rcs' ? 'RCS·' : ''}${channel} · ${bytes} bytes`}
+          hint={
+            channelChosen
+              ? `자동 채널: ${sendChannel === 'rcs' ? 'RCS·' : ''}${channel} · ${bytes} bytes`
+              : `${bytes} bytes · 전송 방식을 선택하세요`
+          }
           counter={{
             value: `${bytes} bytes`,
             state: bytesState,
@@ -333,11 +342,12 @@ export function ComposeForm() {
             footer={
               <>
                 <span className="font-mono">
-                  {bytes} bytes · {channel}
+                  {bytes} bytes{channelChosen ? ` · ${channel}` : ''}
                 </span>
                 <span className="font-mono text-ink-dim">
-                  예상 {recipients.length}건 · ₩
-                  {cost.toLocaleString('ko-KR')}
+                  {channelChosen
+                    ? `예상 ${recipients.length}건 · ₩${cost.toLocaleString('ko-KR')}`
+                    : '전송 방식 선택 후 견적'}
                 </span>
               </>
             }

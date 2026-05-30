@@ -169,8 +169,9 @@ class CampaignCreateBody(BaseModel):
     message: str = Field(..., min_length=1)
     sendAt: str | None = None
     # 전송 방식 선택: "rcs"(RCS 우선+fallback) | "sms"(일반 SMS/LMS/MMS 직접).
-    # 하위 유형(단문/장문/이미지)은 서버가 content·첨부로 자동 분류한다.
-    sendChannel: str = "rcs"
+    # 기본값 없음 — 클라이언트가 명시해야 한다(침묵의 기본값 방지). 하위 유형
+    # (단문/장문/이미지)은 서버가 content·첨부로 자동 분류한다.
+    sendChannel: str
     # MMS 첨부 — POST /campaigns/attachments 업로드 후 돌려받은 attachmentId.
     attachmentId: int | None = Field(default=None, ge=1)
 
