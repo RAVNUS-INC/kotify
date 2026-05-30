@@ -213,6 +213,13 @@ def patch_org(
 
         for field, val in normalized.items():
             _upsert_setting(db, _ORG_KEYS[field], val, user.sub)
+        audit.log(
+            db,
+            actor_sub=user.sub,
+            action=audit.SETTINGS_UPDATE,
+            target="org",
+            detail={"fields": sorted(normalized.keys())},
+        )
         db.commit()
 
     return {"data": _get_org_dict(db)}
@@ -598,7 +605,9 @@ async def _run_update_script(action: str) -> tuple[int, str, str]:
 
 
 @router.get("/system/update/check", response_model=None)
-async def check_system_update() -> dict | JSONResponse:
+async def check_system_update(
+    user: User = Depends(require_user),
+) -> dict | JSONResponse:
     """원격 main 브랜치와 비교해 업데이트 가능 여부와 신규 커밋 목록을 반환."""
     if not _UPDATE_SCRIPT.exists():
         return JSONResponse(
