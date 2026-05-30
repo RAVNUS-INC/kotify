@@ -158,19 +158,28 @@ def _find_message(
         if msg:
             return msg
 
-    # phone 보조 매칭 — 아직 완료되지 않은 최근 메시지만 대상 (ambiguity 최소화)
+    # phone 보조 매칭 — 미완료 메시지가 정확히 1건일 때만 매칭한다 (H4).
+    # 동일 번호가 2개+ 캠페인에 동시에 미완료로 남아 있으면 cliKey 없는 리포트가
+    # 어느 캠페인의 결과인지 확신할 수 없다. limit(1)+order_by 로 "가장 최근 1건"을
+    # 집으면 엉뚱한 캠페인에 결과가 귀속돼 과금·집계가 오염되므로, 모호하면 보류한다.
+    # limit(2) 는 "정확히 1건 vs 2건+" 판별에 필요한 최소 조회량이다.
     if phone:
-        msg = db.execute(
+        candidates = db.execute(
             select(Message)
             .where(
                 Message.to_number == phone,
                 Message.status.in_(("PENDING", "REG", "ING", "FB_PENDING")),
             )
             .order_by(Message.id.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-        if msg:
-            return msg
+            .limit(2)
+        ).scalars().all()
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) >= 2:
+            log.warning(
+                "phone 보조매칭 보류: phone=%s 에 미완료 메시지 %d건 — 모호하여 매칭하지 않음",
+                phone, len(candidates),
+            )
 
     return None
 
