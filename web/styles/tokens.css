@@ -201,7 +201,7 @@
 .k-editor-tb-btn:hover{background:var(--white); color:var(--text);}
 .k-editor-tb-btn.divider{width:1px; padding:0; margin:3px 4px; background:var(--gray-3); border-radius:0;}
 .k-editor-tb-btn svg{width:13px; height:13px; stroke:currentColor; fill:none; stroke-width:1.8;}
-.k-editor-body{padding:12px 14px; font-size:13.5px; line-height:1.65; min-height:120px; outline:none;}
+.k-editor-body{padding:12px 14px; font-size:13.5px; line-height:1.65; min-height:120px; outline:none; width:100%; display:block; resize:vertical;}
 .k-editor-ft{display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-top:1px solid var(--gray-3); background:var(--gray-1); border-radius:0 0 var(--r) var(--r); font-size:11.5px; color:var(--text-muted);}
 
 /* Select — custom chevron */
