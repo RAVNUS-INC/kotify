@@ -22,17 +22,17 @@
 ### B. 미해결 🔴 (다른 Phase, 제약 있음)
 - ~~**C3** 29002 재시도 중복발송~~ → **❌ 반증(false positive)**. LG U+ 공식 스펙 확인: CPS=요청 단위 레이트리밋, 29002=HTTP 400 최상위 code(요청 전체 거부)라 접수분 0 → `-fb` 재시도 중복 불가. 부분수락은 HTTP 200+`data[].code`(H1) 경로뿐. 코드 무변경 + 확정 주석 + 회귀 1건. ✅ `553ddd3` (검증: `c3-verification.md`)
 - ~~**CSV injection** — export 일관성이 근본 방어~~ → **전 4개 export 경로(audit_api/campaigns/reports/contacts) 인스펙션 결과 모든 사용자 입력 컬럼이 `safe_csv_cell` 적용됨**(숫자 컬럼은 서버 계산값이라 안전). 방어 완전·일관 확인, 누락 0. `safe_csv_cell` 테스트 커버리지 0 → 회귀 고정. ✅ `039b285` (테스트 3건)
-- **window.confirm** — **정정**: 재사용 `ConfirmDialog` 컴포넌트 **미존재**(Radix Dialog 프리미티브만 있음). `confirm()` 사용처 **5곳**(2곳 아님): `ContactDrawer.tsx:47`·`SystemUpdatePanel.tsx:55`·`NumberActions.tsx:82`·`GroupDetailAdminShell.tsx:35`·`CampaignDetailActions.tsx:40` — 전부 삭제/취소 파괴적 액션. 작업 실체 = **신규 async ConfirmDialog 컴포넌트 생성 + 5개 호출부 sync→async 리팩터링**(기계적 교체 아님). ⚠️ 프론트 테스트 인프라 0 → tsc/eslint+인스펙션만. **무테스트 파괴적-액션 리팩터링을 맹목 커밋하는 건 위험** → 프론트 테스트 인프라(Vitest+RTL) 선도입 또는 검증갭 명시 수용 필요. (NumberActions 에 "모달 도입 전까지 임시" 주석 = 의도적 보류)
+- ~~**window.confirm** (5곳: 연락처/발신번호/그룹 삭제·예약 취소·시스템 업데이트)~~ → ✅ `84ea2c4`. **Vitest+RTL 인프라 선도입**(`1e91337`) 후, Radix 기반 `useConfirm` 훅(Promise 기반, 전역 Provider 없음) 신규 생성 + 5개 호출부 sync→async 최소 리팩터링. 검증: 컴포넌트 동작 7건(확인=true·취소/ESC=false) + tsc 0 + eslint 0 + **next build 성공(18/18)**. (잔여: `CampaignDetailActions` 의 `alert()` 는 별개 — 미스코프)
 - ~~**배포** `kotify-update.sh`(JSON 파괴)/`worker.sh`(alembic 롤백)~~ → ✅ `e26047b`. #15 sed+awk→`python3 json.dumps`(악성 메시지 valid JSON 검증), #16 `if ! alembic` 가드 제거→bare 명령으로 ERR trap 롤백 발동(trap 발동 차이 재현 검증). 정적 검증만(배포 환경 부재).
 
 ### C. P3/P4
 - ~~PII 로그 마스킹~~ → ✅ `649f8da`. `mask_phone`(앞3·뒤4) + 3개 로그 사이트(webhook/report×2) + 회귀 8건.
 - ruff `--fix` 86건 (스타일 일괄, 변경 후 pytest) — **다음 권장**(저위험·검증가능)
-- 프론트 테스트 인프라 도입 (Playwright/Vitest) → 발송 플로우 E2E (window.confirm 검증 전제)
+- ~~프론트 테스트 인프라 도입 (Vitest)~~ → ✅ `1e91337` (Vitest+RTL+jsdom, `pnpm test`). 발송 플로우 E2E(Playwright)는 별도 미도입.
 - 양방향 8원 전환 (U+ outbound 양방향 CHAT 가능 여부 확인)
 
 ## 성공 패턴 (재현할 것)
-- 검증: `.venv/bin/pytest -q -p no:cacheprovider` / `(cd web && node_modules/.bin/tsc --noEmit)` / `next lint`
+- 검증: `.venv/bin/pytest -q -p no:cacheprovider` / `(cd web && node_modules/.bin/tsc --noEmit)` / `next lint` / **`(cd web && pnpm test)`**(Vitest, 신규)
 - ruff: 변경분 **새 위반 0**만 확인 (`ruff check <file> | grep -E "B[0-9]{3}|F[0-9]{3}"`), 기존 부채(UP045/I001/B904)는 P4
 - 병렬 Bash는 `; true`로 exit 정규화 (non-zero가 배치 취소시킴)
 - atomic 커밋, conventional 한국어 메시지, **AI 흔적 없음**(CLAUDE.md 규칙)
@@ -46,8 +46,9 @@
 
 ## 다음 단계 (바로 시작)
 이번 resume 세션: 상태머신 P2-E(H4/H1/H5) + CSV injection + PII 마스킹 + 배포 스크립트
-+ C3 외부검증 완료 (테스트 **248→271**, 8 fix/test 커밋 + docs). **검증 가능한 백엔드
-🔴/🟠 전부 처리.** 남은 항목 (모두 검증 제약·옵트인 필요):
-1. **window.confirm → ConfirmDialog** (🔴, 프론트) — **신규 async 컴포넌트 + 5개 파괴적-액션 호출부 리팩터링**(상세·정정은 §B). ⚠️ 무테스트 → **프론트 테스트 인프라(Vitest+RTL) 선도입 권장**, 또는 검증갭 수용 시 tsc/eslint+QA로 진행.
-2. **ruff `--fix` 86건** (P4) — 스타일 일괄정리. 저위험·`pytest`로 검증 가능하나 큰 noise 디프 → 옵트인 권장. 변경분만, 기존 부채(UP045/I001/B904) 신중히.
-3. P4 기타: 프론트 테스트 인프라(Vitest/Playwright) · 양방향 8원(U+ outbound 양방향 CHAT 가능 여부).
++ C3 외부검증 + **window.confirm 교체(프론트 테스트 인프라 신규 도입 포함)** 완료
+(백엔드 테스트 **248→271**, 프론트 테스트 0→7). **리뷰의 🔴 전부 해소**(수정 또는 검증반증).
+남은 항목 (P4 옵트인):
+1. **ruff `--fix` 86건** (P4) — 스타일 일괄정리. 저위험·`pytest`로 검증 가능하나 큰 noise 디프 → 옵트인 권장. 변경분만, 기존 부채(UP045/I001/B904) 신중히.
+2. **양방향 8원 전환** (P4) — U+ outbound 양방향 CHAT(RPCSAXX001) 가능 여부 외부 확인 선행(C4/C3 교훈). 현재는 단방향 SMS형(17원) 사용.
+3. (선택) 발송 플로우 E2E(Playwright), `alert()` → toast 등 추가 UX 개선.
