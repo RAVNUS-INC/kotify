@@ -271,7 +271,7 @@ export function ComposeForm() {
               checked={sendChannel === 'sms'}
               onChange={() => setSendChannel('sms')}
               label="일반 (SMS/LMS/MMS)"
-              sub="표준 문자. 단문 9원 — 단순 공지에 경제적"
+              sub="표준 문자 (단순 공지, 알림, 문자 수신 및 답장 불가능한 단방향)"
             />
             <Radio
               name="sendChannel"
@@ -279,7 +279,7 @@ export function ComposeForm() {
               checked={sendChannel === 'rcs'}
               onChange={() => setSendChannel('rcs')}
               label="RCS"
-              sub="브랜드 발신·읽음확인. 단문 17원 (미지원 단말은 SMS 9원 자동 대체)"
+              sub="브랜드 발신(읽음 확인 가능, 채팅처럼 문자 수신 및 답장 소통 가능)"
             />
           </div>
         </Field>
