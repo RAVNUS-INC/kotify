@@ -382,15 +382,18 @@ async def dispatch_campaign(
     reserve_time_local: str | None = None,
     attachment_id: int | None = None,
     idempotency_key: str | None = None,
+    send_channel: str = "rcs",
 ) -> Campaign:
-    """캠페인을 생성하고 msghub를 통해 RCS 우선 발송한다.
+    """캠페인을 생성하고 msghub를 통해 발송한다.
 
-    모든 메시지 유형은 통합 RCS 단방향(/rcs/v1.1)을 사용한다:
-    - short: RPSSAXX001 (9원), fbInfoLst → SMS
-    - long:  RPLSAXX001 (27원), fbInfoLst → MMS (title+body)
-    - image: RPMSMMX001 (40원), fbInfoLst → MMS
+    send_channel 로 전송 방식을 선택한다 (하위 유형은 content/첨부로 자동 분류):
+    - "rcs" (기본): 통합 RCS 단방향(/rcs/v1.1) + fbInfoLst 자동 fallback.
+        short RPSSAXX001(RCS 17 / SMS fallback 9), long RPLSAXX001(27),
+        image RPMSMMX001(MMS 85).
+    - "sms" (일반): RCS 미사용, 직접 SMS/LMS/MMS 발송.
+        short SMS(9), long LMS(27), image MMS(85).
 
-    RCS 실패 시 msghub가 fbInfoLst로 자동 대체발송한다.
+    단가는 webhook 리포트의 (channel, productCode) 로 calculate_cost 가 확정한다.
     """
     # 0. 수신자 중복 제거 (C2) — 한도 판정 전에 수행해 실제 발송 건수 기준으로 검증.
     original_count = len(recipients)
@@ -438,8 +441,9 @@ async def dispatch_campaign(
     if caller is None:
         raise ValueError(f"발신번호 '{caller_number}'가 활성 목록에 없습니다.")
 
-    # 2. messagebaseId 결정 — 모든 유형이 단방향 엔드포인트(/rcs/v1.1) 사용.
-    messagebase_id = _MESSAGEBASE_MAP.get(msg_type) or "RPSSAXX001"
+    # 2. messagebaseId 결정 — RCS 모드만. 일반(sms) 모드는 RCS 미사용이라 None.
+    is_rcs = send_channel != "sms"
+    messagebase_id = (_MESSAGEBASE_MAP.get(msg_type) or "RPSSAXX001") if is_rcs else None
 
     now = _now_iso()
 
@@ -475,12 +479,19 @@ async def dispatch_campaign(
 
     db.commit()
 
-    # 4. 발송 — 단방향 RCS + fbInfoLst 자동 fallback (모든 유형 공통)
-    failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
-        db, msghub_client, campaign, caller_number, content, subject,
-        recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
-        is_reserved, reserve_utc_iso, msghub_reserve_time,
-    )
+    # 4. 발송 — RCS 우선(+fallback) 또는 일반 직접(SMS/LMS/MMS).
+    if is_rcs:
+        failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
+            db, msghub_client, campaign, caller_number, content, subject,
+            recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
+            is_reserved, reserve_utc_iso, msghub_reserve_time,
+        )
+    else:
+        failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_direct_chunks(
+            db, msghub_client, campaign, caller_number, content, subject,
+            recipients, msg_type, mms_file_id,
+            is_reserved, reserve_utc_iso, msghub_reserve_time,
+        )
     chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
 
     # 5. Campaign state + counters 업데이트 — 수신자 수 기반 판정.
@@ -557,6 +568,116 @@ async def _send_chunk_direct(
             recv_list=recv_list,
             file_id_lst=[mms_file_id] if mms_file_id else None,
         )
+
+
+async def _send_direct(
+    client: MsghubClient,
+    callback: str,
+    content: str,
+    subject: str | None,
+    recv_list: list[RecvInfo],
+    msg_type: str,
+    mms_file_id: str | None,
+    is_reserved: bool,
+    msghub_reserve_time: str | None,
+) -> SendResponse | ReserveResponse:
+    """일반(직접) 발송 — short→SMS, long→LMS, image→MMS (예약 지원).
+
+    RCS 우선/fallback 이 없는 1차 직접 발송이라, RCS fallback 용 _send_chunk_direct
+    (cliKey 에 -fb 접미사를 붙임) 와 달리 전달받은 정상 cliKey(recv_list) 를 그대로 쓴다.
+    """
+    resv_yn = "Y" if is_reserved else None
+    if msg_type == "short":
+        return await client.send_sms(
+            callback=callback,
+            msg=content,
+            recv_list=recv_list,
+            resv_yn=resv_yn,
+            resv_req_dt=msghub_reserve_time,
+        )
+    # long → LMS(파일 없음), image → MMS(파일 있음)
+    return await client.send_mms(
+        callback=callback,
+        title=subject or "",
+        msg=content,
+        recv_list=recv_list,
+        file_id_lst=[mms_file_id] if mms_file_id else None,
+        resv_yn=resv_yn,
+        resv_req_dt=msghub_reserve_time,
+    )
+
+
+async def _dispatch_direct_chunks(
+    db: Session,
+    client: MsghubClient,
+    campaign: Campaign,
+    callback: str,
+    content: str,
+    subject: str | None,
+    recipients: list[str],
+    msg_type: str,
+    mms_file_id: str | None,
+    is_reserved: bool,
+    reserve_utc_iso: str | None,
+    msghub_reserve_time: str | None,
+) -> tuple[list[int], list[int], int]:
+    """일반 직접(SMS/LMS/MMS) 청크 발송 — RCS 미사용.
+
+    RCS→직접 전환 fallback 이 없어 _dispatch_rcs_chunks 보다 단순하다(성공 +
+    단일 실패 기록). 반환 계약은 동일: (failed_chunk_indices, failed_chunk_sizes,
+    item_failed). item_failed 는 HTTP 200 응답 내 item 단위 실패(H1).
+    """
+    chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
+    failed_chunks: list[int] = []
+    failed_chunk_sizes: list[int] = []
+    item_failed = 0
+
+    for chunk_idx, chunk in enumerate(chunks):
+        sent_at = reserve_utc_iso if is_reserved else _now_iso()
+        try:
+            recv_list = [
+                RecvInfo(cli_key=_make_cli_key(campaign.id, chunk_idx, i), phone=phone)
+                for i, phone in enumerate(chunk)
+            ]
+            resp = await _send_direct(
+                client, callback, content, subject, recv_list,
+                msg_type, mms_file_id, is_reserved, msghub_reserve_time,
+            )
+            msghub_req = MsghubRequest(
+                campaign_id=campaign.id,
+                chunk_index=chunk_idx,
+                response_code=resp.code if resp else None,
+                response_message=resp.message if resp else None,
+                error_body=None,
+                sent_at=sent_at,
+            )
+            db.add(msghub_req)
+            db.flush()
+
+            if isinstance(resp, ReserveResponse) and resp.web_req_id:
+                campaign.web_req_id = resp.web_req_id
+
+            _, n_failed = _create_messages_from_response(
+                db, campaign.id, msghub_req.id, resp, chunk, chunk_idx
+            )
+            item_failed += n_failed
+            db.flush()
+            db.commit()
+
+        except MsghubAuthError:
+            db.rollback()
+            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, "인증 오류")
+            db.commit()
+            raise
+
+        except Exception as exc:
+            db.rollback()
+            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, str(exc))
+            db.commit()
+            failed_chunks.append(chunk_idx)
+            failed_chunk_sizes.append(len(chunk))
+
+    return failed_chunks, failed_chunk_sizes, item_failed
 
 
 def _create_messages_from_response(

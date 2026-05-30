@@ -168,7 +168,9 @@ class CampaignCreateBody(BaseModel):
     recipients: list[str] = Field(..., min_length=1, max_length=1000)
     message: str = Field(..., min_length=1)
     sendAt: str | None = None
-    channel: str | None = None  # 참조용, 실제로는 서버가 재분류
+    # 전송 방식 선택: "rcs"(RCS 우선+fallback) | "sms"(일반 SMS/LMS/MMS 직접).
+    # 하위 유형(단문/장문/이미지)은 서버가 content·첨부로 자동 분류한다.
+    sendChannel: str = "rcs"
     # MMS 첨부 — POST /campaigns/attachments 업로드 후 돌려받은 attachmentId.
     attachmentId: int | None = Field(default=None, ge=1)
 
@@ -179,6 +181,13 @@ class CampaignCreateBody(BaseModel):
         if not stripped:
             raise ValueError("비어 있을 수 없습니다")
         return stripped
+
+    @field_validator("sendChannel")
+    @classmethod
+    def _valid_channel(cls, v: str) -> str:
+        if v not in ("rcs", "sms"):
+            raise ValueError("sendChannel 은 'rcs' 또는 'sms' 여야 합니다")
+        return v
 
 
 # ── S3: GET /campaigns ───────────────────────────────────────────────────────
@@ -338,6 +347,7 @@ async def create_campaign(
             reserve_time_local=body.sendAt or None,
             attachment_id=body.attachmentId,
             idempotency_key=idem_key,
+            send_channel=body.sendChannel,
         )
     except IntegrityError:
         # 동시 요청 race: 다른 요청이 같은 키로 먼저 INSERT(발송 전 차단됨).

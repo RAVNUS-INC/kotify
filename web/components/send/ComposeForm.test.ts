@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { computeEstimate } from './ComposeForm';
 
 describe('computeEstimate', () => {
-  it('첨부 없는 단문(≤90B)은 SMS 17원', () => {
+  it('첨부 없는 단문(≤90B)은 RCS 17원 (기본 모드)', () => {
     const e = computeEstimate('안녕하세요', 10, false);
     expect(e.channel).toBe('SMS');
     expect(e.perUnit).toBe(17);
@@ -27,5 +27,19 @@ describe('computeEstimate', () => {
     const e = computeEstimate('여름 세일', 100, true);
     expect(e.perUnit).toBe(85);
     expect(e.cost).toBe(8500);
+  });
+
+  it('일반(sms) 모드 단문은 SMS 9원 (RCS 17 대비 절감)', () => {
+    const e = computeEstimate('안녕하세요', 10, false, 'sms');
+    expect(e.channel).toBe('SMS');
+    expect(e.perUnit).toBe(9);
+    expect(e.cost).toBe(90);
+  });
+
+  it('장문·이미지는 전송 방식과 무관하게 동일 단가 (27 / 85)', () => {
+    expect(computeEstimate('a'.repeat(100), 10, false, 'sms').perUnit).toBe(27);
+    expect(computeEstimate('a'.repeat(100), 10, false, 'rcs').perUnit).toBe(27);
+    expect(computeEstimate('x', 10, true, 'sms').perUnit).toBe(85);
+    expect(computeEstimate('x', 10, true, 'rcs').perUnit).toBe(85);
   });
 });

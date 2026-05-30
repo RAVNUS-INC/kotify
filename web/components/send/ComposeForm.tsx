@@ -23,6 +23,7 @@ import { AttachmentPicker } from './AttachmentPicker';
 import { DeviceMockup } from './DeviceMockup';
 
 type SendMode = 'now' | 'schedule';
+type SendChannel = 'rcs' | 'sms';
 
 type Sender = { value: string; label: string };
 
@@ -33,14 +34,15 @@ export function computeEstimate(
   message: string,
   recipientCount: number,
   hasAttachment = false,
+  sendChannel: 'rcs' | 'sms' = 'rcs',
 ) {
   // 단가: U+ msghub 공식(VAT 별도, 백엔드 PRICE_TABLE 과 일치).
   // 채널 판정은 백엔드 _classify_msg_type 와 동일하게 — 첨부(이미지)가 있으면
   // MMS, 아니면 본문 바이트로 단문/장문. 보수적으로 채널 단가를 표시한다.
-  // (outbound 단문은 RCS 단방향 17 > SMS fallback 9 — 비용 역전.)
+  // 단문만 전송 방식에 따라 갈린다: RCS 17 / 일반 SMS 9. 장문(27)·이미지(85)는 동일.
   const bytes = new TextEncoder().encode(message).length;
   let channel: 'SMS' | 'LMS' | 'MMS' = 'SMS';
-  let perUnit = 17; // 단문: RCS 단방향 17 (> SMS fallback 9)
+  let perUnit = sendChannel === 'sms' ? 9 : 17; // 단문: 일반 SMS 9 / RCS 17
   if (hasAttachment) {
     channel = 'MMS';
     perUnit = 85; // 이미지(첨부): RCS MMS형 RPMSMMX001 = productCode MMS = 85
@@ -67,6 +69,7 @@ export function ComposeForm() {
   const [sender, setSender] = useState<string>('');
   const [recipients, setRecipients] = useState<string[]>([]);
   const [message, setMessage] = useState('');
+  const [sendChannel, setSendChannel] = useState<SendChannel>('rcs');
   const [mode, setMode] = useState<SendMode>('now');
   const [sendAt, setSendAt] = useState('');
   const [confirmed, setConfirmed] = useState(false);
@@ -104,8 +107,8 @@ export function ComposeForm() {
   }, []);
 
   const { bytes, channel, cost, bytesState } = useMemo(
-    () => computeEstimate(message, recipients.length, attachment != null),
-    [message, recipients.length, attachment],
+    () => computeEstimate(message, recipients.length, attachment != null, sendChannel),
+    [message, recipients.length, attachment, sendChannel],
   );
 
   const recipientsState: 'warn' | 'err' | undefined =
@@ -157,7 +160,7 @@ export function ComposeForm() {
           message,
           sendAt: mode === 'schedule' ? sendAt : null,
           attachmentId: attachment?.attachmentId ?? null,
-          channel,
+          sendChannel,
         }),
       });
       const json = (await res.json()) as {
@@ -252,10 +255,35 @@ export function ComposeForm() {
         </Field>
 
         <Field
+          label="전송 방식"
+          required
+          hint="RCS는 브랜드 발신·읽음확인 등 리치 기능, 일반은 표준 SMS/LMS/MMS"
+        >
+          <div className="flex flex-col gap-2">
+            <Radio
+              name="sendChannel"
+              value="rcs"
+              checked={sendChannel === 'rcs'}
+              onChange={() => setSendChannel('rcs')}
+              label="RCS"
+              sub="브랜드 발신·읽음확인. 단문 17원 (미지원 단말은 SMS 9원 자동 대체)"
+            />
+            <Radio
+              name="sendChannel"
+              value="sms"
+              checked={sendChannel === 'sms'}
+              onChange={() => setSendChannel('sms')}
+              label="일반 (SMS/LMS/MMS)"
+              sub="표준 문자. 단문 9원 — 단순 공지에 경제적"
+            />
+          </div>
+        </Field>
+
+        <Field
           label="메시지"
           htmlFor="msg"
           required
-          hint={`자동 채널: ${channel} · ${bytes} bytes`}
+          hint={`자동 채널: ${sendChannel === 'rcs' ? 'RCS·' : ''}${channel} · ${bytes} bytes`}
           counter={{
             value: `${bytes} bytes`,
             state: bytesState,
