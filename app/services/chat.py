@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -19,10 +20,16 @@ from app.msghub.codes import (
     CHAT_SESSION_WINDOW_HOURS,
     chat_session_cost,
 )
-from app.services.compose import dispatch_campaign, validate_message
+from app.services.compose import (
+    dispatch_campaign,
+    dispatch_chat_reply,
+    validate_message,
+)
 
 if TYPE_CHECKING:
     from app.msghub.client import MsghubClient
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -367,6 +374,23 @@ def validate_reply_content(content: str) -> dict:
     return result
 
 
+def _latest_reply_id(db: Session, caller: str, phone: str) -> str | None:
+    """(caller, phone) 의 최신 MO 에서 양방향 reply_id 를 가져온다. 없으면 None.
+
+    양방향(8원) 응답은 고객 MO 의 replyId 컨텍스트가 필요하다(webhook 이 저장).
+    """
+    return db.execute(
+        select(MoMessage.reply_id)
+        .where(
+            MoMessage.mo_callback == caller,
+            MoMessage.mo_number == phone,
+            MoMessage.reply_id.is_not(None),
+        )
+        .order_by(func.coalesce(MoMessage.mo_recv_dt, MoMessage.received_at).desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 async def send_reply(
     db: Session,
     msghub_client: MsghubClient,
@@ -375,17 +399,40 @@ async def send_reply(
     phone: str,
     content: str,
 ) -> Campaign:
-    """답장을 발송한다 — 단건 Campaign 생성 후 기존 dispatch_campaign 호출.
+    """답장을 발송한다.
 
-    RCS 양방향 CHAT(8원) 우선, 실패 시 webhook이 SMS fallback(9원) 자동 처리.
+    고객 MO 의 reply_id 가 있으면 RCS 양방향(CHAT, 8원)으로 응답하고, 없거나 양방향
+    발송이 실패하면 단방향 RCS(dispatch_campaign, 17원)로 fallback 한다 — 어느
+    경우든 답장은 전달된다.
     """
-    # H2: 답장 길이 검증 — 90바이트 초과 시 단방향 LMS 로 강등되어 고객이 더 이상
-    # 답장할 수 없으므로(대화 단절) 차단한다. ValueError 는 라우트에서 422 로 변환됨.
+    # H2: 답장 길이 검증 — 90바이트 초과 시 단방향 LMS 로 강등되어 양방향 세션이
+    # 끊기므로 차단한다. ValueError 는 라우트에서 422 로 변환됨.
     check = validate_reply_content(content)
     if not check["ok"]:
         raise ValueError(check["error"])
 
-    campaign = await dispatch_campaign(
+    reply_id = _latest_reply_id(db, caller, phone)
+    if reply_id:
+        try:
+            return await dispatch_chat_reply(
+                db=db,
+                msghub_client=msghub_client,
+                created_by=user.sub,
+                caller_number=caller,
+                content=content,
+                phone=phone,
+                reply_id=reply_id,
+            )
+        except Exception:
+            log.warning(
+                "양방향(8원) 응답 실패 → 단방향 fallback: caller=%s",
+                caller,
+                exc_info=True,
+            )
+            # fall through to 단방향
+
+    # reply_id 없음 또는 양방향 실패 → 단방향 RCS(17원). 어느 경우든 답장은 전달.
+    return await dispatch_campaign(
         db=db,
         msghub_client=msghub_client,
         created_by=user.sub,
@@ -394,5 +441,5 @@ async def send_reply(
         recipients=[phone],
         message_type="SMS",
         subject=None,
+        send_channel="rcs",
     )
-    return campaign

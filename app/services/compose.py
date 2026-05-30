@@ -533,6 +533,105 @@ async def dispatch_campaign(
     return campaign
 
 
+async def dispatch_chat_reply(
+    db: Session,
+    msghub_client: MsghubClient,
+    created_by: str,
+    caller_number: str,
+    content: str,
+    phone: str,
+    reply_id: str,
+) -> Campaign:
+    """RCS 양방향(CHAT, 8원) 단건 응답 발송 — 고객 MO 에 대한 답장 전용.
+
+    reply_id 는 고객 MO 의 응답 템플릿 ID(MoMessage.reply_id). 양방향은 단건이라
+    청크가 없다. 발송 실패 시 미커밋 Campaign 을 rollback 으로 폐기하고 예외를 다시
+    던지므로, 호출자(chat.send_reply)가 단방향 fallback 을 결정할 수 있다.
+
+    주의: 양방향 응답 data 에는 phone 이 없어(cliKey/msgKey/replyId 만) Message 는
+    아는 phone 으로 직접 만든다 — _create_messages_from_response(item.phone 의존) 미사용.
+    """
+    caller = db.execute(
+        select(Caller).where(Caller.number == caller_number, Caller.active == 1)
+    ).scalar_one_or_none()
+    if caller is None:
+        raise ValueError(f"발신번호 '{caller_number}'가 활성 목록에 없습니다.")
+
+    now = _now_iso()
+    campaign = Campaign(
+        created_by=created_by,
+        caller_number=caller_number,
+        message_type="short",
+        subject=None,
+        content=content,
+        total_count=1,
+        ok_count=0,
+        fail_count=0,
+        pending_count=1,
+        state="DISPATCHING",
+        created_at=now,
+        completed_at=None,
+        reserve_time=None,
+        rcs_messagebase_id="RPCSAXX001",  # 양방향 CHAT (8원)
+        web_req_id=None,
+        total_cost=0,
+        rcs_count=0,
+        fallback_count=0,
+        idempotency_key=None,
+    )
+    db.add(campaign)
+    db.flush()  # id 할당 (커밋 안 함 — 발송 실패 시 rollback 으로 폐기)
+
+    cli_key = _make_cli_key(campaign.id, 0, 0)
+    try:
+        resp = await msghub_client.send_rcs_chat(
+            description=content, phone=phone, cli_key=cli_key, reply_id=reply_id,
+        )
+    except Exception:
+        db.rollback()  # 미커밋 Campaign 폐기 → 호출자가 단방향 fallback
+        raise
+
+    msghub_req = MsghubRequest(
+        campaign_id=campaign.id,
+        chunk_index=0,
+        response_code=resp.code,
+        response_message=resp.message,
+        error_body=None,
+        sent_at=now,
+    )
+    db.add(msghub_req)
+    db.flush()
+
+    item = resp.items[0] if resp.items else None
+    code = item.code if item else resp.code
+    is_ok = code == SUCCESS_CODE
+    db.add(Message(
+        campaign_id=campaign.id,
+        msghub_request_id=msghub_req.id,
+        to_number=phone,
+        to_number_raw=phone,
+        cli_key=cli_key,
+        msg_key=item.msg_key if item else None,
+        status="REG" if is_ok else "FAILED",
+        result_code=code,
+        result_desc=item.message if item else resp.message,
+    ))
+    campaign.fail_count = 0 if is_ok else 1
+    campaign.pending_count = 1 if is_ok else 0
+    campaign.state = "DISPATCHED" if is_ok else "FAILED"
+    db.flush()
+
+    audit.log(
+        db,
+        actor_sub=created_by,
+        action=audit.SEND,
+        target=f"campaign:{campaign.id}",
+        detail={"total": 1, "channel": "chat", "reply_id": reply_id},
+    )
+    db.commit()
+    return campaign
+
+
 async def _send_chunk_direct(
     client: MsghubClient,
     campaign: Campaign,
