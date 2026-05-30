@@ -457,10 +457,21 @@ async def cancel_campaign(
         )
         campaign.state = "RESERVE_CANCELED"
         msg = "예약이 취소되었습니다"
-    except MsghubBadRequest as exc:
-        # 이미 실행됐거나 취소된 경우 — state 는 정리해두되 경고 메시지.
-        campaign.state = "RESERVE_CANCELED"
-        msg = f"예약이 이미 처리되었습니다: {exc}"
+    except MsghubBadRequest:
+        # msghub 가 취소를 거부 — 이미 발송됐거나 이미 취소된 상태일 수 있어 단정 불가.
+        # 로컬을 RESERVE_CANCELED 로 바꾸면 발송된 캠페인을 "취소됨"으로 오표기하므로
+        # (H6) 상태를 유지하고 거부를 알린다. 발송 여부는 이후 리포트로 확정한다.
+        db.rollback()
+        return JSONResponse(
+            {"error": {
+                "code": "cancel_rejected",
+                "message": (
+                    "예약 취소가 거부되었습니다. 이미 발송되었거나 취소된 상태일 수 "
+                    "있으니 발송 결과를 확인해 주세요."
+                ),
+            }},
+            status_code=409,
+        )
     except MsghubError as exc:
         db.rollback()
         return JSONResponse(
