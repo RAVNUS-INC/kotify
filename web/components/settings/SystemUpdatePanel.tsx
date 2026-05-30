@@ -8,7 +8,7 @@ import {
   waitForVersion,
   type UpdateCheckResult,
 } from '@/lib/settings';
-import { Badge, Button, Icon } from '@/components/ui';
+import { Badge, Button, Icon, useConfirm } from '@/components/ui';
 
 type Phase =
   | 'idle'
@@ -35,6 +35,7 @@ export function SystemUpdatePanel() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<UpdateCheckResult | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const { confirm, dialog } = useConfirm();
 
   const onCheck = async () => {
     setPhase('checking');
@@ -52,9 +53,11 @@ export function SystemUpdatePanel() {
   const onApply = async () => {
     if (!info?.updateAvailable) return;
     if (
-      !confirm(
-        `${info.count}건의 업데이트를 설치하시겠습니까?\n\n서비스가 잠시 재시작됩니다.`,
-      )
+      !(await confirm({
+        title: '업데이트 설치',
+        description: `${info.count}건의 업데이트를 설치하시겠습니까?\n\n서비스가 잠시 재시작됩니다.`,
+        confirmLabel: '설치',
+      }))
     ) {
       return;
     }
@@ -99,6 +102,7 @@ export function SystemUpdatePanel() {
       aria-label="시스템 업데이트"
       className="rounded-lg border border-line bg-surface p-5"
     >
+      {dialog}
       <header className="mb-4">
         <h2 className="text-base font-semibold text-ink">시스템 업데이트</h2>
         <p className="mt-0.5 text-[12.5px] text-ink-muted">

@@ -10,6 +10,7 @@ import {
   Drawer,
   Icon,
   Pill,
+  useConfirm,
 } from '@/components/ui';
 import { deleteContactClient } from '@/lib/contacts-client';
 import { ContactFormDialog } from './ContactFormDialog';
@@ -32,6 +33,7 @@ export function ContactDrawer({
   const [editOpen, setEditOpen] = useState(false);
   const [busy, setBusy] = useState<'delete' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   const handleOpenChange = (next: boolean) => {
     if (next) return;
@@ -44,7 +46,15 @@ export function ContactDrawer({
 
   const onDelete = async () => {
     if (!contact || busy) return;
-    if (!confirm(`${contact.name} 연락처를 삭제하시겠습니까?`)) return;
+    if (
+      !(await confirm({
+        title: '연락처 삭제',
+        description: `'${contact.name}' 연락처를 삭제하시겠습니까?`,
+        tone: 'danger',
+        confirmLabel: '삭제',
+      }))
+    )
+      return;
     setBusy('delete');
     setActionError(null);
     try {
@@ -101,6 +111,7 @@ export function ContactDrawer({
         ) : null
       }
     >
+      {dialog}
       {contact && (
         <div className="flex flex-col gap-6 p-5">
           <Section title="기본 정보">

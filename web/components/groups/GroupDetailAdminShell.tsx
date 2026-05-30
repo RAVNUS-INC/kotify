@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Icon } from '@/components/ui';
+import { Button, Icon, useConfirm } from '@/components/ui';
 import { deleteGroupClient } from '@/lib/groups-client';
 import { GroupFormDialog } from './GroupFormDialog';
 import { GroupMembersBulkAddDialog } from './GroupMembersBulkAddDialog';
@@ -28,11 +28,19 @@ export function GroupDetailAdminShell({
   const [bulkOpen, setBulkOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   if (!canManage) return null;
 
   const onDelete = async () => {
-    if (!confirm(`그룹 "${group.name}" 을(를) 삭제하시겠습니까?\n멤버십은 모두 제거되지만 연락처 자체는 유지됩니다.`)) {
+    if (
+      !(await confirm({
+        title: '그룹 삭제',
+        description: `'${group.name}' 그룹을 삭제하시겠습니까?\n멤버십은 모두 제거되지만 연락처 자체는 유지됩니다.`,
+        tone: 'danger',
+        confirmLabel: '삭제',
+      }))
+    ) {
       return;
     }
     setDeleting(true);
@@ -89,6 +97,7 @@ export function GroupDetailAdminShell({
         onOpenChange={setBulkOpen}
         groupId={group.id}
       />
+      {dialog}
     </div>
   );
 }

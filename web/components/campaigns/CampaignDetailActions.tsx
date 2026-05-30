@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Button, Icon } from '@/components/ui';
+import { Button, Icon, useConfirm } from '@/components/ui';
 import {
   buildCampaignExportHref,
   cancelCampaignClient,
@@ -31,13 +31,22 @@ export function CampaignDetailActions({
   const router = useRouter();
   const [canceling, setCanceling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   // status 매핑: backend 'cancelled' = 취소완료, 'scheduled' = 예약됨
   const showCancelButton = canCancel && status === 'scheduled';
 
   const onCancel = async () => {
     if (canceling) return;
-    if (!confirm('이 예약을 취소하시겠습니까?')) return;
+    if (
+      !(await confirm({
+        title: '예약 취소',
+        description: '이 예약을 취소하시겠습니까?',
+        tone: 'danger',
+        confirmLabel: '예약 취소',
+      }))
+    )
+      return;
     setCanceling(true);
     setError(null);
     try {
@@ -57,6 +66,7 @@ export function CampaignDetailActions({
 
   return (
     <div className="flex flex-col items-end gap-1">
+      {dialog}
       <div className="flex items-center gap-2">
         <Link
           href="/campaigns"

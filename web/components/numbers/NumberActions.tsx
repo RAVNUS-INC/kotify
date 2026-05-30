@@ -8,7 +8,7 @@ import {
   toggleNumberClient,
 } from '@/lib/numbers-client';
 import type { SenderNumber } from '@/types/number';
-import { Button, Icon } from '@/components/ui';
+import { Button, Icon, useConfirm } from '@/components/ui';
 
 export type NumberActionsProps = {
   number: SenderNumber;
@@ -23,12 +23,13 @@ export type NumberActionsProps = {
  * - 활성 토글: 항상 노출, 현재 상태 반전
  * - 삭제: 비활성(`expired`) 상태에서만 노출 (backend 가 422 반환)
  *
- * 확인 UX 는 network-safe 한 `confirm()` 사용 (모달 도입 전까지 임시).
+ * 확인 UX 는 Radix Dialog 기반 ConfirmDialog(useConfirm) 사용.
  */
 export function NumberActions({ number, canManage }: NumberActionsProps) {
   const router = useRouter();
   const [busy, setBusy] = useState<'default' | 'toggle' | 'delete' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   if (!canManage) return null;
 
@@ -52,6 +53,7 @@ export function NumberActions({ number, canManage }: NumberActionsProps) {
 
   return (
     <div className="flex items-center justify-end gap-1">
+      {dialog}
       {isActive ? (
         <Button
           variant="ghost"
@@ -78,8 +80,16 @@ export function NumberActions({ number, canManage }: NumberActionsProps) {
           variant="danger"
           size="sm"
           disabled={busy !== null}
-          onClick={() => {
-            if (!confirm(`${number.number} 발신번호를 삭제하시겠습니까?`)) return;
+          onClick={async () => {
+            if (
+              !(await confirm({
+                title: '발신번호 삭제',
+                description: `'${number.number}' 발신번호를 삭제하시겠습니까?`,
+                tone: 'danger',
+                confirmLabel: '삭제',
+              }))
+            )
+              return;
             void run('delete', () => deleteNumberClient(number.id));
           }}
           icon={<Icon name="trash" size={12} />}

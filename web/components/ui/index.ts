@@ -61,3 +61,6 @@ export type { ListSearchInputProps } from './ListSearchInput';
 
 export { Drawer } from './Drawer';
 export type { DrawerProps, DrawerWidth } from './Drawer';
+
+export { useConfirm } from './ConfirmDialog';
+export type { ConfirmOptions, UseConfirmResult } from './ConfirmDialog';
