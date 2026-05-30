@@ -357,6 +357,12 @@ async def send_reply(
 
     RCS 양방향 CHAT(8원) 우선, 실패 시 webhook이 SMS fallback(9원) 자동 처리.
     """
+    # H2: 답장 길이 검증 — 90바이트 초과 시 단방향 LMS 로 강등되어 고객이 더 이상
+    # 답장할 수 없으므로(대화 단절) 차단한다. ValueError 는 라우트에서 422 로 변환됨.
+    check = validate_reply_content(content)
+    if not check["ok"]:
+        raise ValueError(check["error"])
+
     campaign = await dispatch_campaign(
         db=db,
         msghub_client=msghub_client,
