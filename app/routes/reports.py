@@ -19,12 +19,11 @@ from __future__ import annotations
 import csv
 import io
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
@@ -53,7 +52,7 @@ def _parse_yyyymmdd_kst(s: str) -> datetime | None:
 
 
 def _period_window(
-    from_: Optional[str], to: Optional[str]
+    from_: str | None, to: str | None
 ) -> tuple[datetime, datetime, int]:
     """조회 윈도우 (KST) → (start_kst, end_kst, days).
 
@@ -342,9 +341,9 @@ def _daily_ok(db: Session, start: datetime, end: datetime) -> dict[str, int]:
 
 @router.get("/reports")
 def get_reports(
-    from_: Optional[str] = None,
-    to: Optional[str] = None,
-    campaignId: Optional[str] = None,
+    from_: str | None = None,
+    to: str | None = None,
+    campaignId: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
     """리포트 데이터. from/to 는 KST 'YYYY-MM-DD'. 기본 최근 7일."""
@@ -471,8 +470,8 @@ def _daily_labels(start: datetime, days: int) -> list[str]:
 
 @router.get("/reports/export.csv")
 def export_reports_csv(
-    from_: Optional[str] = None,
-    to: Optional[str] = None,
+    from_: str | None = None,
+    to: str | None = None,
     db: Session = Depends(get_db),
 ) -> Response:
     """일별 발송·회신·회신률 CSV. formula-safe."""

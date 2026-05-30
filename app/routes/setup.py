@@ -21,7 +21,6 @@ from __future__ import annotations
 import ipaddress
 import secrets as _secrets
 import socket
-from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -40,7 +39,7 @@ from app.services import audit, setup_service
 router = APIRouter()
 
 
-def _validate_keycloak_issuer(url: str) -> Optional[str]:
+def _validate_keycloak_issuer(url: str) -> str | None:
     """SSRF 방지 — issuer URL 이 http(s) 이고 사설/링크로컬 IP 가 아닌지 확인.
 
     성공 시 None, 실패 시 에러 메시지를 돌려준다.
@@ -232,12 +231,12 @@ class CompleteSetupBody(BaseModel):
     msghubApiKey: str = Field(..., min_length=1)
     msghubApiPwd: str = Field(..., min_length=1)
     msghubEnv: str = Field(default="production")
-    msghubBrandId: Optional[str] = None
-    msghubChatbotId: Optional[str] = None
+    msghubBrandId: str | None = None
+    msghubChatbotId: str | None = None
     # App (옵션)
-    appPublicUrl: Optional[str] = None
+    appPublicUrl: str | None = None
     # 첫 admin email — Keycloak 에서 이 이메일로 로그인한 사용자가 자동 admin 승격.
-    firstAdminEmail: Optional[str] = None
+    firstAdminEmail: str | None = None
 
 
 @router.post(

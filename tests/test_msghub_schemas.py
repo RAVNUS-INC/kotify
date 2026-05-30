@@ -17,7 +17,6 @@ from app.msghub.schemas import (
     WebhookReport,
 )
 
-
 # ─── RCS 양방향 MO (rcsBiLst) ────────────────────────────────────────────────
 # 2026-04-22 production에서 받은 실제 페이로드 형식.
 RCS_BI_MO_PAYLOAD = {

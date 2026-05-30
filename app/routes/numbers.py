@@ -13,10 +13,9 @@ api-contract.md §S11 계약:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, func, select, update
@@ -99,7 +98,7 @@ def _daily_usage_map(db: Session) -> dict[str, int]:
 
 @router.get("/numbers")
 def list_numbers(
-    status: Optional[str] = None,
+    status: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
     """발신번호 목록. status 필터 지원 (approved/pending/rejected/expired/all)."""

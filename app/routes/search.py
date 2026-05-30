@@ -11,7 +11,6 @@ api-contract.md §S17 — web/types/search.ts SearchResult shape.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query

@@ -12,7 +12,6 @@ from pydantic import ValidationError
 
 from app.routes.contacts import ContactCreateBody, ContactUpdateBody
 
-
 # ── POST /contacts ───────────────────────────────────────────────────────────
 
 

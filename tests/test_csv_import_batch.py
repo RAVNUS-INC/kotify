@@ -5,8 +5,6 @@ import_contacts 가 행별 SELECT(N+1) 대신 IN 쿼리 일괄 조회 + dict 캐
 """
 from __future__ import annotations
 
-import pytest
-
 from app.services.contacts import create_contact
 from app.services.csv_import import import_contacts
 

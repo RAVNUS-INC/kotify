@@ -10,7 +10,6 @@ from __future__ import annotations
 import csv
 import io
 from datetime import UTC, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
@@ -87,7 +86,7 @@ def _entry_to_dict(
 
 
 def _query_audit(
-    db: Session, q: Optional[str], action: Optional[str]
+    db: Session, q: str | None, action: str | None
 ) -> list[tuple[AuditLog, str | None, str | None]]:
     """SELECT audit_logs LEFT JOIN users ORDER BY id DESC.
 
@@ -128,8 +127,8 @@ def _query_audit(
 
 @router.get("/audit")
 def list_audit(
-    q: Optional[str] = None,
-    action: Optional[str] = None,
+    q: str | None = None,
+    action: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
     """감사 로그 목록 — created_at DESC, 최대 1000건."""
@@ -145,8 +144,8 @@ def list_audit(
 
 @router.get("/audit/export.csv")
 def export_audit_csv(
-    q: Optional[str] = None,
-    action: Optional[str] = None,
+    q: str | None = None,
+    action: str | None = None,
     db: Session = Depends(get_db),
 ) -> Response:
     """CSV 다운로드 — UTF-8 BOM + CSV injection 방어 (util.csv_safe)."""

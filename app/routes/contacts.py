@@ -11,7 +11,6 @@ NOTE: Contact DB 컬럼은 `department`, TS 계약은 `team` 이므로 여기서
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
@@ -34,9 +33,17 @@ from app.security.csrf import verify_csrf
 from app.services import audit, csv_import
 from app.services.contacts import (
     create_contact as svc_create_contact,
+)
+from app.services.contacts import (
     delete_contact as svc_delete_contact,
+)
+from app.services.contacts import (
     get_contact as svc_get_contact,
+)
+from app.services.contacts import (
     list_contacts as svc_list_contacts,
+)
+from app.services.contacts import (
     update_contact as svc_update_contact,
 )
 
@@ -171,9 +178,9 @@ _CONTACTS_PAGE_SIZE = 1000
 
 @router.get("/contacts", response_model=None)
 def list_contacts_route(
-    q: Optional[str] = None,
-    groupId: Optional[str] = None,
-    tag: Optional[str] = None,  # 현 스키마엔 tags 컬럼 없음 — 무시
+    q: str | None = None,
+    groupId: str | None = None,
+    tag: str | None = None,  # 현 스키마엔 tags 컬럼 없음 — 무시
     db: Session = Depends(get_db),
 ) -> dict | JSONResponse:
     """주소록 목록. q(이름·번호·이메일), groupId 필터. tag 는 스키마 미지원."""
@@ -348,10 +355,10 @@ class ContactCreateBody(BaseModel):
     """POST /contacts 요청 body. phone 은 선택(이메일만 보유한 연락처 허용)."""
 
     name: str = Field(..., min_length=1, max_length=120)
-    phone: Optional[str] = Field(default=None, max_length=40)
-    email: Optional[str] = Field(default=None, max_length=200)
-    team: Optional[str] = Field(default=None, max_length=120)  # → department
-    notes: Optional[str] = Field(default=None, max_length=2000)
+    phone: str | None = Field(default=None, max_length=40)
+    email: str | None = Field(default=None, max_length=200)
+    team: str | None = Field(default=None, max_length=120)  # → department
+    notes: str | None = Field(default=None, max_length=2000)
 
     @field_validator("name")
     @classmethod
@@ -363,7 +370,7 @@ class ContactCreateBody(BaseModel):
 
     @field_validator("phone")
     @classmethod
-    def _normalize_phone(cls, v: Optional[str]) -> Optional[str]:
+    def _normalize_phone(cls, v: str | None) -> str | None:
         # 테마 D: 모든 입력 경로를 normalize_phone 으로 통일(휴대폰만 허용).
         from app.util.phone import normalize_phone
 
@@ -378,15 +385,15 @@ class ContactCreateBody(BaseModel):
 class ContactUpdateBody(BaseModel):
     """PATCH /contacts/{id} — 모두 optional. None 필드는 "변경 없음"."""
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
-    phone: Optional[str] = Field(default=None, max_length=40)
-    email: Optional[str] = Field(default=None, max_length=200)
-    team: Optional[str] = Field(default=None, max_length=120)
-    notes: Optional[str] = Field(default=None, max_length=2000)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    phone: str | None = Field(default=None, max_length=40)
+    email: str | None = Field(default=None, max_length=200)
+    team: str | None = Field(default=None, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
 
     @field_validator("name")
     @classmethod
-    def _strip_name_opt(cls, v: Optional[str]) -> Optional[str]:
+    def _strip_name_opt(cls, v: str | None) -> str | None:
         if v is None:
             return None
         s = v.strip()
@@ -396,7 +403,7 @@ class ContactUpdateBody(BaseModel):
 
     @field_validator("phone")
     @classmethod
-    def _normalize_phone_opt(cls, v: Optional[str]) -> Optional[str]:
+    def _normalize_phone_opt(cls, v: str | None) -> str | None:
         # 테마 D: normalize_phone 통일. 빈 문자열도 None 처리(P3: "" 저장 방지).
         from app.util.phone import normalize_phone
 

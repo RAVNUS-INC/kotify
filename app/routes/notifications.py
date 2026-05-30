@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import threading
 from datetime import UTC, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
@@ -277,8 +276,8 @@ def _apply_read_state(
 
 @router.get("/notifications")
 def list_notifications(
-    kind: Optional[str] = None,
-    unread: Optional[bool] = None,
+    kind: str | None = None,
+    unread: bool | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict:

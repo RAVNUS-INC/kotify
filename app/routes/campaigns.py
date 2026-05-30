@@ -8,14 +8,12 @@ CampaignDetail shape 반환.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import List, Optional
-from zoneinfo import ZoneInfo
-
 import csv
 import io
 import json
 import uuid
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -167,12 +165,12 @@ class CampaignCreateBody(BaseModel):
     """POST /campaigns 요청 body."""
 
     sender: str = Field(..., min_length=1)
-    recipients: List[str] = Field(..., min_length=1, max_length=1000)
+    recipients: list[str] = Field(..., min_length=1, max_length=1000)
     message: str = Field(..., min_length=1)
-    sendAt: Optional[str] = None
-    channel: Optional[str] = None  # 참조용, 실제로는 서버가 재분류
+    sendAt: str | None = None
+    channel: str | None = None  # 참조용, 실제로는 서버가 재분류
     # MMS 첨부 — POST /campaigns/attachments 업로드 후 돌려받은 attachmentId.
-    attachmentId: Optional[int] = Field(default=None, ge=1)
+    attachmentId: int | None = Field(default=None, ge=1)
 
     @field_validator("sender", "message")
     @classmethod
@@ -188,8 +186,8 @@ class CampaignCreateBody(BaseModel):
 
 @router.get("/campaigns")
 def list_campaigns(
-    q: Optional[str] = None,
-    status: Optional[str] = None,
+    q: str | None = None,
+    status: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
     """캠페인 목록 — 최신순, q / status 필터."""
@@ -505,7 +503,7 @@ async def cancel_campaign(
 @router.get("/campaigns/{cid}/export.csv")
 def export_campaign_csv(
     cid: str,
-    status: Optional[str] = None,  # fail 등 필터 (Message.status 또는 파생)
+    status: str | None = None,  # fail 등 필터 (Message.status 또는 파생)
     db: Session = Depends(get_db),
 ) -> Response:
     """캠페인의 수신자별 결과를 CSV 로. UTF-8 BOM + formula-safe."""

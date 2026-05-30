@@ -8,7 +8,6 @@ Excel/Numbers에서 `=`, `+`, `-`, `@`, `\\t`, `\\r`로 시작하는 셀 값은
 """
 from __future__ import annotations
 
-
 # CWE-1236: Excel/LibreOffice/Numbers가 공식 시작 문자로 해석하는 접두사.
 # `\n` 과 `;` 는 일부 로케일(특히 LibreOffice) 에서도 셀 구분/공식 트리거로 쓰이므로 포함.
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n", ";")

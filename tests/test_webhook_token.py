@@ -17,7 +17,6 @@ from app.routes.setup import CompleteSetupBody, complete_setup
 from app.routes.webhook import _verify_token
 from app.security.settings_store import SettingsStore
 
-
 # ── _verify_token ────────────────────────────────────────────────────────────
 
 

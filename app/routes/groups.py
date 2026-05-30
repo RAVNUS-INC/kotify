@@ -12,8 +12,6 @@ lastCampaignAt 컬럼이 없다. TS 계약에서 source 는 필수이므로 "man
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
@@ -26,7 +24,6 @@ from sqlalchemy.orm import Session
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
 from app.models import (
-    Campaign,
     Contact,
     ContactGroup,
     ContactGroupMember,
@@ -43,11 +40,23 @@ from app.security.csrf import verify_csrf
 from app.services import audit
 from app.services.groups import (
     add_members as svc_add_members,
+)
+from app.services.groups import (
     bulk_add_by_phones as svc_bulk_add_by_phones,
+)
+from app.services.groups import (
     create_group as svc_create_group,
+)
+from app.services.groups import (
     delete_group as svc_delete_group,
+)
+from app.services.groups import (
     list_groups as svc_list_groups,
+)
+from app.services.groups import (
     remove_members as svc_remove_members,
+)
+from app.services.groups import (
     update_group as svc_update_group,
 )
 
@@ -172,7 +181,7 @@ def _parse_gid(gid: str) -> int | None:
 
 @router.get("/groups", response_model=None)
 def list_groups_route(
-    q: Optional[str] = None,
+    q: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
     """그룹 목록. q 는 name 부분 매치 (service 에서 처리)."""
@@ -254,7 +263,7 @@ def get_group_route(gid: str, db: Session = Depends(get_db)) -> dict | JSONRespo
 
 class GroupCreateBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
-    description: Optional[str] = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=500)
 
     @field_validator("name")
     @classmethod
@@ -266,12 +275,12 @@ class GroupCreateBody(BaseModel):
 
 
 class GroupUpdateBody(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
-    description: Optional[str] = Field(default=None, max_length=500)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
 
     @field_validator("name")
     @classmethod
-    def _strip_name_opt(cls, v: Optional[str]) -> Optional[str]:
+    def _strip_name_opt(cls, v: str | None) -> str | None:
         if v is None:
             return None
         s = v.strip()

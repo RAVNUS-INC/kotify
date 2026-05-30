@@ -20,7 +20,6 @@ import logging
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends
@@ -150,10 +149,10 @@ def _user_to_member(u: User) -> dict:
 class OrgPatchBody(BaseModel):
     """PATCH /org 요청 body — 모두 optional."""
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
-    service: Optional[str] = Field(default=None, max_length=120)
-    contact: Optional[str] = Field(default=None, max_length=120)
-    timezone: Optional[str] = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    service: str | None = Field(default=None, max_length=120)
+    contact: str | None = Field(default=None, max_length=120)
+    timezone: str | None = None
 
     @field_validator("timezone")
     @classmethod
@@ -416,20 +415,20 @@ class ProviderPatchBody(BaseModel):
     """PATCH /settings/provider — 모두 optional. 빈 문자열은 None 과 동일하게 취급."""
 
     # 공개 (평문 저장)
-    keycloakIssuer: Optional[str] = None
-    keycloakClientId: Optional[str] = None
-    appPublicUrl: Optional[str] = None
-    msghubEnv: Optional[str] = None  # production | staging | sandbox 등
-    msghubBrandId: Optional[str] = None
-    msghubChatbotId: Optional[str] = None
+    keycloakIssuer: str | None = None
+    keycloakClientId: str | None = None
+    appPublicUrl: str | None = None
+    msghubEnv: str | None = None  # production | staging | sandbox 등
+    msghubBrandId: str | None = None
+    msghubChatbotId: str | None = None
     # 시크릿 (Fernet 암호화 저장) — 빈 값/미제공 시 기존 값 보존
-    keycloakClientSecret: Optional[str] = None
-    msghubApiKey: Optional[str] = None
-    msghubApiPwd: Optional[str] = None
-    sessionSecret: Optional[str] = None
+    keycloakClientSecret: str | None = None
+    msghubApiKey: str | None = None
+    msghubApiPwd: str | None = None
+    sessionSecret: str | None = None
     # msghub 웹훅 토큰 — msghub 콘솔의 report/MO 수신 URL 에 포함된다. 새 값
     # 저장 시 기존 msghub 등록 URL 이 무효화되니 콘솔 URL 도 같이 교체 필요.
-    msghubWebhookToken: Optional[str] = None
+    msghubWebhookToken: str | None = None
 
 
 @router.get("/settings/provider")
@@ -619,7 +618,7 @@ async def check_system_update(
         )
     try:
         rc, stdout, stderr = await _run_update_script("check")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return JSONResponse(
             {"error": {"code": "timeout", "message": "원격 확인 시간 초과"}},
             status_code=504,
@@ -689,7 +688,7 @@ async def apply_system_update(
 
     try:
         rc, stdout, stderr = await _run_update_script("apply")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return JSONResponse(
             {"error": {"code": "timeout", "message": "업데이트 시간 초과"}},
             status_code=504,
