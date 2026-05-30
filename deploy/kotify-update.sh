@@ -43,11 +43,14 @@ if [[ "${ACTION}" == "check" ]]; then
         echo '{"update_available": false, "current": "'"${LOCAL:0:7}"'", "commits": []}'
         exit 0
     fi
-    COMMITS=$(git log --oneline HEAD.."origin/${BRANCH}" --max-count=20 \
-        | sed 's/"/\\"/g' \
-        | awk '{printf "%s{\"hash\": \"%s\", \"message\": \"%s\"}", (NR>1?",":""), substr($1,1,7), substr($0, index($0,$2))}')
+    # 커밋 메시지에 " \ 제어문자가 있어도 깨지지 않도록 python3 로 안전 직렬화.
+    # 기존 sed+awk 는 " 만 이스케이프(백슬래시·제어문자 누락)해 invalid JSON →
+    # 웹 UI 502 를 유발했다. %h=약식해시, %x09=TAB 구분, %s=제목. 첫 TAB 기준
+    # partition 으로 분리해 제목 내 TAB 도 보존하고 json.dumps 가 전부 이스케이프.
+    COMMITS=$(git log --format='%h%x09%s' HEAD.."origin/${BRANCH}" --max-count=20 \
+        | python3 -c 'import sys, json; print(json.dumps([{"hash": h[:7], "message": m} for h, _, m in (ln.rstrip("\n").partition("\t") for ln in sys.stdin) if h], ensure_ascii=False))')
     COUNT=$(git rev-list --count HEAD.."origin/${BRANCH}")
-    echo '{"update_available": true, "current": "'"${LOCAL:0:7}"'", "remote": "'"${REMOTE:0:7}"'", "count": '"${COUNT}"', "commits": ['"${COMMITS}"']}'
+    echo '{"update_available": true, "current": "'"${LOCAL:0:7}"'", "remote": "'"${REMOTE:0:7}"'", "count": '"${COUNT}"', "commits": '"${COMMITS}"'}'
     exit 0
 fi
 

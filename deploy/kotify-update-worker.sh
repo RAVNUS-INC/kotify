@@ -102,11 +102,12 @@ fi
 # Phase 2c: alembic 을 **서비스 사용자** 로 실행 — 파일 소유권 일관.
 # root 로 돌면 WAL/SHM 파일이 root 소유가 되어 다음 서비스 기동에서 EACCES.
 echo '{"phase": "migrate"}'
-if ! runuser -u "${SERVICE_USER}" -- \
-        "${VENV}/bin/alembic" -c "${INSTALL_DIR}/alembic.ini" upgrade head 2>&1; then
-    echo '{"phase": "error", "step": "migrate", "message": "alembic upgrade failed"}'
-    exit 1
-fi
+# 실패 시 set -e + ERR trap(cleanup_on_error)이 git/DB 롤백을 수행해야 한다.
+# `if ! cmd; then exit 1; fi` 로 감싸면 조건 컨텍스트라 set -e·ERR trap 이
+# 발동하지 않아 exit 1 이 롤백을 건너뛴다(rollback 누락). pip/pnpm/build 와
+# 동일하게 bare 명령으로 두어 실패가 cleanup_on_error 로 흐르게 한다.
+runuser -u "${SERVICE_USER}" -- \
+    "${VENV}/bin/alembic" -c "${INSTALL_DIR}/alembic.ini" upgrade head 2>&1
 
 # Phase 3a: Next.js 의존성 (변경 없으면 fast no-op).
 # --silent 제거 — 이전에 rc=254 나는데 원인이 로그에 안 남아 디버깅 불가
