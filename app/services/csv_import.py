@@ -142,40 +142,43 @@ def import_contacts(
 
     for row in valid_rows:
         try:
-            phone = row.get("phone")
-            existing = existing_map.get(phone) if (mode != "create" and phone) else None
+            # 행 단위 savepoint — 한 행이 실패해도 그 행만 롤백하고 나머지는 유지한다.
+            # (이전엔 부분 실패 시 트랜잭션 경계가 모호해 일부만 저장될 수 있었음)
+            with db.begin_nested():
+                phone = row.get("phone")
+                existing = (
+                    existing_map.get(phone) if (mode != "create" and phone) else None
+                )
 
-            if existing is not None:
-                if mode == "skip":
-                    result["skipped"] += 1
-                    continue
-                if mode == "update":
-                    update_contact(
+                if existing is not None:
+                    if mode == "skip":
+                        result["skipped"] += 1
+                    elif mode == "update":
+                        update_contact(
+                            db,
+                            existing.id,
+                            name=row["name"],
+                            email=row.get("email"),
+                            department=row.get("department"),
+                            notes=row.get("notes"),
+                        )
+                        result["updated"] += 1
+                else:
+                    # 새로 생성
+                    created = create_contact(
                         db,
-                        existing.id,
                         name=row["name"],
+                        created_by=created_by,
+                        phone=phone,
                         email=row.get("email"),
                         department=row.get("department"),
                         notes=row.get("notes"),
                     )
-                    result["updated"] += 1
-                    continue
-
-            # 새로 생성
-            created = create_contact(
-                db,
-                name=row["name"],
-                created_by=created_by,
-                phone=phone,
-                email=row.get("email"),
-                department=row.get("department"),
-                notes=row.get("notes"),
-            )
-            result["created"] += 1
-            # CSV 내 동일 phone 후속 행이 방금 만든 레코드를 보도록 캐시 갱신
-            # (원래 행별 SELECT 동작 보존 — 같은 파일 내 중복 시 1건만 생성).
-            if phone and mode != "create":
-                existing_map[phone] = created
+                    result["created"] += 1
+                    # CSV 내 동일 phone 후속 행이 방금 만든 레코드를 보도록 캐시 갱신
+                    # (원래 행별 SELECT 동작 보존 — 같은 파일 내 중복 시 1건만 생성).
+                    if phone and mode != "create":
+                        existing_map[phone] = created
 
         except Exception as exc:
             result["errors"].append(str(exc))
