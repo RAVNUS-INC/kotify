@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from sqlalchemy import func, select
 
-from app.models import MoMessage, ThreadRead
-from app.routes.threads import api_mark_read
+from app.models import Campaign, Message, MoMessage, MsghubRequest, ThreadRead
+from app.routes.threads import api_get_thread, api_mark_read
 from app.services.chat import list_threads, thread_unread
 
 _CALLER = "0212345678"
@@ -118,3 +118,45 @@ def test_mark_read_clears_unread_and_upserts(db_session):
         .where(ThreadRead.caller == _CALLER, ThreadRead.phone == _PHONE)
     ).scalar()
     assert count == 1
+
+
+def _make_outbound(db, *, created_at, caller=_CALLER, phone=_PHONE):
+    """우리 발신(MT) 1건 — 같은 (caller, phone) 스레드에 OUT 메시지를 만든다."""
+    campaign = Campaign(
+        created_by="test-sub-001", caller_number=caller, message_type="short",
+        content="답장드립니다", total_count=1, pending_count=0,
+        state="DISPATCHED", created_at=created_at,
+    )
+    db.add(campaign)
+    db.flush()
+    req = MsghubRequest(campaign_id=campaign.id, chunk_index=0, sent_at=created_at)
+    db.add(req)
+    db.flush()
+    db.add(Message(
+        campaign_id=campaign.id, msghub_request_id=req.id,
+        to_number=phone, to_number_raw=phone, status="DELIVERED",
+    ))
+    db.commit()
+
+
+def test_detail_unread_with_trailing_outbound(db_session, sample_user):
+    """회귀(프로덕션 버그): 고객 MO(T1) 뒤에 우리 발신(T2>T1)이 있는 스레드.
+
+    목록은 '마지막 고객 메시지 vs read_at' 으로 unread=True 인데, 상세는
+    예전엔 messages[-1] 이 IN 일 때만 unread 로 봐서(끝 메시지가 OUT) read 로
+    응답 → ThreadView 가드(wasUnread)가 mark-read POST 를 건너뜀 → read_at 이
+    영원히 저장되지 않아 목록에서 계속 안읽음으로 남았다. 상세도 목록과 동일
+    기준(마지막 고객 메시지)을 써야 한다.
+    """
+    _make_mo(db_session, recv_dt="2026-05-30T01:00:00+00:00", mo_key="mo-trail")
+    _make_outbound(db_session, created_at="2026-05-30T02:00:00+00:00")  # MO 뒤 발신
+
+    # 목록·상세 모두 unread=True 여야 한다(일치).
+    assert _thread(db_session).unread is True
+    res = api_get_thread(f"{_CALLER}:{_PHONE}", db_session)
+    assert res["data"].get("unread") is True
+
+    # 열람 후엔 둘 다 읽음(상세는 unread 키 자체가 없음).
+    api_mark_read(f"{_CALLER}:{_PHONE}", db_session)
+    assert _thread(db_session).unread is False
+    assert api_get_thread(f"{_CALLER}:{_PHONE}", db_session)["data"].get("unread") is None

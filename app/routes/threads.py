@@ -264,15 +264,20 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
             status_code=404,
         )
 
-    # 안읽음 = 마지막 메시지가 고객(IN)이고 팀 read_at 이후. (열람 시 프론트가
-    # mark-read 를 호출하므로 곧 해소되지만, 목록과 동일 기준으로 표기.)
     last = messages[-1]
     read_at = db.execute(
         select(ThreadRead.read_at).where(
             ThreadRead.caller == caller, ThreadRead.phone == phone
         )
     ).scalar_one_or_none()
-    unread = last.direction == "IN" and thread_unread(last.timestamp, read_at)
+    # 안읽음 기준을 목록(list_threads)과 일치 — "마지막 고객(IN) 메시지가 팀
+    # read_at 이후". 이전엔 messages[-1] 이 IN 일 때만 unread 라, 고객 메시지
+    # 뒤에 우리 발신(MT)이 있으면 상세=read → ThreadView 가드(wasUnread)가
+    # mark-read 를 건너뛰어 목록에선 영원히 안읽음으로 남았다(프로덕션 버그).
+    last_mo_ts = next(
+        (m.timestamp for m in reversed(messages) if m.direction == "IN"), ""
+    )
+    unread = thread_unread(last_mo_ts, read_at)
     # 단건 조회도 batch 헬퍼 재사용 — pair 1개면 2쿼리로 동일, 코드 경로 통일.
     pair = {(caller, phone)}
     last_channel = _batch_last_mt_channels(db, pair).get((caller, phone), "sms")
