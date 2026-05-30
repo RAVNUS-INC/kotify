@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Campaign, Message, MoMessage, User
+from app.models import Campaign, Message, MoMessage, ThreadRead, User
 from app.msghub.codes import (
     CHAT_SESSION_CAP_KRW,
     CHAT_SESSION_MAX_UNITS,
@@ -51,7 +51,7 @@ class ChatThread:
     last_timestamp: str
     last_body: str
     last_direction: str
-    unanswered: bool
+    unread: bool          # 안읽음 = 마지막 고객(MO) 메시지가 팀 read_at 이후
     mo_count: int
     mt_count: int
 
@@ -97,6 +97,18 @@ def _parse_ts_for_sort(raw: str | None) -> float:
         except (ValueError, TypeError):
             pass
     return 0.0
+
+
+def thread_unread(last_mo_ts: str | None, read_at: str | None) -> bool:
+    """안읽음 판정 — 고객(MO) 최종 메시지가 팀 read_at 이후인가.
+
+    ISO/msghub 네이티브(yyyyMMddHHmmss) 혼재 포맷을 epoch 로 파싱해 비교한다.
+    고객 메시지가 없으면 False, read_at 이 없으면(한 번도 안 읽음) True.
+    목록(list_threads)과 상세(routes.threads)가 동일 기준을 쓰도록 공유한다.
+    """
+    if not last_mo_ts:
+        return False
+    return _parse_ts_for_sort(last_mo_ts) > _parse_ts_for_sort(read_at or "")
 
 
 def list_threads(
@@ -163,6 +175,14 @@ def list_threads(
         t["mo_last_t"] = r.last_t or ""
         t["mo_count"] = r.cnt
 
+    # 팀 공유 읽음 상태 — (caller, phone) → read_at. 행이 없으면 미읽음 취급.
+    read_at_map: dict[tuple[str, str], str] = {
+        (r.caller, r.phone): r.read_at
+        for r in db.execute(
+            select(ThreadRead.caller, ThreadRead.phone, ThreadRead.read_at)
+        ).all()
+    }
+
     # 마지막 메시지 상세를 가져와 ChatThread로 빌드
     built: list[ChatThread] = []
     for (caller, phone), t in threads.items():
@@ -200,8 +220,9 @@ def list_threads(
             ).scalar_one_or_none()
             last_body = last_body_row or ""
 
-        # 미답 = 마지막 메시지가 IN(고객 답장)인 경우
-        unanswered = last_dir == "IN" and bool(last_mo_t)
+        # 안읽음 = 고객(MO) 최종 메시지가 팀 마지막 읽음 시각 이후.
+        read_at = read_at_map.get((caller, phone), "")
+        unread = thread_unread(last_mo_t, read_at)
 
         built.append(
             ChatThread(
@@ -210,7 +231,7 @@ def list_threads(
                 last_timestamp=last_t,
                 last_body=last_body,
                 last_direction=last_dir,
-                unanswered=unanswered,
+                unread=unread,
                 mo_count=t["mo_count"],
                 mt_count=t["mt_count"],
             )

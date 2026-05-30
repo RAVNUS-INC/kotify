@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,14 +22,18 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, Message, User
+from app.models import Campaign, Message, ThreadRead, User
 from app.security.csrf import verify_csrf
 from app.services.chat import (
     ChatMessage as ServiceChatMessage,
+)
+from app.services.chat import (
     ChatThread as ServiceChatThread,
-    chat_session_summary,
+)
+from app.services.chat import (
     get_thread,
     list_threads,
+    thread_unread,
 )
 from app.util.time import fmt_kst_hhmm
 
@@ -83,7 +86,7 @@ def _service_thread_to_ts(t: ServiceChatThread, last_channel: str) -> dict:
         "time": fmt_kst_hhmm(t.last_timestamp),
         "channel": last_channel,
     }
-    if t.unanswered:
+    if t.unread:
         row["unread"] = True
     return row
 
@@ -202,11 +205,11 @@ def _batch_last_campaign_labels(
 
 @router.get("/threads")
 def api_list_threads(
-    q: Optional[str] = None,
-    unread: Optional[bool] = None,
+    q: str | None = None,
+    unread: bool | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
-    """스레드 목록. q(번호/본문 부분 매치), unread(미답만) 필터."""
+    """스레드 목록. q(번호/본문 부분 매치), unread(안읽음만) 필터."""
     threads, _total = list_threads(db, limit=200, offset=0)
 
     if q:
@@ -219,7 +222,7 @@ def api_list_threads(
         ]
 
     if unread:
-        threads = [t for t in threads if t.unanswered]
+        threads = [t for t in threads if t.unread]
 
     # N+1 회피: 필터링 후 남은 쌍을 한 번에 수집 → 2쿼리 × 2종 = 4쿼리로 고정.
     pairs: set[tuple[str, str]] = {(t.caller, t.phone) for t in threads}
@@ -261,9 +264,15 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
             status_code=404,
         )
 
-    # 최근 timestamp / body / unanswered 도출 — thread 요약.
+    # 안읽음 = 마지막 메시지가 고객(IN)이고 팀 read_at 이후. (열람 시 프론트가
+    # mark-read 를 호출하므로 곧 해소되지만, 목록과 동일 기준으로 표기.)
     last = messages[-1]
-    unanswered = last.direction == "IN"
+    read_at = db.execute(
+        select(ThreadRead.read_at).where(
+            ThreadRead.caller == caller, ThreadRead.phone == phone
+        )
+    ).scalar_one_or_none()
+    unread = last.direction == "IN" and thread_unread(last.timestamp, read_at)
     # 단건 조회도 batch 헬퍼 재사용 — pair 1개면 2쿼리로 동일, 코드 경로 통일.
     pair = {(caller, phone)}
     last_channel = _batch_last_mt_channels(db, pair).get((caller, phone), "sms")
@@ -278,7 +287,7 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         "channel": last_channel,
         "messages": [_service_message_to_ts(m) for m in messages],
     }
-    if unanswered:
+    if unread:
         detail["unread"] = True
     if label:
         detail["lastCampaign"] = label
@@ -347,14 +356,14 @@ async def api_post_message(
         raise HTTPException(
             status_code=422,
             detail={"code": "validation_failed", "message": str(exc)},
-        )
-    except Exception:
+        ) from exc
+    except Exception as exc:
         import logging
         logging.getLogger(__name__).exception("send_reply failed")
         raise HTTPException(
             status_code=500,
             detail={"code": "send_failed", "message": "답장 전송 중 오류가 발생했습니다"},
-        )
+        ) from exc
 
     now_kst = datetime.now(UTC).astimezone(KST)
     return {
@@ -375,11 +384,13 @@ async def api_post_message(
     dependencies=[Depends(verify_csrf)],
     response_model=None,
 )
-def api_mark_read(tid: str) -> dict | JSONResponse:
-    """스레드 읽음 표시 — 현재 스키마엔 read flag 없음. no-op 으로 200 반환.
+def api_mark_read(
+    tid: str, db: Session = Depends(get_db)
+) -> dict | JSONResponse:
+    """스레드 읽음 표시 — (caller, phone) 팀 공유 read_at 을 현재 시각으로 upsert.
 
-    (UI 에서 로컬 상태 갱신을 위한 확인 응답 역할. 향후 thread_reads 테이블
-    추가 시 실 DB write 로 교체.)
+    팀 중 누구든 대화방을 열면 전체에게 읽음 처리된다. unread 판정은
+    list_threads / api_get_thread 의 thread_unread(마지막 MO > read_at).
     """
     parsed = _parse_thread_id(tid)
     if parsed is None:
@@ -387,6 +398,18 @@ def api_mark_read(tid: str) -> dict | JSONResponse:
             {"error": {"code": "not_found", "message": "스레드를 찾을 수 없습니다"}},
             status_code=404,
         )
+    caller, phone = parsed
+    now = datetime.now(UTC).isoformat()
+    existing = db.execute(
+        select(ThreadRead).where(
+            ThreadRead.caller == caller, ThreadRead.phone == phone
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        db.add(ThreadRead(caller=caller, phone=phone, read_at=now))
+    else:
+        existing.read_at = now
+    db.commit()
     return {"data": {"id": tid, "unread": False}}
 
 

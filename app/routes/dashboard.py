@@ -131,9 +131,9 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
     ]
 
     # ── Inbox ────────────────────────────────────────────────────────────────
-    # list_threads() 는 MT+MO 를 머지해 최근 활동순 반환. 상위 5개 + 미답 count.
+    # list_threads() 는 MT+MO 를 머지해 최근 활동순 반환. 상위 5개 + 안읽음 count.
     threads_all, _ = list_threads(db, limit=200, offset=0)
-    unread_count = sum(1 for t in threads_all if t.unanswered)
+    unread_count = sum(1 for t in threads_all if t.unread)
 
     inbox_threads = [
         {
@@ -141,7 +141,7 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
             "name": t.phone,  # 연락처 이름이 DB 에 없으니 번호로 표시
             "preview": (t.last_body or "")[:48],
             "time": _hhmm_kst(t.last_timestamp),
-            "unread": t.unanswered,
+            "unread": t.unread,
         }
         for t in threads_all[:5]
     ]
