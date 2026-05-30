@@ -28,9 +28,11 @@ from app.security.csrf import verify_csrf
 from app.services.chat import (
     ChatMessage as ServiceChatMessage,
     ChatThread as ServiceChatThread,
+    chat_session_summary,
     get_thread,
     list_threads,
 )
+from app.util.time import fmt_kst_hhmm
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -39,20 +41,7 @@ router = APIRouter(
 KST = ZoneInfo("Asia/Seoul")
 
 
-# ── 공통 변환 헬퍼 ───────────────────────────────────────────────────────────
-
-
-def _hhmm(iso_ts: str | None) -> str:
-    """UTC ISO → 'HH:MM' KST. 실패 시 빈 문자열."""
-    if not iso_ts:
-        return ""
-    try:
-        dt = datetime.fromisoformat(iso_ts)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt.astimezone(KST).strftime("%H:%M")
-    except (ValueError, TypeError):
-        return ""
+# 시간 포맷 헬퍼는 app.util.time 에서 import (혼합 포맷 파서 기반).
 
 
 def _channel_from_mt(msg_channel: str | None) -> str:
@@ -91,7 +80,7 @@ def _service_thread_to_ts(t: ServiceChatThread, last_channel: str) -> dict:
         "name": t.phone,  # 연락처 이름 미연결 — 번호로 표시
         "phone": t.phone,
         "preview": (t.last_body or "")[:60],
-        "time": _hhmm(t.last_timestamp),
+        "time": fmt_kst_hhmm(t.last_timestamp),
         "channel": last_channel,
     }
     if t.unanswered:
@@ -155,7 +144,7 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
         "side": side,
         "kind": kind,
         "text": m.body or "",
-        "time": _hhmm(m.timestamp),
+        "time": fmt_kst_hhmm(m.timestamp),
     }
 
 
@@ -285,7 +274,7 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         "name": phone,
         "phone": phone,
         "preview": (last.body or "")[:60],
-        "time": _hhmm(last.timestamp),
+        "time": fmt_kst_hhmm(last.timestamp),
         "channel": last_channel,
         "messages": [_service_message_to_ts(m) for m in messages],
     }
