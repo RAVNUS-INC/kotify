@@ -14,10 +14,10 @@
 
 ## 남은 작업 (우선순위 순)
 
-### A. 상태머신 P2-E (🟠) — H6만 완료, 3건 남음
-- **H4** `app/services/report.py` `_find_message`(162-171): phone 보조매칭이 "가장 최근 미완료 1건"에 적용 → 동일 번호가 2개 캠페인에 미완료면 **오귀속**. → phone 미완료가 **정확히 1건일 때만** 매칭, 2건+면 보류(로그). 테스트: 동일 phone 2캠페인 시 매칭 안 함.
-- **H1** `app/services/compose.py` `_create_messages_from_response`(526-560) + `dispatch_campaign`(446-466): HTTP 200 응답 내 item 실패가 dispatch 카운터에 미반영(웹훅 전까지 fail_count=0 오표시). → 함수가 (성공수, 실패수) 반환하게 하고 dispatch가 즉시 `fail_count`/`pending_count` 반영.
-- **H5** `compose.py`(459 RESERVED 유지) + C5 연결: 예약 캠페인이 실행돼도 상태 갱신 경로 확인 필요. 예약 Message는 status=PENDING(compose:549-560)이라 **C5 reconcile 대상에 이미 포함**될 가능성 — `reconcile_pending_messages`가 RESERVED campaign의 PENDING Message를 처리하는지 검증하고, RESERVED→COMPLETED 전이가 `_refresh_campaign_counters`(report.py:244, RESERVED 포함)로 되는지 확인. 추가 코드 불필요할 수도 — **검증 우선**.
+### A. 상태머신 P2-E (🟠) — ✅ 완료 (H6·H4·H1·H5 전건, 테스트 248→259)
+- ~~**H4** phone 보조매칭이 "가장 최근 미완료 1건"에 오귀속~~ → **정확히 1건일 때만 매칭, 2건+면 보류(로그)**. ✅ `00acc59` (`report.py:_find_message`, limit(2) 유일성 판별, 테스트 3건)
+- ~~**H1** HTTP 200 응답 내 item 실패가 dispatch 카운터 미반영~~ → `_create_messages_from_response`가 `(accepted, failed)` 반환, `_dispatch_rcs_chunks`가 `item_failed` 누적, dispatch가 `failed_recipients`에 합산. ✅ `e9a2f04` (테스트 5건). 청크실패·item실패는 서로소라 이중계산 없음.
+- ~~**H5** 예약 캠페인 영구 RESERVED 우려~~ → **코드 추적 결과 기존 경로가 이미 정확**(`_refresh_campaign_counters` 전이대상에 RESERVED 포함 + reconcile는 메시지 status/sent_at으로만 필터). production 무변경, 웹훅·재조정 양쪽 완료 전이를 **회귀 테스트로 고정**. ✅ `d3afe80` (테스트 3건)
 
 ### B. 미해결 🔴 (다른 Phase, 제약 있음)
 - **C3** `compose.py:262` 29002 재시도 중복발송 — msghub 부분수락 의미론 **외부 확인 필요**(C4처럼 msghub 스펙). 확인 전엔 보수적 처리(재시도 시 query_sent로 기접수분 제외).
@@ -45,7 +45,9 @@
 - 단일 워커(`--workers 1`) 전제 — lifespan 백그라운드 태스크 안전.
 
 ## 다음 단계 (바로 시작)
-1. **H4** (report.py phone 매칭 1건 제한) — 가장 명확
-2. **H1** (compose 카운터 반환)
-3. **H5** (예약 reconcile 검증 — 코드 불필요 가능성)
-4. 이후 미해결 🔴: CSV injection → window.confirm → 배포 → C3(외부확인)
+상태머신 P2-E 완료. 남은 미해결 🔴/🟠 (각각 제약 있음, 권장 순):
+1. **CSV injection** (🔴) — `audit_api.py`/`reports.py` export가 `safe_csv_cell` 쓰는지 확인 후 누락 보강 (`export_contacts`는 이미 적용). 백엔드·테스트 가능 → **다음 권장**
+2. **window.confirm** (🔴/🟢) — `ContactDrawer.tsx:47`/`SystemUpdatePanel.tsx:55` → Radix ConfirmDialog. ⚠️ 프론트 테스트 인프라 없음(tsc/lint만)
+3. **배포 스크립트** (🔴) — `kotify-update.sh`(JSON 파괴)/`worker.sh`(alembic 실패감지). 셸, 로컬 검증 어려움 → Python/jq 직렬화
+4. **C3** (🔴) — `compose.py:262` 29002 재시도 중복발송. ⚠️ **msghub 부분수락 의미론 외부 확인 필요**(C4처럼). 확인 전 보수적 처리만
+5. P3/P4: PII 로그 마스킹 · ruff --fix 86건 · 프론트 테스트 인프라 · 양방향 8원
