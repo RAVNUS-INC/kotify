@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageBubble } from '@/components/chat';
 import {
   Button,
   Check,
@@ -15,12 +14,10 @@ import {
   Input,
   Radio,
 } from '@/components/ui';
-import { cn } from '@/lib/cn';
 import type { UploadedAttachment } from '@/lib/campaigns-client';
 import { apiSend } from '@/lib/csrf-client';
 import type { SenderNumber } from '@/types/number';
 import { AttachmentPicker } from './AttachmentPicker';
-import { DeviceMockup } from './DeviceMockup';
 
 type SendMode = 'now' | 'schedule';
 type SendChannel = 'rcs' | 'sms';
@@ -191,12 +188,8 @@ export function ComposeForm() {
     }
   };
 
-  // SMS/LMS/MMS는 모두 'sms' 버블로 표시. RCS 프리뷰는 Phase 후속에서 실제
-  // 발신 RCS 지원 여부 확인 후 분기.
-  const previewKind = 'sms' as const;
-
   return (
-    <form onSubmit={onSubmit} className="mt-6 grid gap-6 lg:grid-cols-[560px_1fr]">
+    <form onSubmit={onSubmit} className="mt-6 max-w-[560px]">
       <div className="flex flex-col gap-5">
         <Field
           label="발신번호"
@@ -433,43 +426,6 @@ export function ComposeForm() {
           </Button>
         </div>
       </div>
-
-      <aside className="lg:sticky lg:top-6 lg:self-start">
-        <div className="mb-3 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
-          미리보기 · {channel}
-        </div>
-        <DeviceMockup
-          frame="ios"
-          senderName={sender}
-          timeLabel={mode === 'schedule' && sendAt ? sendAt.replace('T', ' ') : '지금'}
-        >
-          <MessageBubble kind={previewKind} side="them">
-            {message.trim() ? (
-              message
-            ) : (
-              <span className={cn('text-gray-5')}>
-                메시지를 입력하면 여기에 표시됩니다.
-              </span>
-            )}
-          </MessageBubble>
-        </DeviceMockup>
-        <div className="mt-4 rounded-lg border border-line bg-surface p-3 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-ink-muted">수신자</span>
-            <span className="font-mono">{recipients.length}명</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between">
-            <span className="text-ink-muted">채널</span>
-            <span className="font-mono">{channel}</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between">
-            <span className="text-ink-muted">예상 비용</span>
-            <span className="font-mono font-semibold text-ink">
-              ₩{cost.toLocaleString('ko-KR')}
-            </span>
-          </div>
-        </div>
-      </aside>
     </form>
   );
 }
