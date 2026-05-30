@@ -84,6 +84,20 @@ def test_new_mo_after_read_is_unread_again(db_session):
     assert _thread(db_session).unread is True
 
 
+def test_unread_clears_with_msghub_kst_recv_dt(db_session):
+    """회귀: msghub moRecvDt('2026-05-30 11:36:38' = KST 11:36 = UTC 02:36)를
+    UTC 03:00 에 읽으면 unread 해제돼야 한다.
+
+    이전엔 naive 를 UTC 로 파싱해 MO 를 UTC 11:36(9h 늦게)로 계산 → read_at(UTC
+    03:00)보다 항상 최신 → 읽어도 unread 유지(프로덕션 버그). KST 로 파싱하면
+    MO(UTC 02:36) < read(UTC 03:00) → 읽음 처리.
+    """
+    _make_mo(db_session, recv_dt="2026-05-30 11:36:38", mo_key="mo-kst")  # 공백 KST
+    db_session.add(ThreadRead(caller=_CALLER, phone=_PHONE, read_at="2026-05-30T03:00:00+00:00"))
+    db_session.commit()
+    assert _thread(db_session).unread is False
+
+
 # ── api_mark_read 통합 (전체 루프) ────────────────────────────────────────────
 
 

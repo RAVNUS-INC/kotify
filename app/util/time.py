@@ -19,7 +19,7 @@
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
@@ -29,7 +29,9 @@ def parse_mixed_ts(raw: str | None) -> datetime | None:
     """문자열 → tz-aware datetime. 실패 시 None.
 
     지원 포맷 (우선순위):
-      1. ISO 8601 (`fromisoformat` 호환). 'Z' 접미사도 허용. naive 면 UTC 간주.
+      1. ISO 8601 (`fromisoformat` 호환). 'Z'·오프셋 있으면 그대로, **naive(오프셋
+         없음)면 KST 간주**. 우리가 만드는 값은 항상 +00:00(aware)이고, 오프셋 없는
+         값은 msghub moRecvDt("2026-02-23 11:36:38" 등)처럼 KST 이기 때문.
       2. msghub 네이티브 yyyyMMddHHmmss — 14자리 이상의 숫자. **KST 로 간주**
          (msghub 가 한국 서비스라 문자열에 tz 표기가 없어도 KST 로 해석해야
          실제 이벤트 시각과 일치).
@@ -44,7 +46,9 @@ def parse_mixed_ts(raw: str | None) -> datetime | None:
         s = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
+            # 오프셋 없는 값은 msghub KST(예: moRecvDt "2026-02-23 11:36:38").
+            # 우리가 생성하는 시각은 항상 +00:00 이라 naive=KST 가정이 안전하다.
+            dt = dt.replace(tzinfo=KST)
         return dt
     except (ValueError, TypeError):
         pass

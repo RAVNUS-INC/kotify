@@ -25,6 +25,7 @@ from app.services.compose import (
     dispatch_chat_reply,
     validate_message,
 )
+from app.util.time import parse_mixed_ts
 
 if TYPE_CHECKING:
     from app.msghub.client import MsghubClient
@@ -79,31 +80,10 @@ def _parse_ts_for_sort(raw: str | None) -> float:
     실시간 값으로 변환 후 epoch float 를 돌려 정렬 키로 사용.
     실패 시 0.0 반환 (가장 앞).
     """
-    if not raw:
-        return 0.0
-    # 1차: ISO 8601 시도.
-    try:
-        from datetime import UTC as _UTC
-        from datetime import datetime as _dt
-        s = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
-        d = _dt.fromisoformat(s)
-        if d.tzinfo is None:
-            d = d.replace(tzinfo=_UTC)
-        return d.timestamp()
-    except (ValueError, TypeError):
-        pass
-    # 2차: msghub 네이티브 yyyyMMddHHmmss (또는 14자리 숫자).
-    digits = "".join(c for c in raw if c.isdigit())
-    if len(digits) >= 14:
-        try:
-            from datetime import datetime as _dt
-            from zoneinfo import ZoneInfo as _Zi
-            naive = _dt.strptime(digits[:14], "%Y%m%d%H%M%S")
-            kst = naive.replace(tzinfo=_Zi("Asia/Seoul"))
-            return kst.timestamp()
-        except (ValueError, TypeError):
-            pass
-    return 0.0
+    # 단일 파서(app.util.time.parse_mixed_ts)로 위임 — ISO(오프셋)·msghub naive KST
+    # ·14자리 네이티브를 모두 일관 처리. 실패 시 0.0(가장 앞).
+    dt = parse_mixed_ts(raw)
+    return dt.timestamp() if dt else 0.0
 
 
 def thread_unread(last_mo_ts: str | None, read_at: str | None) -> bool:
