@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import type { ChatThreadDetail } from '@/types/chat';
 import { markReadClient } from '@/lib/chat';
 import { MessageBubble } from './MessageBubble';
@@ -13,6 +14,7 @@ export type ThreadViewProps = {
 
 export function ThreadView({ thread }: ThreadViewProps) {
   useChatStream();
+  const router = useRouter();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMessageId = thread.messages[thread.messages.length - 1]?.id;
@@ -27,10 +29,15 @@ export function ThreadView({ thread }: ThreadViewProps) {
   const wasUnread = thread.unread === true;
   useEffect(() => {
     if (!wasUnread) return;
-    void markReadClient(threadId).catch(() => {
-      // 읽음 표시 실패는 치명적이지 않음 — silent
-    });
-  }, [threadId, wasUnread]);
+    void markReadClient(threadId)
+      .then(() => {
+        // 서버 컴포넌트(목록·안읽음 배지) 재요청 — 새로고침 없이 즉시 반영.
+        router.refresh();
+      })
+      .catch(() => {
+        // 읽음 표시 실패는 치명적이지 않음 — silent
+      });
+  }, [threadId, wasUnread, router]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
