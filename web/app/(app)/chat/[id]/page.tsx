@@ -8,6 +8,7 @@ import {
 import { Button, Icon } from '@/components/ui';
 import { fetchThread } from '@/lib/chat';
 import { ApiError } from '@/lib/api';
+import { formatPhone } from '@/lib/phone';
 
 type PageProps = {
   params: { id: string };
@@ -29,7 +30,7 @@ export default async function ThreadDetailPage({ params }: PageProps) {
     <div className="k-page">
       <PageHeader
         title={thread.name}
-        sub={`${thread.phone} · ${thread.messages.length}개 메시지`}
+        sub={`${formatPhone(thread.phone)} · ${thread.messages.length}개 메시지`}
         actions={
           <Link
             href="/chat"

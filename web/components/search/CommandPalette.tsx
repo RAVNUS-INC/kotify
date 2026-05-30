@@ -17,6 +17,7 @@ import { searchClient } from '@/lib/search';
 import type { SearchResult } from '@/types/search';
 import { cn } from '@/lib/cn';
 import { HighlightText } from './HighlightText';
+import { formatPhone } from '@/lib/phone';
 
 type Item = {
   href: Route;
@@ -34,7 +35,7 @@ function buildItems(q: string, r: SearchResult): Item[] {
     items.push({
       href: (`/contacts?selected=${encodeURIComponent(c.id)}`) as Route,
       primary: c.name,
-      secondary: c.phone,
+      secondary: formatPhone(c.phone),
       icon: 'user',
       section: '주소록',
     }),

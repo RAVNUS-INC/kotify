@@ -44,11 +44,11 @@ export function ThreadPreview({ thread }: ThreadPreviewProps) {
                 'bg-gray-3',
               )}
             >
-              {thread.name.charAt(0)}
+              {(thread.name === thread.phone ? formatPhone(thread.phone) : thread.name).charAt(0)}
             </div>
             <div>
               <div className="text-base font-semibold text-ink">
-                {thread.name}
+                {thread.name === thread.phone ? formatPhone(thread.phone) : thread.name}
                 {thread.unread && (
                   <Badge kind="brand" className="ml-2">
                     새 메시지

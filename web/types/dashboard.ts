@@ -11,6 +11,7 @@ export type TimelineEvent = {
 export type InboxThread = {
   id: string;
   name: string;
+  phone?: string;
   preview: string;
   /** "HH:MM" */
   time: string;

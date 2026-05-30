@@ -139,6 +139,7 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
         {
             "id": f"{t.caller}:{t.phone}",
             "name": t.phone,  # 연락처 이름이 DB 에 없으니 번호로 표시
+            "phone": t.phone,
             "preview": (t.last_body or "")[:48],
             "time": _hhmm_kst(t.last_timestamp),
             "unread": t.unread,

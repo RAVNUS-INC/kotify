@@ -27,11 +27,11 @@ export function ThreadRecipientCard({ thread }: ThreadRecipientCardProps) {
     >
       <div className="flex items-center gap-3">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-base text-ink">
-          {thread.name.charAt(0)}
+          {(thread.name === thread.phone ? formatPhone(thread.phone) : thread.name).charAt(0)}
         </div>
         <div className="min-w-0">
           <div className="truncate text-base font-semibold text-ink">
-            {thread.name}
+            {thread.name === thread.phone ? formatPhone(thread.phone) : thread.name}
           </div>
           <div className="truncate font-mono text-[12.5px] text-ink-dim">
             {formatPhone(thread.phone)}

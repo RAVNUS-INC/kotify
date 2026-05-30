@@ -1,5 +1,6 @@
 import type { InboxThread } from '@/types/dashboard';
 import { cn } from '@/lib/cn';
+import { formatPhone } from '@/lib/phone';
 
 export type InboxThreadRowProps = {
   thread: InboxThread;
@@ -29,7 +30,7 @@ export function InboxThreadRow({ thread }: InboxThreadRowProps) {
               unread ? 'font-semibold text-ink' : 'text-ink-muted',
             )}
           >
-            {thread.name}
+            {thread.phone && thread.name === thread.phone ? formatPhone(thread.phone) : thread.name}
             {unread && <span className="sr-only"> — 읽지 않음</span>}
           </div>
           <div className="shrink-0 font-mono text-[11px] text-ink-dim">
