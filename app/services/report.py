@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.models import Campaign, Message
 from app.msghub.codes import SUCCESS_CODE, calculate_cost
 from app.msghub.schemas import ReportItem
+from app.util.phone import mask_phone
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
         if msg is None:
             log.warning(
                 "리포트 매칭 실패: cliKey=%s, msgKey=%s, phone=%s",
-                item.cli_key, item.msg_key, item.phone,
+                item.cli_key, item.msg_key, mask_phone(item.phone),
             )
             continue
 
@@ -178,7 +179,7 @@ def _find_message(
         if len(candidates) >= 2:
             log.warning(
                 "phone 보조매칭 보류: phone=%s 에 미완료 메시지 %d건 — 모호하여 매칭하지 않음",
-                phone, len(candidates),
+                mask_phone(phone), len(candidates),
             )
 
     return None

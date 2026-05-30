@@ -39,6 +39,7 @@ from app.models import Campaign, Message, MoMessage
 from app.msghub.schemas import MoWebhookPayload, RecvInfo, WebhookReport
 from app.security.settings_store import SettingsStore
 from app.services.report import process_report
+from app.util.phone import mask_phone
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
             )
             sent += 1
         except Exception:
-            log.exception("SMS fallback 발송 실패: msg_id=%s, phone=%s", msg.id, msg.to_number)
+            log.exception("SMS fallback 발송 실패: msg_id=%s, phone=%s", msg.id, mask_phone(msg.to_number))
             msg.status = "FAILED"
             msg.result_desc = (msg.result_desc or "") + " (SMS fallback 실패)"
 

@@ -9,7 +9,7 @@ import pytest
 
 # NotImplementedError → 전체 모듈 skip 처리
 try:
-    from app.util.phone import normalize_phone, parse_phone_list
+    from app.util.phone import mask_phone, normalize_phone, parse_phone_list
     _NOT_IMPLEMENTED = False
 except ImportError:
     _NOT_IMPLEMENTED = True
@@ -238,3 +238,34 @@ class TestParsePhoneList:
         valid, invalid = parse_phone_list(text)
         assert all(n == "01012345678" for n in valid)
         assert len(invalid) == 0
+
+
+# ── mask_phone (PII 로그 마스킹) ──────────────────────────────────────────────
+
+
+class TestMaskPhone:
+    """로그 노출용 마스킹 — 앞3·뒤4만 남기고 가운데 고정 ****."""
+
+    def test_standard_11_digit(self) -> None:
+        assert mask_phone("01012345678") == "010****5678"
+
+    def test_10_digit_old_format(self) -> None:
+        assert mask_phone("0111234567") == "011****4567"
+
+    def test_hyphenated_value_masks_middle(self) -> None:
+        # 하이픈 포함 비정형 값도 앞3·뒤4 (가운데 하이픈·자릿수 가려짐)
+        assert mask_phone("010-1234-5678") == "010****5678"
+
+    def test_short_value_fully_masked(self) -> None:
+        # 7자 이하는 앞3·뒤4가 겹쳐 과다노출 → 전부 가림
+        assert mask_phone("1234567") == "*******"
+        assert mask_phone("12") == "**"
+
+    def test_empty_and_none(self) -> None:
+        assert mask_phone("") == "(none)"
+        assert mask_phone(None) == "(none)"
+
+    def test_does_not_leak_identifying_middle_digits(self) -> None:
+        masked = mask_phone("01099998888")
+        assert "9999" not in masked        # 가운데 식별 자릿수 노출 안 함
+        assert masked == "010****8888"

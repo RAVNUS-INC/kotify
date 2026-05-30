@@ -72,3 +72,20 @@ def parse_phone_list(text: str) -> tuple[list[str], list[str]]:
             invalid.append(token)
 
     return valid, invalid
+
+
+def mask_phone(value: str | None) -> str:
+    """전화번호를 로그 노출용으로 마스킹한다 (PIPA — 개인정보 보호).
+
+    예: "01012345678" → "010****5678". 앞 3·뒤 4자리만 남기고 가운데를 가린다.
+    cliKey 없는 리포트의 비정형 값(하이픈·국제표기 포함 등)도 동일 규칙으로 처리하되,
+    7자 이하면 전부 가린다(과다노출 방지). 빈 값/None 은 "(none)".
+
+    고정 길이 "****" 로 가려 실제 자릿수도 노출하지 않는다. 로그·감사 출력 전용이며,
+    발송·매칭 로직에는 절대 사용하지 않는다(원본 손실).
+    """
+    if not value:
+        return "(none)"
+    if len(value) <= 7:
+        return "*" * len(value)
+    return value[:3] + "****" + value[-4:]
