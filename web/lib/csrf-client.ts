@@ -6,8 +6,9 @@
  *   2) 모듈 단위 메모리에 캐시 (세션당 유효)
  *   3) `apiSend(url, init)` 으로 POST/PATCH/DELETE 시 X-CSRF-Token 자동 첨부
  *
- * 403 (CSRF 검증 실패) 응답을 받으면 캐시를 invalidate 하고 1회 재시도 — 세션이
- * 만료된 후 재로그인 직후 stale 토큰이 남은 케이스를 처리.
+ * 403 (CSRF 검증 실패) 응답을 받으면 캐시를 invalidate 하고 1회 재시도한다.
+ * 401 (세션 만료) 응답을 받으면 캐시를 invalidate 한다 — 재로그인 후 다음 요청이
+ * 이전 세션의 stale 토큰을 보내지 않도록.
  */
 
 let cached: string | null = null;
@@ -74,7 +75,7 @@ export async function getCsrfToken(): Promise<string> {
 }
 
 /**
- * 캐시 무효화 — 로그아웃 / 403 받은 경우 호출.
+ * 캐시 무효화 — 로그아웃 / 401(세션 만료) / 403(CSRF 실패) 시 호출.
  */
 export function invalidateCsrfToken(): void {
   cached = null;
@@ -98,9 +99,13 @@ export async function apiSend(
 
   let res = await doFetch();
   if (res.status === 403) {
-    // 토큰이 stale 이었을 가능성 — 새로 받고 1회 재시도.
+    // CSRF 토큰이 stale 이었을 가능성 — 새로 받고 1회 재시도.
     invalidateCsrfToken();
     res = await doFetch();
+  } else if (res.status === 401) {
+    // 세션 만료 — 캐시된 토큰은 이전 세션의 것이므로 무효화한다.
+    // 재로그인 후 다음 요청이 새 세션의 토큰을 받도록 한다 (401 은 재시도 무의미).
+    invalidateCsrfToken();
   }
   return res;
 }
