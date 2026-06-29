@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -31,10 +31,6 @@ KST = ZoneInfo("Asia/Seoul")
 
 # n8n 전송 타임아웃 (초) — 웹훅 핸들러를 오래 잡지 않도록 짧게.
 _TIMEOUT = 5.0
-
-# 회신 담당자(lastSender) 조회 시 거슬러 올라갈 발송 이력 범위 (일).
-# 이보다 오래된 발송만 있으면 담당자 매칭 안 함 → lastSender=null.
-_LAST_SENDER_LOOKBACK_DAYS = 90
 
 
 def _format_phone_display(digits: str) -> str:
@@ -73,10 +69,14 @@ def _to_kst_iso(iso_utc: str | None) -> str:
 
 
 def lookup_last_sender(db: Session, phone: str) -> dict | None:
-    """이 고객 번호로 최근(90일 이내) 발송한 담당자를 조회한다.
+    """이 고객 번호로 마지막으로 발송한 담당자를 조회한다.
 
     경로: messages.to_number == phone 인 가장 최근 발송 → 그 campaign 의
     created_by(=users.sub) → User. 정렬은 campaign.created_at DESC.
+
+    기간 제한 없음 — "그 고객과 마지막으로 접촉한 담당자"가 회신 담당이므로,
+    오래된 발송이라도 그 사람이 적임이다. 퇴사 등으로 직원 레코드가 사라진
+    경우는 아래 User 조회에서 None 이 되어 자연히 제외된다(→ 관리자 fallback).
 
     Args:
         db: 활성 DB 세션.
@@ -89,17 +89,12 @@ def lookup_last_sender(db: Session, phone: str) -> dict | None:
     if not phone:
         return None
 
-    cutoff = (
-        datetime.now(UTC) - timedelta(days=_LAST_SENDER_LOOKBACK_DAYS)
-    ).isoformat()
-
     # to_number 인덱스 + created_at DESC + LIMIT 1. created_at 은 ISO 문자열이라
     # lexicographic 정렬이 시간순과 일치(전부 UTC ISO).
     row = db.execute(
         select(Message.id, Campaign.created_by, Campaign.created_at)
         .join(Campaign, Message.campaign_id == Campaign.id)
         .where(Message.to_number == phone)
-        .where(Campaign.created_at >= cutoff)
         .order_by(Campaign.created_at.desc())
         .limit(1)
     ).first()

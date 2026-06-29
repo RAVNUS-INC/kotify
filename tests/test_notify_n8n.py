@@ -220,13 +220,15 @@ def test_lookup_last_sender_most_recent_wins(db_session):
     assert got["id"] == "new@ravnus.com"
 
 
-def test_lookup_last_sender_excludes_older_than_90d(db_session):
-    """90일보다 오래된 발송만 있으면 None (조회 범위 정책)."""
+def test_lookup_last_sender_matches_old_history(db_session):
+    """오래된 발송이라도 마지막 담당자면 매칭된다 (기간 제한 없음)."""
     _make_user(db_session, "u1", "old@ravnus.com", "옛담당")
-    stale = (datetime.now(UTC) - timedelta(days=120)).isoformat()
+    stale = (datetime.now(UTC) - timedelta(days=400)).isoformat()
     _make_outbound(db_session, sub="u1", phone="01012345678", created_at=stale)
 
-    assert notify.lookup_last_sender(db_session, "01012345678") is None
+    got = notify.lookup_last_sender(db_session, "01012345678")
+    assert got is not None
+    assert got["id"] == "old@ravnus.com"
 
 
 def test_receive_mo_payload_includes_last_sender(db_session):
