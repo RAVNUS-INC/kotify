@@ -398,6 +398,10 @@ _PROVIDER_PUBLIC_KEYS: dict[str, str] = {
     "msghubEnv": "msghub.env",
     "msghubBrandId": "msghub.brand_id",
     "msghubChatbotId": "msghub.chatbot_id",
+    # 아웃바운드 알림 (고객 회신 → n8n). URL 은 시크릿이 아니라 공개 필드로
+    # 저장(마스킹 불필요, 운영자가 값 확인 가능해야 함). enabled 는 "true"/"false".
+    "n8nNotifyEnabled": "notify.n8n_enabled",
+    "n8nNotifyUrl": "notify.n8n_url",
 }
 _PROVIDER_SECRET_KEYS: dict[str, str] = {
     "keycloakClientSecret": "keycloak.client_secret",
@@ -421,6 +425,9 @@ class ProviderPatchBody(BaseModel):
     msghubEnv: str | None = None  # production | staging | sandbox 등
     msghubBrandId: str | None = None
     msghubChatbotId: str | None = None
+    # 아웃바운드 알림 (n8n). enabled 는 "true"/"false" 문자열, url 은 n8n Webhook URL.
+    n8nNotifyEnabled: str | None = None
+    n8nNotifyUrl: str | None = None
     # 시크릿 (Fernet 암호화 저장) — 빈 값/미제공 시 기존 값 보존
     keycloakClientSecret: str | None = None
     msghubApiKey: str | None = None
@@ -571,6 +578,48 @@ async def test_msghub_auth(
             await client.aclose()
         except Exception:
             pass
+
+
+class N8nTestBody(BaseModel):
+    """POST /settings/test-n8n — 테스트할 URL. 미지정 시 저장된 값 사용."""
+
+    url: str | None = None
+
+
+@router.post(
+    "/settings/test-n8n",
+    dependencies=[Depends(verify_csrf)],
+    response_model=None,
+)
+async def test_n8n_notify(
+    body: N8nTestBody,
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    """n8n 알림 URL 로 샘플 페이로드 1건을 보내 연동을 확인한다.
+
+    body.url 이 오면 그 값으로(아직 저장 안 한 입력값 테스트), 없으면 저장된
+    notify.n8n_url 로 전송. 성공 시 `{data:{ok,message}}`, 실패 시 422.
+    """
+    store = SettingsStore(db)
+    url = (body.url or store.get("notify.n8n_url", "") or "").strip()
+    if not url:
+        return JSONResponse(
+            {"error": {
+                "code": "not_configured",
+                "message": "n8n 알림 URL 이 설정되지 않았습니다",
+            }},
+            status_code=422,
+        )
+
+    from app.services.notify import send_n8n_test
+
+    ok, message = await send_n8n_test(url)
+    if ok:
+        return {"data": {"ok": True, "message": message}}
+    return JSONResponse(
+        {"error": {"code": "send_failed", "message": message}},
+        status_code=422,
+    )
 
 
 # ── 시스템 업데이트 (git pull + rebuild + restart) ──────────────────────────

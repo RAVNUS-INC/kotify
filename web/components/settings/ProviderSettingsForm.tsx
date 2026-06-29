@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   patchProviderClient,
   testMsghubClient,
+  testN8nNotifyClient,
   type ProviderPatchInput,
   type ProviderSettings,
 } from '@/lib/settings';
@@ -37,6 +38,11 @@ export function ProviderSettingsForm({
   const [msghubEnv, setMsghubEnv] = useState(initial.public.msghubEnv || 'production');
   const [msghubBrandId, setMsghubBrandId] = useState(initial.public.msghubBrandId);
   const [msghubChatbotId, setMsghubChatbotId] = useState(initial.public.msghubChatbotId);
+  // n8n 아웃바운드 알림 (고객 회신 → n8n → 하이웍스 등)
+  const [n8nNotifyEnabled, setN8nNotifyEnabled] = useState(
+    initial.public.n8nNotifyEnabled === 'true',
+  );
+  const [n8nNotifyUrl, setN8nNotifyUrl] = useState(initial.public.n8nNotifyUrl);
 
   // 시크릿 state — 항상 빈 문자열 시작.
   const [keycloakClientSecret, setKeycloakClientSecret] = useState('');
@@ -47,6 +53,7 @@ export function ProviderSettingsForm({
 
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testingN8n, setTestingN8n] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const onSubmit = async (e: FormEvent) => {
@@ -64,6 +71,10 @@ export function ProviderSettingsForm({
       if (msghubApiKey) payload.msghubApiKey = msghubApiKey;
       if (msghubApiPwd) payload.msghubApiPwd = msghubApiPwd;
       if (msghubWebhookToken) payload.msghubWebhookToken = msghubWebhookToken;
+      // n8n 알림 — enabled 는 항상 명시 전송("false" 로 끄기 가능, 빈문자열 skip
+      // 정책 회피). URL 은 값이 있을 때만 전송(빈칸 저장 시 기존값 보존).
+      payload.n8nNotifyEnabled = n8nNotifyEnabled ? 'true' : 'false';
+      if (n8nNotifyUrl.trim()) payload.n8nNotifyUrl = n8nNotifyUrl.trim();
     } else {
       if (keycloakIssuer.trim()) payload.keycloakIssuer = keycloakIssuer.trim();
       if (keycloakClientId.trim()) payload.keycloakClientId = keycloakClientId.trim();
@@ -106,6 +117,25 @@ export function ProviderSettingsForm({
       });
     } finally {
       setTesting(false);
+    }
+  };
+
+  const onTestN8n = async () => {
+    if (testingN8n) return;
+    setTestingN8n(true);
+    setMsg(null);
+    try {
+      // 입력칸의 현재 URL 로 테스트 (저장 전에도 확인 가능). 비어 있으면
+      // 서버가 저장값을 사용.
+      const r = await testN8nNotifyClient(n8nNotifyUrl.trim() || undefined);
+      setMsg({ kind: 'ok', text: `✓ n8n ${r.message}` });
+    } catch (err) {
+      setMsg({
+        kind: 'err',
+        text: err instanceof Error ? err.message : 'n8n 테스트 실패',
+      });
+    } finally {
+      setTestingN8n(false);
     }
   };
 
@@ -227,6 +257,51 @@ export function ProviderSettingsForm({
         </section>
       ) : null}
 
+      {section === 'messaging' ? (
+        <section
+          aria-label="알림 연동 설정"
+          className="rounded-lg border border-line bg-surface p-5"
+        >
+          <header className="mb-4">
+            <h2 className="text-base font-semibold text-ink">
+              회신 알림 (n8n)
+            </h2>
+            <p className="mt-0.5 text-[12.5px] text-ink-muted">
+              고객이 문자/RCS 로 회신하면 지정한 n8n Webhook URL 로 전송합니다.
+              n8n 에서 하이웍스 등으로 포워딩하세요.
+            </p>
+          </header>
+
+          <div className="flex flex-col gap-4">
+            <Check
+              checked={n8nNotifyEnabled}
+              onChange={(e) => setN8nNotifyEnabled(e.target.checked)}
+              label="회신 수신 시 n8n 으로 알림 전송"
+              sub="끄면 회신은 계속 저장되지만 외부 알림은 보내지 않습니다."
+            />
+            <Field
+              label="n8n Webhook URL"
+              hint="n8n 의 Webhook 노드에서 발급된 Production URL (예: https://n8n.example.com/webhook/abc123)"
+            >
+              <Input
+                type="url"
+                value={n8nNotifyUrl}
+                onChange={(e) => setN8nNotifyUrl(e.target.value)}
+                placeholder="https://n8n.example.com/webhook/..."
+                disabled={submitting}
+              />
+            </Field>
+            <div className="rounded border border-line bg-gray-1 p-3 text-[12px] text-ink-muted">
+              전송 페이로드(JSON) 주요 필드: <code>from</code>(회신 번호),{' '}
+              <code>fromDisplay</code>(하이픈 표시),{' '}
+              <code>text</code>(본문), <code>to</code>(발신번호),{' '}
+              <code>channel</code>, <code>receivedAt</code>. n8n 에서{' '}
+              <code>{'{{ $json.text }}'}</code> 형태로 사용하세요.
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {section === 'security' ? (
         <>
           <section
@@ -339,16 +414,28 @@ export function ProviderSettingsForm({
         </div>
         <div className="flex items-center gap-2">
           {section === 'messaging' ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="md"
-              onClick={onTestMsghub}
-              disabled={submitting || testing}
-              icon={<Icon name="check" size={12} />}
-            >
-              {testing ? '테스트 중…' : '인증 테스트'}
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                onClick={onTestMsghub}
+                disabled={submitting || testing}
+                icon={<Icon name="check" size={12} />}
+              >
+                {testing ? '테스트 중…' : '인증 테스트'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                onClick={onTestN8n}
+                disabled={submitting || testingN8n || !n8nNotifyUrl.trim()}
+                icon={<Icon name="zap" size={12} />}
+              >
+                {testingN8n ? 'n8n 테스트 중…' : 'n8n 테스트'}
+              </Button>
+            </>
           ) : null}
           <Button
             type="submit"

@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.config import settings
 from app.db import get_db
@@ -249,6 +250,7 @@ async def receive_mo(
     saved = 0
     duplicates = 0
     rejected = 0
+    saved_mos: list[MoMessage] = []  # n8n 알림 대상 (신규 저장분만)
     active_callbacks = _active_caller_digits(db)
 
     try:
@@ -306,6 +308,7 @@ async def receive_mo(
                 received_at=now,
             )
             db.add(mo)
+            saved_mos.append(mo)
             saved += 1
 
         db.commit()
@@ -323,6 +326,25 @@ async def receive_mo(
         rejected,
         payload.mo_cnt,
     )
+
+    # 아웃바운드 알림 (n8n → 하이웍스 등). MO 저장이 끝난 뒤에만 처리한다.
+    # 전송은 응답 반환 후 BackgroundTask 에서 수행 → msghub success 응답이
+    # n8n 지연/장애에 묶이지 않는다(인바운드 처리량 보호). 페이로드는 DB 세션이
+    # 살아있는 지금 준비하고(설정 읽기), HTTP 전송만 백그라운드로 미룬다.
+    # (재전송된 동일 MO 는 위에서 mo_key 중복으로 saved_mos 에 없으므로 재알림 없음)
+    background: BackgroundTask | None = None
+    if saved_mos:
+        try:
+            from app.services.notify import deliver_n8n, prepare_n8n_delivery
+
+            n8n_url, n8n_payloads = prepare_n8n_delivery(db, saved_mos)
+            if n8n_url and n8n_payloads:
+                background = BackgroundTask(deliver_n8n, n8n_url, n8n_payloads)
+        except Exception:  # noqa: BLE001
+            log.exception("n8n 알림 준비 중 예외 — 무시하고 success 반환")
+
     return JSONResponse(
-        {"code": "10000", "message": "success"}, status_code=200
+        {"code": "10000", "message": "success"},
+        status_code=200,
+        background=background,
     )

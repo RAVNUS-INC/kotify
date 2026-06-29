@@ -15,6 +15,9 @@ export type ProviderPublicFields = {
   msghubEnv: string;
   msghubBrandId: string;
   msghubChatbotId: string;
+  /** 아웃바운드 알림(고객 회신 → n8n). "true"/"false" 문자열. */
+  n8nNotifyEnabled: string;
+  n8nNotifyUrl: string;
 };
 
 export type ProviderSecretInfo = {
@@ -42,6 +45,29 @@ export type ProviderPatchInput = Partial<
     msghubWebhookToken: string;
   }
 >;
+
+/**
+ * n8n 알림 테스트 — 입력한(또는 저장된) URL 로 샘플 페이로드 1건 전송.
+ * url 미지정 시 서버가 저장값을 사용. 실패 시 throw.
+ */
+export async function testN8nNotifyClient(
+  url?: string,
+): Promise<{ ok: true; message: string }> {
+  const res = await apiSend('/api/settings/test-n8n', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(url ? { url } : {}),
+  });
+  const body = (await res.json()) as {
+    data?: { ok: true; message: string };
+    error?: { code: string; message: string };
+  };
+  if (!res.ok || body.error) {
+    throw new Error(body.error?.message ?? `HTTP ${res.status}`);
+  }
+  if (!body.data) throw new Error('API 응답에 data가 없습니다');
+  return body.data;
+}
 
 export async function fetchOrg(): Promise<Org> {
   return apiFetch<Org>('/org');
