@@ -190,6 +190,8 @@ class Message(Base):
         Index("idx_messages_msghub_request_id", "msghub_request_id"),
         Index("idx_messages_cli_key", "cli_key"),
         Index("idx_messages_msg_key", "msg_key"),
+        # 회신 담당자 조회(lookup_last_sender): WHERE to_number = ?
+        Index("idx_messages_to_number", "to_number"),
     )
 
 

@@ -89,7 +89,8 @@ def lookup_last_sender(db: Session, phone: str) -> dict | None:
     if not phone:
         return None
 
-    # to_number 인덱스 + created_at DESC + LIMIT 1. created_at 은 ISO 문자열이라
+    # idx_messages_to_number (마이그레이션 0014) 로 to_number 조회 가속.
+    # created_at DESC + LIMIT 1 로 최근 1건. created_at 은 ISO 문자열이라
     # lexicographic 정렬이 시간순과 일치(전부 UTC ISO).
     row = db.execute(
         select(Message.id, Campaign.created_by, Campaign.created_at)
