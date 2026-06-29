@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.models import Campaign, Message, MsghubRequest, User
 from app.routes.webhook import receive_mo
 from app.security.settings_store import SettingsStore
 from app.services import notify
@@ -78,6 +80,8 @@ def test_notify_enabled_posts_payload(db_session):
     assert payload["fromDisplay"] == "010-1234-5678"
     assert payload["text"] == "회신내용"
     assert payload["event"] == "message.received"
+    # 발송 이력 없음 → lastSender 키는 존재하되 null
+    assert payload["lastSender"] is None
 
 
 def test_notify_failure_is_swallowed(db_session):
@@ -146,3 +150,101 @@ def test_receive_mo_no_n8n_when_disabled(db_session):
     assert resp.status_code == 200
     assert resp.background is None  # 예약 안 됨
     m.assert_not_called()
+
+
+# ── lookup_last_sender (회신 담당자 매칭) ─────────────────────────────────────
+
+
+def _make_user(db, sub, email, display_name):
+    db.add(User(
+        sub=sub, email=email, name=email.split("@")[0], display_name=display_name,
+        roles='["sender"]', created_at="2026-01-01T00:00:00+00:00",
+        last_login_at="2026-01-01T00:00:00+00:00",
+    ))
+    db.commit()
+
+
+def _make_outbound(db, *, sub, phone, created_at):
+    """sub 직원이 phone 으로 보낸 발송(MT) 1건."""
+    c = Campaign(
+        created_by=sub, caller_number="0212345678", message_type="short",
+        content="공지", total_count=1, pending_count=0, state="DISPATCHED",
+        created_at=created_at,
+    )
+    db.add(c)
+    db.flush()
+    req = MsghubRequest(campaign_id=c.id, chunk_index=0, sent_at=created_at)
+    db.add(req)
+    db.flush()
+    db.add(Message(
+        campaign_id=c.id, msghub_request_id=req.id,
+        to_number=phone, to_number_raw=phone, status="DELIVERED",
+    ))
+    db.commit()
+
+
+def test_lookup_last_sender_found(db_session):
+    """발송 이력 있으면 담당자 id=email, name=display_name 반환."""
+    _make_user(db_session, "u1", "stopdragon@ravnus.com", "정지용")
+    _make_outbound(db_session, sub="u1", phone="01012345678",
+                   created_at="2026-06-01T00:00:00+00:00")
+
+    got = notify.lookup_last_sender(db_session, "01012345678")
+    assert got is not None
+    assert got["id"] == "stopdragon@ravnus.com"
+    assert got["email"] == "stopdragon@ravnus.com"
+    assert got["name"] == "정지용"
+    assert got["messageId"].startswith("MT-")
+    assert got["sentAt"].endswith("+09:00")  # KST 변환
+
+
+def test_lookup_last_sender_none_when_no_history(db_session):
+    """그 번호로 보낸 적 없으면 None."""
+    _make_user(db_session, "u1", "a@ravnus.com", "에이")
+    _make_outbound(db_session, sub="u1", phone="01099998888",
+                   created_at="2026-06-01T00:00:00+00:00")
+    # 다른 번호 회신
+    assert notify.lookup_last_sender(db_session, "01012345678") is None
+
+
+def test_lookup_last_sender_most_recent_wins(db_session):
+    """같은 번호에 여러 담당자 → 가장 최근 발송 담당자."""
+    _make_user(db_session, "u1", "old@ravnus.com", "옛담당")
+    _make_user(db_session, "u2", "new@ravnus.com", "새담당")
+    _make_outbound(db_session, sub="u1", phone="01012345678",
+                   created_at="2026-05-01T00:00:00+00:00")
+    _make_outbound(db_session, sub="u2", phone="01012345678",
+                   created_at="2026-06-20T00:00:00+00:00")
+
+    got = notify.lookup_last_sender(db_session, "01012345678")
+    assert got["id"] == "new@ravnus.com"
+
+
+def test_lookup_last_sender_excludes_older_than_90d(db_session):
+    """90일보다 오래된 발송만 있으면 None (조회 범위 정책)."""
+    _make_user(db_session, "u1", "old@ravnus.com", "옛담당")
+    stale = (datetime.now(UTC) - timedelta(days=120)).isoformat()
+    _make_outbound(db_session, sub="u1", phone="01012345678", created_at=stale)
+
+    assert notify.lookup_last_sender(db_session, "01012345678") is None
+
+
+def test_receive_mo_payload_includes_last_sender(db_session):
+    """통합: 회신 수신 시 payload.lastSender 가 담당자로 채워진다."""
+    _setup_token(db_session)
+    _enable_n8n(db_session)
+    _make_user(db_session, "u1", "stopdragon@ravnus.com", "정지용")
+    _make_outbound(db_session, sub="u1", phone="01012345678",
+                   created_at="2026-06-01T00:00:00+00:00")
+
+    resp_obj = MagicMock(status_code=200)
+    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=resp_obj)) as m:
+        resp = asyncio.run(receive_mo("wtok", _mo_request(_mo_body()), db_session))
+        assert resp.background is not None
+        asyncio.run(resp.background())
+
+    _, kwargs = m.call_args
+    ls = kwargs["json"]["lastSender"]
+    assert ls is not None
+    assert ls["id"] == "stopdragon@ravnus.com"
+    assert ls["name"] == "정지용"

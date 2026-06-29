@@ -15,16 +15,26 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models import Campaign, Message, User
 from app.security.settings_store import SettingsStore
 
 log = logging.getLogger(__name__)
 
+KST = ZoneInfo("Asia/Seoul")
+
 # n8n 전송 타임아웃 (초) — 웹훅 핸들러를 오래 잡지 않도록 짧게.
 _TIMEOUT = 5.0
+
+# 회신 담당자(lastSender) 조회 시 거슬러 올라갈 발송 이력 범위 (일).
+# 이보다 오래된 발송만 있으면 담당자 매칭 안 함 → lastSender=null.
+_LAST_SENDER_LOOKBACK_DAYS = 90
 
 
 def _format_phone_display(digits: str) -> str:
@@ -49,11 +59,75 @@ def _format_phone_display(digits: str) -> str:
     return d
 
 
-def _mo_to_payload(mo) -> dict:
+def _to_kst_iso(iso_utc: str | None) -> str:
+    """UTC ISO 문자열 → KST(+09:00) ISO. 파싱 실패 시 원본 그대로."""
+    if not iso_utc:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_utc)
+    except (ValueError, TypeError):
+        return iso_utc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(KST).isoformat()
+
+
+def lookup_last_sender(db: Session, phone: str) -> dict | None:
+    """이 고객 번호로 최근(90일 이내) 발송한 담당자를 조회한다.
+
+    경로: messages.to_number == phone 인 가장 최근 발송 → 그 campaign 의
+    created_by(=users.sub) → User. 정렬은 campaign.created_at DESC.
+
+    Args:
+        db: 활성 DB 세션.
+        phone: 고객 번호(숫자만, MO.mo_number 와 동일 정규화 가정).
+
+    Returns:
+        {"id", "email", "name", "sentAt", "messageId"} 또는 매칭 없으면 None.
+        id 는 하이웍스/AD 식별용으로 email 을 사용(User 에 sAMAccountName 없음).
+    """
+    if not phone:
+        return None
+
+    cutoff = (
+        datetime.now(UTC) - timedelta(days=_LAST_SENDER_LOOKBACK_DAYS)
+    ).isoformat()
+
+    # to_number 인덱스 + created_at DESC + LIMIT 1. created_at 은 ISO 문자열이라
+    # lexicographic 정렬이 시간순과 일치(전부 UTC ISO).
+    row = db.execute(
+        select(Message.id, Campaign.created_by, Campaign.created_at)
+        .join(Campaign, Message.campaign_id == Campaign.id)
+        .where(Message.to_number == phone)
+        .where(Campaign.created_at >= cutoff)
+        .order_by(Campaign.created_at.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+
+    msg_id, created_by, created_at = row
+    user = db.get(User, created_by)
+    if user is None:
+        # 발송 직원이 삭제된 경우 등 — 식별자 없으면 알림 라우팅 불가하니 None.
+        return None
+
+    return {
+        # 하이웍스/AD 식별자: User 에 sAMAccountName 컬럼이 없어 email 을 사용.
+        "id": user.email,
+        "email": user.email,
+        "name": user.display_name or user.name or "",
+        "sentAt": _to_kst_iso(created_at),
+        "messageId": f"MT-{msg_id}",
+    }
+
+
+def _mo_to_payload(mo, last_sender: dict | None = None) -> dict:
     """MoMessage ORM → n8n 으로 보낼 평탄한 JSON.
 
     Args:
         mo: 방금 저장한 app.models.MoMessage 인스턴스.
+        last_sender: lookup_last_sender 결과 (없으면 None).
     """
     return {
         "event": "message.received",
@@ -69,6 +143,8 @@ def _mo_to_payload(mo) -> dict:
         # msghub 가 준 수신 시각 원본(있으면) + 우리 저장 시각(UTC ISO).
         "moReceivedDt": mo.mo_recv_dt or "",
         "receivedAt": mo.received_at or "",
+        # 이 고객에게 마지막으로 문자 보낸 담당자(회신 알림 라우팅용). 없으면 null.
+        "lastSender": last_sender,
     }
 
 
@@ -96,7 +172,16 @@ def prepare_n8n_delivery(db: Session, mos: list) -> tuple[str | None, list[dict]
     if not (enabled and url):
         return None, []
 
-    return url, [_mo_to_payload(mo) for mo in mos]
+    # 같은 배치에 동일 고객 번호가 여러 건이면 발송 이력 조회를 1회로 캐시.
+    sender_cache: dict[str, dict | None] = {}
+    payloads: list[dict] = []
+    for mo in mos:
+        phone = mo.mo_number or ""
+        if phone not in sender_cache:
+            sender_cache[phone] = lookup_last_sender(db, phone)
+        payloads.append(_mo_to_payload(mo, sender_cache[phone]))
+
+    return url, payloads
 
 
 async def deliver_n8n(url: str, payloads: list[dict]) -> int:
@@ -162,6 +247,7 @@ async def send_n8n_test(url: str) -> tuple[bool, str]:
         "telco": "",
         "moReceivedDt": "",
         "receivedAt": "",
+        "lastSender": None,
         "test": True,
     }
     try:
@@ -180,4 +266,5 @@ __all__ = [
     "deliver_n8n",
     "notify_n8n_mo",
     "send_n8n_test",
+    "lookup_last_sender",
 ]
