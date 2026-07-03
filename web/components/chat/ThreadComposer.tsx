@@ -40,7 +40,13 @@ export function ThreadComposer({ threadId, disabled }: ThreadComposerProps) {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    // Enter=줄바꿈(기본 동작), Cmd/Ctrl+Enter 또는 Shift+Enter=발송.
+    // 한글 조합 중(isComposing) Enter 는 조합 확정이므로 발송하지 않는다.
+    if (
+      e.key === 'Enter' &&
+      (e.metaKey || e.ctrlKey || e.shiftKey) &&
+      !e.nativeEvent.isComposing
+    ) {
       e.preventDefault();
       void submit();
     }
@@ -61,7 +67,7 @@ export function ThreadComposer({ threadId, disabled }: ThreadComposerProps) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="메시지 입력 · Enter로 발송, Shift+Enter로 줄바꿈"
+        placeholder="메시지 입력 · Enter로 줄바꿈, ⌘/Shift+Enter로 발송"
         rows={3}
         disabled={disabled || sending}
         aria-label="메시지 입력"
