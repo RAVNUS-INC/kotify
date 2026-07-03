@@ -262,10 +262,17 @@ async def receive_mo(
                 c for c in item.number if c.isdigit()
             )
 
+            # moCallback(우리 발신번호)도 숫자만으로 통일. 대화방 그룹핑 키가
+            # (caller, phone)=(mo_callback, mo_number) 인데, campaigns.caller_number
+            # 는 숫자만 저장되므로 mo_callback 이 하이픈/국제표기로 남으면 같은 고객이
+            # 발송방·회신방으로 쪼개진다. cb_digits 를 저장값에도 반영해 정합성 유지.
+            if item.callback:
+                item.callback = "".join(c for c in item.callback if c.isdigit())
+
             # 위변조 방지 — callback 이 우리 활성 발신번호가 아니면 거부(토큰 유출 대비
             # defense-in-depth). 발신번호 미등록 환경에서는 검증 불가하므로 통과시킨다.
             if active_callbacks and item.callback:
-                cb_digits = "".join(c for c in item.callback if c.isdigit())
+                cb_digits = item.callback  # 이미 숫자만
                 if cb_digits not in active_callbacks:
                     log.warning(
                         "MO moCallback 미등록 — 거부(위변조 의심): %s", item.callback
