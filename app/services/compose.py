@@ -28,7 +28,7 @@ from app.msghub.schemas import (
     SendResponse,
 )
 from app.services import audit
-from app.util.phone import parse_phone_list
+from app.util.phone import normalize_phone, parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
 
 if TYPE_CHECKING:
@@ -85,10 +85,23 @@ def dedupe_recipients(recipients: list[str]) -> list[str]:
     중복 발송·이중 과금을 방지한다. dict.fromkeys 로 첫 등장 순서를 유지한다.
 
     주의: 문자열 동일성 기준이다. "010-1234-5678" 과 "01012345678" 은
-    서로 다른 문자열이라 별개로 취급된다. 발송 경로의 전화번호 정규화 통일
-    (normalize_phone) 은 별도 작업(테마 D)에서 처리한다.
+    서로 다른 문자열이라 별개로 취급된다. 저장 시 to_number 는
+    _norm_to_number 로 숫자만 통일하지만(대화방 그룹핑 키), dedupe 는 사용자
+    입력 원본 기준이라 여기선 정규화하지 않는다.
     """
     return list(dict.fromkeys(recipients))
+
+
+def _norm_to_number(phone: str) -> str:
+    """messages.to_number(그룹핑·매칭 키)용 정규화 — 숫자만 남긴다.
+
+    대화방은 (caller, phone) 이 아니라 phone 단위로 묶이며, MO.mo_number 는
+    webhook 에서 숫자만 저장된다. 발송(MT) to_number 도 숫자만으로 통일해야
+    같은 고객의 발송·회신이 한 대화방으로 병합된다(하이픈 유무로 갈리지 않게).
+    휴대폰 패턴이 아니면 normalize_phone 이 None 이라, 숫자만 추출로 fallback.
+    to_number_raw 에는 원본을 그대로 보존한다(감사·표시 원본).
+    """
+    return normalize_phone(phone) or "".join(c for c in (phone or "") if c.isdigit())
 
 # 예약 발송 최소 리드타임 (10분)
 RESERVE_MIN_LEAD_SECONDS = 10 * 60
@@ -608,7 +621,7 @@ async def dispatch_chat_reply(
     db.add(Message(
         campaign_id=campaign.id,
         msghub_request_id=msghub_req.id,
-        to_number=phone,
+        to_number=_norm_to_number(phone),
         to_number_raw=phone,
         cli_key=cli_key,
         msg_key=item.msg_key if item else None,
@@ -803,7 +816,7 @@ def _create_messages_from_response(
             msg = Message(
                 campaign_id=campaign_id,
                 msghub_request_id=msghub_request_id,
-                to_number=item.phone,
+                to_number=_norm_to_number(item.phone),
                 to_number_raw=item.phone,
                 cli_key=item.cli_key,
                 msg_key=item.msg_key,
@@ -821,7 +834,7 @@ def _create_messages_from_response(
             msg = Message(
                 campaign_id=campaign_id,
                 msghub_request_id=msghub_request_id,
-                to_number=phone,
+                to_number=_norm_to_number(phone),
                 to_number_raw=phone,
                 cli_key=_make_cli_key(campaign_id, chunk_idx, i),
                 msg_key=None,
@@ -856,7 +869,7 @@ def _record_failed_chunk(
         msg = Message(
             campaign_id=campaign_id,
             msghub_request_id=msghub_req.id,
-            to_number=to_num,
+            to_number=_norm_to_number(to_num),
             to_number_raw=to_num,
             cli_key=_make_cli_key(campaign_id, chunk_idx, i),
             msg_key=None,

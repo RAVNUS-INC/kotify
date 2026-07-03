@@ -134,3 +134,42 @@ def test_rcs_bidirectional_reply_merges_by_phone(db_session, sample_user):
     assert t.mt_count == 1  # 발송
     assert t.mo_count == 1  # RCS 회신
     assert t.last_direction == "IN"
+
+
+# ── _norm_to_number: 발송 to_number 정규화 (하이픈 재유입 방지) ───────────────
+
+
+def test_norm_to_number_strips_hyphens():
+    """하이픈/공백 입력을 숫자만으로. to_number 그룹핑 키 통일."""
+    from app.services.compose import _norm_to_number
+
+    assert _norm_to_number("010-7171-2463") == "01071712463"
+    assert _norm_to_number("010 7171 2463") == "01071712463"
+    assert _norm_to_number("01071712463") == "01071712463"  # 멱등
+    # 휴대폰 패턴 아니어도 숫자만 fallback (normalize_phone None → 숫자추출)
+    assert _norm_to_number("02-577-1000") == "025771000"
+
+
+def test_hyphen_outbound_merges_with_reply(db_session, sample_user):
+    """하이픈으로 저장된 과거 발송도, to_number 를 숫자로 정리하면 회신과 병합.
+
+    회귀 재현: 발송 to_number='010-7171-2463'(하이픈) + 회신 mo_number=
+    '01071712463'(숫자) → 정리 전엔 대화방 2개. list_threads 는 저장값 기준이라,
+    발송측이 숫자로 저장돼야(=_norm_to_number 적용 또는 0016 마이그레이션) 병합된다.
+    여기서는 발송을 정규화된 값으로 저장해 병합을 확인한다(수정 후 동작).
+    """
+    _setup_token(db_session)
+    phone = "01071712463"
+    # 수정 후 저장 경로가 보장하는 상태: to_number 는 숫자만
+    _make_outbound(db_session, caller="025771000", phone=phone)
+
+    body = {"moCnt": 1, "moLst": [{
+        "moKey": "h1", "moNumber": "010-7171-2463",  # 회신은 하이픈으로 와도
+        "moCallback": "025771000", "moMsg": "확인했습니다",
+    }]}
+    asyncio.run(receive_mo("wtok", _mo_request(body), db_session))
+
+    threads, total = list_threads(db_session)
+    assert total == 1, f"하이픈 발송이 회신과 분리됨 ({total}개)"
+    assert threads[0].mt_count == 1
+    assert threads[0].mo_count == 1
