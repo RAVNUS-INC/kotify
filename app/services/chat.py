@@ -130,49 +130,64 @@ def list_threads(
         .group_by(MoMessage.mo_callback, MoMessage.mo_number)
     ).all()
 
-    # Python에서 (caller, phone) 키로 머지
-    threads: dict[tuple[str, str], dict] = {}
-    for r in mt_rows:
-        if not r.caller or not r.phone:
-            continue
-        key = (r.caller, r.phone)
-        threads[key] = {
-            "caller": r.caller,
-            "phone": r.phone,
-            "mt_last_t": r.last_t or "",
-            "mt_count": r.cnt,
-            "mo_last_t": "",
-            "mo_count": 0,
-        }
-    for r in mo_rows:
-        if not r.caller or not r.phone:
-            continue
-        key = (r.caller, r.phone)
-        t = threads.setdefault(
-            key,
+    # 고객번호(phone) 단위로 머지. caller(우리 발신번호/chatbotId)는 발송·회신
+    # 경로마다 다를 수 있어(RCS 양방향 회신은 mo_callback=chatbotId) 그룹핑 키에서
+    # 제외한다. 대표 caller 는 "가장 최근 활동한 caller" 로 유지 — 답장 발송·읽음
+    # 처리가 이 값을 쓴다. 같은 고객을 여러 발신번호로 상대해도 대화방은 1개.
+    threads: dict[str, dict] = {}
+
+    def _touch(phone: str) -> dict:
+        return threads.setdefault(
+            phone,
             {
-                "caller": r.caller,
-                "phone": r.phone,
+                "caller": "",
+                "phone": phone,
                 "mt_last_t": "",
                 "mt_count": 0,
                 "mo_last_t": "",
                 "mo_count": 0,
+                "caller_last_t": "",  # 대표 caller 선정용 최신 활동 시각
             },
         )
-        t["mo_last_t"] = r.last_t or ""
-        t["mo_count"] = r.cnt
 
-    # 팀 공유 읽음 상태 — (caller, phone) → read_at. 행이 없으면 미읽음 취급.
-    read_at_map: dict[tuple[str, str], str] = {
-        (r.caller, r.phone): r.read_at
-        for r in db.execute(
-            select(ThreadRead.caller, ThreadRead.phone, ThreadRead.read_at)
-        ).all()
-    }
+    def _maybe_set_caller(t: dict, caller: str, ts: str) -> None:
+        """더 최근(ts) 활동의 caller 를 대표로 채택."""
+        if caller and ts >= t["caller_last_t"]:
+            t["caller"] = caller
+            t["caller_last_t"] = ts
+
+    for r in mt_rows:
+        if not r.caller or not r.phone:
+            continue
+        t = _touch(r.phone)
+        t["mt_last_t"] = r.last_t or ""
+        t["mt_count"] += r.cnt
+        _maybe_set_caller(t, r.caller, r.last_t or "")
+    for r in mo_rows:
+        if not r.caller or not r.phone:
+            continue
+        t = _touch(r.phone)
+        # 같은 phone 에 여러 mo_callback 이 있으면 최신 것으로 갱신.
+        if (r.last_t or "") >= t["mo_last_t"]:
+            t["mo_last_t"] = r.last_t or ""
+        t["mo_count"] += r.cnt
+        _maybe_set_caller(t, r.caller, r.last_t or "")
+
+    # 팀 공유 읽음 상태 — phone → 최신 read_at. 대화방을 phone 으로 묶으므로
+    # 같은 고객에 caller 별 읽음행이 여럿이면 가장 최근 읽음 시각으로 합친다
+    # (이미 읽은 대화가 안읽음으로 되살아나는 것 방지).
+    read_at_map: dict[str, str] = {}
+    for r in db.execute(
+        select(ThreadRead.phone, ThreadRead.read_at)
+    ).all():
+        prev = read_at_map.get(r.phone, "")
+        if (r.read_at or "") > prev:
+            read_at_map[r.phone] = r.read_at or ""
 
     # 마지막 메시지 상세를 가져와 ChatThread로 빌드
     built: list[ChatThread] = []
-    for (caller, phone), t in threads.items():
+    for phone, t in threads.items():
+        caller = t["caller"]  # 대표(최근) caller
         last_mt_t = t["mt_last_t"]
         last_mo_t = t["mo_last_t"]
         if last_mo_t > last_mt_t:
@@ -180,10 +195,7 @@ def list_threads(
             last_dir = "IN"
             mo = db.execute(
                 select(MoMessage.mo_msg)
-                .where(
-                    MoMessage.mo_callback == caller,
-                    MoMessage.mo_number == phone,
-                )
+                .where(MoMessage.mo_number == phone)
                 .order_by(
                     func.coalesce(MoMessage.mo_recv_dt, MoMessage.received_at).desc()
                 )
@@ -196,10 +208,7 @@ def list_threads(
             last_body_row = db.execute(
                 select(Campaign.content)
                 .join(Message, Message.campaign_id == Campaign.id)
-                .where(
-                    Campaign.caller_number == caller,
-                    Message.to_number == phone,
-                )
+                .where(Message.to_number == phone)
                 .order_by(
                     func.coalesce(Message.complete_time, Message.report_dt).desc()
                 )
@@ -208,7 +217,7 @@ def list_threads(
             last_body = last_body_row or ""
 
         # 안읽음 = 고객(MO) 최종 메시지가 팀 마지막 읽음 시각 이후.
-        read_at = read_at_map.get((caller, phone), "")
+        read_at = read_at_map.get(phone, "")
         unread = thread_unread(last_mo_t, read_at)
 
         built.append(
@@ -231,17 +240,20 @@ def list_threads(
 
 
 def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
-    """특정 (caller, phone) 스레드의 모든 메시지를 시간 오름차순으로 반환한다."""
+    """특정 고객(phone) 스레드의 모든 메시지를 시간 오름차순으로 반환한다.
+
+    대화방은 고객번호(phone) 단위로 묶는다. caller(우리 발신번호/chatbotId)는
+    발송·회신 경로마다 다를 수 있어(특히 RCS 양방향은 mo_callback=chatbotId)
+    그룹핑 키에서 제외한다 — caller 인자는 하위호환용으로 받되 조회엔 쓰지 않는다.
+    같은 고객과 여러 발신번호로 주고받은 이력도 한 방에 모인다.
+    """
     out: list[ChatMessage] = []
 
-    # MT
+    # MT — 그 고객(phone)에게 보낸 모든 발송 (발신번호 무관).
     mt_rows = db.execute(
         select(Message, Campaign)
         .join(Campaign, Campaign.id == Message.campaign_id)
-        .where(
-            Campaign.caller_number == caller,
-            Message.to_number == phone,
-        )
+        .where(Message.to_number == phone)
     ).all()
     for msg, campaign in mt_rows:
         ts = _coalesce_ts(msg.complete_time, msg.report_dt, campaign.created_at)
@@ -258,12 +270,9 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
             )
         )
 
-    # MO
+    # MO — 그 고객(phone)에게서 온 모든 회신 (mo_callback=발신번호/chatbotId 무관).
     mo_rows = db.execute(
-        select(MoMessage).where(
-            MoMessage.mo_callback == caller,
-            MoMessage.mo_number == phone,
-        )
+        select(MoMessage).where(MoMessage.mo_number == phone)
     ).scalars().all()
     for mo in mo_rows:
         ts = _coalesce_ts(mo.mo_recv_dt, mo.received_at)

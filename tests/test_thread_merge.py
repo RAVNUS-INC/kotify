@@ -100,3 +100,37 @@ def test_reply_callback_stored_as_digits(db_session):
     mo = db_session.execute(select(MoMessage)).scalars().one()
     assert mo.mo_callback == "025771000"  # 숫자만
     assert mo.mo_number == "01012345678"
+
+
+def test_rcs_bidirectional_reply_merges_by_phone(db_session, sample_user):
+    """RCS 양방향 회신(mo_callback=chatbotId)도 발송방과 한 방으로 묶인다.
+
+    RCS 양방향은 회신 payload 의 chatbotId 가 mo_callback 에 저장돼, 발신번호
+    (caller_number)와 값 자체가 다르다. 정규화로는 못 합치므로 phone(고객번호)
+    단위 그룹핑으로 하나의 대화방이 되어야 한다.
+    """
+    _setup_token(db_session)
+    phone = "01012345678"
+    send_number = "025771000"
+
+    # 1) 우리가 발신번호로 발송
+    _make_outbound(db_session, caller=send_number, phone=phone)
+
+    # 2) 고객이 RCS 양방향으로 회신 — msgKey 형식 → callback=chatbotId
+    body = {"rcsBiCnt": 1, "rcsBiLst": [{
+        "msgKey": "rcs-1", "phone": "010-1234-5678",
+        "chatbotId": "CHATBOT_0123",  # 발신번호와 완전히 다른 값
+        "eventType": "message",
+        "contentInfo": {"textMessage": "RCS 양방향 회신입니다"},
+    }]}
+    resp = asyncio.run(receive_mo("wtok", _mo_request(body), db_session))
+    assert resp.status_code == 200
+
+    # 3) chatbotId ≠ 발신번호지만, phone 이 같으니 대화방 1개.
+    threads, total = list_threads(db_session)
+    assert total == 1, f"RCS 양방향 회신이 별도 방으로 분리됨 ({total}개)"
+    t = threads[0]
+    assert t.phone == phone
+    assert t.mt_count == 1  # 발송
+    assert t.mo_count == 1  # RCS 회신
+    assert t.last_direction == "IN"
