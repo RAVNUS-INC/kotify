@@ -76,16 +76,23 @@ def _parse_thread_id(tid: str) -> tuple[str, str] | None:
     return caller, phone
 
 
-def _service_thread_to_ts(t: ServiceChatThread, last_channel: str) -> dict:
-    """services.chat.ChatThread → web/types/chat.ts ChatThread shape."""
+def _service_thread_to_ts(
+    t: ServiceChatThread, last_channel: str, contact_name: str | None = None
+) -> dict:
+    """services.chat.ChatThread → web/types/chat.ts ChatThread shape.
+
+    contact_name: 하이웍스 CID 조회로 얻은 표시명(있으면). 프론트가 우선 표시.
+    """
     row: dict = {
         "id": _thread_id(t.caller, t.phone),
-        "name": t.phone,  # 연락처 이름 미연결 — 번호로 표시
+        "name": t.phone,  # 연락처 이름 미연결 — 번호로 표시(fallback)
         "phone": t.phone,
         "preview": (t.last_body or "")[:60],
         "time": fmt_kst_hhmm(t.last_timestamp),
         "channel": last_channel,
     }
+    if contact_name:
+        row["contactName"] = contact_name
     if t.unread:
         row["unread"] = True
     return row
@@ -229,11 +236,19 @@ def api_list_threads(
     channels = _batch_last_mt_channels(db, pairs)
     labels = _batch_last_campaign_labels(db, pairs)
 
+    # 하이웍스 CID 주소록 — 번호→이름 배치 조회(격리: 실패해도 번호 표시).
+    from app.services.hiworks import _digits, lookup_names
+
+    cid = lookup_names(db, [t.phone for t in threads])
+
     rows: list[dict] = []
     for t in threads:
         key = (t.caller, t.phone)
         last_channel = channels.get(key, "sms")
-        row = _service_thread_to_ts(t, last_channel)
+        contact = cid.get(_digits(t.phone))
+        row = _service_thread_to_ts(
+            t, last_channel, contact["display"] if contact else None
+        )
         label = labels.get(key)
         if label:
             row["lastCampaign"] = label
@@ -283,6 +298,11 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
     last_channel = _batch_last_mt_channels(db, pair).get((caller, phone), "sms")
     label = _batch_last_campaign_labels(db, pair).get((caller, phone))
 
+    # 하이웍스 CID — 이 고객 번호의 표시명(격리: 실패 시 번호).
+    from app.services.hiworks import _digits, lookup_names
+
+    contact = lookup_names(db, [phone]).get(_digits(phone))
+
     detail: dict = {
         "id": tid,
         "name": phone,
@@ -292,6 +312,8 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         "channel": last_channel,
         "messages": [_service_message_to_ts(m) for m in messages],
     }
+    if contact:
+        detail["contactName"] = contact["display"]
     if unread:
         detail["unread"] = True
     if label:

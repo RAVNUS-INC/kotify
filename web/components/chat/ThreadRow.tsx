@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import type { ChatThread } from '@/types/chat';
 import { cn } from '@/lib/cn';
-import { formatPhone } from '@/lib/phone';
+import { threadDisplayName } from '@/lib/phone';
 
 export type ThreadRowProps = {
   thread: ChatThread;
@@ -38,7 +38,7 @@ export function ThreadRow({ thread, active = false, href }: ThreadRowProps) {
       {!unread && <span aria-hidden className="mt-1 inline-block h-1.5 w-1.5 shrink-0" />}
 
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-[11px] text-gray-9">
-        {(thread.name === thread.phone ? formatPhone(thread.phone) : thread.name).charAt(0)}
+        {threadDisplayName(thread).charAt(0)}
       </div>
 
       <div className="min-w-0 flex-1">
@@ -49,7 +49,7 @@ export function ThreadRow({ thread, active = false, href }: ThreadRowProps) {
               unread ? 'font-semibold text-ink' : 'text-ink',
             )}
           >
-            {thread.name === thread.phone ? formatPhone(thread.phone) : thread.name}
+            {threadDisplayName(thread)}
             {unread && <span className="sr-only"> — 읽지 않음</span>}
           </span>
           <span className="shrink-0 font-mono text-[11px] text-ink-dim">

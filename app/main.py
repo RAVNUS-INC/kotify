@@ -205,6 +205,7 @@ from app.routes.contacts import router as contacts_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.groups import router as groups_router
 from app.routes.health import router as health_router
+from app.routes.hiworks import router as hiworks_router
 from app.routes.notifications import router as notifications_router
 from app.routes.numbers import router as numbers_router
 from app.routes.reports import router as reports_router
@@ -229,6 +230,7 @@ app.include_router(audit_router)
 app.include_router(notifications_router)
 app.include_router(reports_router)
 app.include_router(search_router)
+app.include_router(hiworks_router)
 
 
 # ── 미들웨어: 사용자 컨텍스트 주입 ───────────────────────────────────────────

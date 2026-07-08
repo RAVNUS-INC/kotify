@@ -18,6 +18,11 @@ export type ProviderPublicFields = {
   /** 아웃바운드 알림(고객 회신 → n8n). "true"/"false" 문자열. */
   n8nNotifyEnabled: string;
   n8nNotifyUrl: string;
+  /** 하이웍스 CID 주소록 MySQL 접속정보(비밀번호 제외). */
+  hiworksMysqlHost: string;
+  hiworksMysqlPort: string;
+  hiworksMysqlDb: string;
+  hiworksMysqlUser: string;
 };
 
 export type ProviderSecretInfo = {
@@ -33,6 +38,7 @@ export type ProviderSettings = {
     msghubApiPwd: ProviderSecretInfo;
     sessionSecret: ProviderSecretInfo;
     msghubWebhookToken: ProviderSecretInfo;
+    hiworksMysqlPassword: ProviderSecretInfo;
   };
 };
 
@@ -43,6 +49,7 @@ export type ProviderPatchInput = Partial<
     msghubApiPwd: string;
     sessionSecret: string;
     msghubWebhookToken: string;
+    hiworksMysqlPassword: string;
   }
 >;
 

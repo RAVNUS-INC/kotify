@@ -3,7 +3,7 @@ import type { Route } from 'next';
 import type { ChatThread } from '@/types/chat';
 import { Badge, Button, EmptyState, Icon } from '@/components/ui';
 import { cn } from '@/lib/cn';
-import { formatPhone } from '@/lib/phone';
+import { formatPhone, threadDisplayName } from '@/lib/phone';
 
 export type ThreadPreviewProps = {
   thread?: ChatThread;
@@ -44,11 +44,11 @@ export function ThreadPreview({ thread }: ThreadPreviewProps) {
                 'bg-gray-3',
               )}
             >
-              {(thread.name === thread.phone ? formatPhone(thread.phone) : thread.name).charAt(0)}
+              {threadDisplayName(thread).charAt(0)}
             </div>
             <div>
               <div className="text-base font-semibold text-ink">
-                {thread.name === thread.phone ? formatPhone(thread.phone) : thread.name}
+                {threadDisplayName(thread)}
                 {thread.unread && (
                   <Badge kind="brand" className="ml-2">
                     새 메시지

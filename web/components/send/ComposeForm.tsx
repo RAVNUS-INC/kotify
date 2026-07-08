@@ -16,6 +16,11 @@ import {
 } from '@/components/ui';
 import type { UploadedAttachment } from '@/lib/campaigns-client';
 import { apiSend } from '@/lib/csrf-client';
+import {
+  lookupHiworks,
+  toDigits,
+  type HiworksLookupResult,
+} from '@/lib/hiworks-client';
 import { formatPhone } from '@/lib/phone';
 import type { SenderNumber } from '@/types/number';
 import { AttachmentPicker } from './AttachmentPicker';
@@ -66,6 +71,8 @@ export function ComposeForm() {
   const [senderError, setSenderError] = useState<string | null>(null);
   const [sender, setSender] = useState<string>('');
   const [recipients, setRecipients] = useState<string[]>([]);
+  // 하이웍스 CID — 입력한 수신자 번호의 주소록 이름 미리보기(격리: 실패 시 빈 맵).
+  const [cidNames, setCidNames] = useState<HiworksLookupResult>({});
   const [message, setMessage] = useState('');
   // 기본값 없음 — 사용자가 일반/RCS 를 직접 선택해야 발송 가능(침묵의 기본값 방지).
   const [sendChannel, setSendChannel] = useState<SendChannel | null>(null);
@@ -104,6 +111,25 @@ export function ComposeForm() {
       cancelled = true;
     };
   }, []);
+
+  // 수신자 번호 → 하이웍스 이름 조회. 300ms debounce + stale 방어. 실패는 무시.
+  useEffect(() => {
+    if (recipients.length === 0) {
+      setCidNames({});
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const result = await lookupHiworks(recipients);
+        if (!cancelled) setCidNames(result);
+      })();
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [recipients]);
 
   // bytes/bytesState 는 채널과 무관(본문 길이 한계 경고용)이라 항상 계산.
   // cost/channel 은 전송 방식 선택 후에만 표시(아래 channelChosen 게이트).
@@ -239,6 +265,36 @@ export function ComposeForm() {
             maxChips={1000}
             invalid={recipientsState === 'err'}
           />
+          {(() => {
+            const matched = recipients
+              .map((r) => ({ phone: r, cid: cidNames[toDigits(r)] }))
+              .filter((x) => x.cid);
+            if (matched.length === 0) return null;
+            return (
+              <div className="mt-2 rounded border border-line bg-gray-1 p-2 text-[12px] text-ink-muted">
+                <span className="text-ink-dim">주소록 매칭 </span>
+                <span className="font-medium text-ink">
+                  {matched.length}/{recipients.length}명
+                </span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {matched.slice(0, 12).map((x) => (
+                    <span
+                      key={x.phone}
+                      className="rounded bg-surface px-1.5 py-0.5 text-[11.5px] text-ink"
+                      title={formatPhone(x.phone)}
+                    >
+                      {x.cid!.display}
+                    </span>
+                  ))}
+                  {matched.length > 12 && (
+                    <span className="px-1 py-0.5 text-ink-dim">
+                      외 {matched.length - 12}명
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </Field>
 
         <Field label="CSV 업로드" hint="수신자 목록을 일괄 추가 (준비 중)">

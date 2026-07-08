@@ -9,6 +9,7 @@ import {
   type ProviderPatchInput,
   type ProviderSettings,
 } from '@/lib/settings';
+import { testHiworksConnection } from '@/lib/hiworks-client';
 import { Button, Check, Field, Icon, Input } from '@/components/ui';
 
 export type ProviderSettingsFormProps = {
@@ -43,6 +44,11 @@ export function ProviderSettingsForm({
     initial.public.n8nNotifyEnabled === 'true',
   );
   const [n8nNotifyUrl, setN8nNotifyUrl] = useState(initial.public.n8nNotifyUrl);
+  // 하이웍스 주소록(CID) 조회용 MySQL 접속정보 — 비밀번호 제외.
+  const [hiworksHost, setHiworksHost] = useState(initial.public.hiworksMysqlHost);
+  const [hiworksPort, setHiworksPort] = useState(initial.public.hiworksMysqlPort || '3306');
+  const [hiworksDb, setHiworksDb] = useState(initial.public.hiworksMysqlDb || 'asterisk');
+  const [hiworksUser, setHiworksUser] = useState(initial.public.hiworksMysqlUser);
 
   // 시크릿 state — 항상 빈 문자열 시작.
   const [keycloakClientSecret, setKeycloakClientSecret] = useState('');
@@ -50,10 +56,12 @@ export function ProviderSettingsForm({
   const [msghubApiPwd, setMsghubApiPwd] = useState('');
   const [sessionSecret, setSessionSecret] = useState('');
   const [msghubWebhookToken, setMsghubWebhookToken] = useState('');
+  const [hiworksPassword, setHiworksPassword] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingN8n, setTestingN8n] = useState(false);
+  const [testingHiworks, setTestingHiworks] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const onSubmit = async (e: FormEvent) => {
@@ -75,6 +83,12 @@ export function ProviderSettingsForm({
       // 정책 회피). URL 은 값이 있을 때만 전송(빈칸 저장 시 기존값 보존).
       payload.n8nNotifyEnabled = n8nNotifyEnabled ? 'true' : 'false';
       if (n8nNotifyUrl.trim()) payload.n8nNotifyUrl = n8nNotifyUrl.trim();
+      // 하이웍스 CID 조회용 MySQL 접속정보 — 값 있을 때만 전송(빈칸 저장 시 기존값 보존).
+      if (hiworksHost.trim()) payload.hiworksMysqlHost = hiworksHost.trim();
+      if (hiworksPort.trim()) payload.hiworksMysqlPort = hiworksPort.trim();
+      if (hiworksDb.trim()) payload.hiworksMysqlDb = hiworksDb.trim();
+      if (hiworksUser.trim()) payload.hiworksMysqlUser = hiworksUser.trim();
+      if (hiworksPassword) payload.hiworksMysqlPassword = hiworksPassword;
     } else {
       if (keycloakIssuer.trim()) payload.keycloakIssuer = keycloakIssuer.trim();
       if (keycloakClientId.trim()) payload.keycloakClientId = keycloakClientId.trim();
@@ -91,6 +105,7 @@ export function ProviderSettingsForm({
       setMsghubApiPwd('');
       setSessionSecret('');
       setMsghubWebhookToken('');
+      setHiworksPassword('');
       setMsg({ kind: 'ok', text: '저장됨' });
       router.refresh();
     } catch (err) {
@@ -136,6 +151,23 @@ export function ProviderSettingsForm({
       });
     } finally {
       setTestingN8n(false);
+    }
+  };
+
+  const onTestHiworks = async () => {
+    if (testingHiworks) return;
+    setTestingHiworks(true);
+    setMsg(null);
+    try {
+      const r = await testHiworksConnection();
+      setMsg({ kind: 'ok', text: `✓ ${r.message}` });
+    } catch (err) {
+      setMsg({
+        kind: 'err',
+        text: err instanceof Error ? err.message : '하이웍스 연결 실패',
+      });
+    } finally {
+      setTestingHiworks(false);
     }
   };
 
@@ -302,6 +334,75 @@ export function ProviderSettingsForm({
         </section>
       ) : null}
 
+      {section === 'messaging' ? (
+        <section
+          aria-label="하이웍스 주소록 설정"
+          className="rounded-lg border border-line bg-surface p-5"
+        >
+          <header className="mb-4">
+            <h2 className="text-base font-semibold text-ink">
+              하이웍스 주소록 (CID)
+            </h2>
+            <p className="mt-0.5 text-[12.5px] text-ink-muted">
+              수신 전화·문자의 발신자를 하이웍스 공유 주소록 이름으로
+              표시합니다. 별도 MySQL(cid_lookup)을 읽기 전용으로 조회합니다.
+            </p>
+          </header>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="호스트">
+              <Input
+                value={hiworksHost}
+                onChange={(e) => setHiworksHost(e.target.value)}
+                placeholder="10.0.5.209"
+                disabled={submitting}
+              />
+            </Field>
+            <Field label="포트">
+              <Input
+                value={hiworksPort}
+                onChange={(e) => setHiworksPort(e.target.value)}
+                placeholder="3306"
+                disabled={submitting}
+              />
+            </Field>
+            <Field label="DB">
+              <Input
+                value={hiworksDb}
+                onChange={(e) => setHiworksDb(e.target.value)}
+                placeholder="asterisk"
+                disabled={submitting}
+              />
+            </Field>
+            <Field label="사용자">
+              <Input
+                value={hiworksUser}
+                onChange={(e) => setHiworksUser(e.target.value)}
+                placeholder="asterisk_ro"
+                disabled={submitting}
+              />
+            </Field>
+            <Field
+              label="비밀번호"
+              hint={secretHint(initial.secrets.hiworksMysqlPassword)}
+            >
+              <Input
+                type="password"
+                value={hiworksPassword}
+                onChange={(e) => setHiworksPassword(e.target.value)}
+                placeholder={
+                  initial.secrets.hiworksMysqlPassword.configured
+                    ? '변경 시에만 입력'
+                    : '미설정'
+                }
+                autoComplete="new-password"
+                disabled={submitting}
+              />
+            </Field>
+          </div>
+        </section>
+      ) : null}
+
       {section === 'security' ? (
         <>
           <section
@@ -434,6 +535,16 @@ export function ProviderSettingsForm({
                 icon={<Icon name="zap" size={12} />}
               >
                 {testingN8n ? 'n8n 테스트 중…' : 'n8n 테스트'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                onClick={onTestHiworks}
+                disabled={submitting || testingHiworks}
+                icon={<Icon name="database" size={12} />}
+              >
+                {testingHiworks ? '테스트 중…' : '연결 테스트'}
               </Button>
             </>
           ) : null}

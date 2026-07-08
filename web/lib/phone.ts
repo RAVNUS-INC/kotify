@@ -39,3 +39,19 @@ export function formatPhone(raw: string | null | undefined): string {
   // 규칙 미상 — 숫자만 반환(일관성 우선)
   return d;
 }
+
+/**
+ * 대화방/연락처 표시명 결정.
+ * 우선순위: 하이웍스 CID 이름(contactName) > 저장된 이름(name, 번호와 다를 때)
+ *           > 번호 포맷(formatPhone).
+ * name 이 phone 과 같으면 "이름 미연결" 상태이므로 번호를 하이픈 포맷해 보여준다.
+ */
+export function threadDisplayName(t: {
+  contactName?: string;
+  name?: string;
+  phone: string;
+}): string {
+  if (t.contactName && t.contactName.trim()) return t.contactName;
+  if (t.name && t.name !== t.phone) return t.name;
+  return formatPhone(t.phone);
+}

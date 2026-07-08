@@ -16,6 +16,8 @@ export type ChatThread = {
   id: string;
   name: string;
   phone: string;
+  /** 하이웍스 CID 주소록 표시명(있으면). 예: "홍길동 부장 (레이븐어스)". */
+  contactName?: string;
   preview: string;
   /** "HH:MM" */
   time: string;

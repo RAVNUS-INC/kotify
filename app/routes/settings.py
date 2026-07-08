@@ -402,12 +402,18 @@ _PROVIDER_PUBLIC_KEYS: dict[str, str] = {
     # 저장(마스킹 불필요, 운영자가 값 확인 가능해야 함). enabled 는 "true"/"false".
     "n8nNotifyEnabled": "notify.n8n_enabled",
     "n8nNotifyUrl": "notify.n8n_url",
+    # 하이웍스 CID 주소록 MySQL — 접속정보 중 password 만 시크릿, 나머지는 공개.
+    "hiworksMysqlHost": "hiworks.mysql_host",
+    "hiworksMysqlPort": "hiworks.mysql_port",
+    "hiworksMysqlDb": "hiworks.mysql_db",
+    "hiworksMysqlUser": "hiworks.mysql_user",
 }
 _PROVIDER_SECRET_KEYS: dict[str, str] = {
     "keycloakClientSecret": "keycloak.client_secret",
     "msghubApiKey": "msghub.api_key",
     "msghubApiPwd": "msghub.api_pwd",
     "sessionSecret": "session.secret",
+    "hiworksMysqlPassword": "hiworks.mysql_password",
     # msghub 가 우리 서버로 report/MO 를 POST 할 때 path 에 포함하는 공유
     # 시크릿. msghub 콘솔에 등록하는 URL 에 같이 들어가고, 수신 시 우리가
     # 일치 여부를 검증. 새로 쓰면 기존 콘솔 등록 URL 이 즉시 무효화됨.
@@ -428,11 +434,17 @@ class ProviderPatchBody(BaseModel):
     # 아웃바운드 알림 (n8n). enabled 는 "true"/"false" 문자열, url 은 n8n Webhook URL.
     n8nNotifyEnabled: str | None = None
     n8nNotifyUrl: str | None = None
+    # 하이웍스 CID MySQL 접속정보 (공개 필드). password 는 아래 시크릿에.
+    hiworksMysqlHost: str | None = None
+    hiworksMysqlPort: str | None = None
+    hiworksMysqlDb: str | None = None
+    hiworksMysqlUser: str | None = None
     # 시크릿 (Fernet 암호화 저장) — 빈 값/미제공 시 기존 값 보존
     keycloakClientSecret: str | None = None
     msghubApiKey: str | None = None
     msghubApiPwd: str | None = None
     sessionSecret: str | None = None
+    hiworksMysqlPassword: str | None = None
     # msghub 웹훅 토큰 — msghub 콘솔의 report/MO 수신 URL 에 포함된다. 새 값
     # 저장 시 기존 msghub 등록 URL 이 무효화되니 콘솔 URL 도 같이 교체 필요.
     msghubWebhookToken: str | None = None
