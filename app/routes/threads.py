@@ -445,16 +445,33 @@ def api_mark_read(
 
 @router.get("/chat/stream")
 async def chat_stream() -> StreamingResponse:
-    """SSE — 현재는 30초 keep-alive ping 만. 실제 이벤트(message.new,
-    thread.updated, session.expired) 는 DB trigger / PubSub 도입 후 발행."""
+    """SSE — 대화방 실시간 갱신 이벤트 스트림.
+
+    고객 회신(MO) 수신 시 webhook 이 events.publish("message.new") 를 호출하면
+    여기 연결된 브라우저로 즉시 전달되고, 프론트(useChatStream)가 router.refresh()
+    로 화면을 갱신한다. 이벤트가 없으면 25초마다 ping 을 보내 연결을 유지한다
+    (프록시 idle timeout 방지).
+
+    전제: uvicorn --workers 1 (app/services/events.py 주석 참고).
+    """
+    from app.services import events
 
     async def gen():
+        q = events.subscribe()
         try:
+            # 연결 직후 1회 ping — 프론트 open 이벤트로 backoff 리셋 유도.
+            yield "event: ping\ndata: .\n\n"
             while True:
-                yield "event: ping\ndata: .\n\n"
-                await asyncio.sleep(30)
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=25)
+                except TimeoutError:
+                    yield "event: ping\ndata: .\n\n"  # keep-alive
+                    continue
+                yield f"event: {event}\ndata: .\n\n"
         except asyncio.CancelledError:
             return
+        finally:
+            events.unsubscribe(q)  # 연결 종료 — 반드시 해제(누수 방지)
 
     return StreamingResponse(
         gen(),

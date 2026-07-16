@@ -1,6 +1,7 @@
 import { PageHeader } from '@/components/shell';
 import {
   ChatFilters,
+  ChatLiveRefresh,
   ThreadList,
   ThreadView,
   type ChatFilter,
@@ -54,6 +55,8 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
     // min-width 를 Tailwind 로 직접 선언해 specificity 충돌을 원천 제거.
     // pt-8=32 / px-7=28 / pb-5=20 — `.k-page` 의 32/28/48 에서 bottom 만 축소.
     <div className="flex h-[calc(100dvh_-_52px)] min-h-0 min-w-0 flex-col px-7 pb-5 pt-8">
+      {/* SSE 구독 — 고객 회신 수신 시 즉시 갱신(UI 없음). */}
+      <ChatLiveRefresh />
       <PageHeader
         title="대화방"
         sub={`${threads.length}개 대화 · 미답 ${unreadCount}건`}

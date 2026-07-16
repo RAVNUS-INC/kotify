@@ -334,6 +334,17 @@ async def receive_mo(
         payload.mo_cnt,
     )
 
+    # 대화방 실시간 갱신 — 접속 중인 브라우저(SSE)로 즉시 알린다. 이벤트 발행은
+    # 인메모리 큐에 넣기만 하는 논블로킹 연산이고, publish 자체가 예외를 삼키지만
+    # 방어적으로 한 번 더 감싼다(알림 실패가 msghub success 를 막지 않게).
+    if saved_mos:
+        try:
+            from app.services import events
+
+            events.publish("message.new")
+        except Exception:  # noqa: BLE001
+            log.debug("SSE 이벤트 발행 실패(무시)", exc_info=True)
+
     # 아웃바운드 알림 (n8n → 하이웍스 등). MO 저장이 끝난 뒤에만 처리한다.
     # 전송은 응답 반환 후 BackgroundTask 에서 수행 → msghub success 응답이
     # n8n 지연/장애에 묶이지 않는다(인바운드 처리량 보호). 페이로드는 DB 세션이
