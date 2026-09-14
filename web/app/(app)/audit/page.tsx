@@ -1,3 +1,5 @@
+import { getSession, hasRole } from '@/lib/auth';
+import { ForbiddenNotice } from '@/components/error';
 import { PageHeader } from '@/components/shell';
 import { AuditTable } from '@/components/audit';
 import { Icon, LinkSegmented, ListSearchInput } from '@/components/ui';
@@ -19,6 +21,15 @@ type PageProps = {
 };
 
 export default async function AuditPage({ searchParams }: PageProps) {
+  // 감사 로그 백엔드는 require_role("admin") 전용. 비admin 진입 시 fetchAudit 가
+  // 403 → 서버 렌더 크래시하므로 역할을 먼저 확인해 안내 페이지를 렌더한다.
+  const session = await getSession();
+  if (!session || !hasRole(session, 'admin')) {
+    return (
+      <ForbiddenNotice description="감사 로그는 관리자만 열람할 수 있습니다. 필요하면 관리자에게 권한을 요청하세요." />
+    );
+  }
+
   const q = searchParams?.q;
   const action = searchParams?.action ?? 'all';
   const entries = await fetchAudit({ q, action });

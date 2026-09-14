@@ -96,6 +96,31 @@ export async function apiFetch<T>(
     },
   });
 
+  // FastAPI 는 세션 만료·초기설정 미완료 시 303 으로 /auth/login·/setup 같은
+  // 비-API(HTML) 페이지로 돌려보낸다. 기본 redirect:'follow' 가 이를 따라가면
+  // HTML 응답이 와서 아래 res.json() 이 'invalid_json' 으로 오분류되어(=원인 불명
+  // 크래시) 버린다. 최종 착지 경로가 인증/설정 페이지면 명확한 에러로 변환한다.
+  // (경로 슬래시 정규화용 307 은 최종 URL 이 여전히 API 경로라 여기 걸리지 않으므로
+  //  기존 동작에 회귀가 없다.)
+  if (res.redirected) {
+    let landedPath = '';
+    try {
+      landedPath = new URL(res.url).pathname;
+    } catch {
+      landedPath = '';
+    }
+    if (/^\/(auth\/login|login|setup)(\/|$)/.test(landedPath)) {
+      const needsSetup = landedPath.includes('setup');
+      throw new ApiError(
+        303,
+        needsSetup ? 'setup_required' : 'auth_required',
+        needsSetup
+          ? '초기 설정이 완료되지 않았습니다. 관리자에게 문의하세요.'
+          : '로그인이 필요합니다. 다시 로그인해 주세요.',
+      );
+    }
+  }
+
   let body: ApiEnvelope<T>;
   try {
     body = (await res.json()) as ApiEnvelope<T>;
