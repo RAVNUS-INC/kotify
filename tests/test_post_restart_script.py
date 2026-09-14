@@ -36,6 +36,21 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_from_parent_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    """부모 git 프로세스가 넘긴 저장소 지정 환경변수(GIT_DIR 등)를 지운다.
+
+    링크드 워크트리에서 pre-push 훅이 돌면 git 이 GIT_DIR 을 실제 저장소의 절대
+    경로로 넘긴다. 그대로 두면 임시 저장소용 git 명령(init·commit·reset --hard)이
+    실제 저장소에 적용돼 브랜치가 옮겨지거나 core.bare 가 켜진다.
+    """
+    names = subprocess.run(
+        ["git", "rev-parse", "--local-env-vars"], check=True, capture_output=True, text=True
+    ).stdout.split()
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+
+
 _STUB = """#!/usr/bin/env bash
 name=$(basename "$0")
 echo "${name} $*" >> "${STUB_CALLS}"
