@@ -389,6 +389,7 @@ def delete_number(
     return {"data": {"id": nid, "deleted": True}}
 
 
-# 쓰기 라우트를 모두 정의한 뒤에 포함해야 한다 (include_router 는 호출 시점의
-# 라우트만 복사).
+# 쓰기 라우트를 모두 정의한 뒤에 포함해야 한다. FastAPI 0.136 이하의 include_router 는
+# 호출 시점의 라우트만 복사한다 (0.137+ 는 라우터를 트리로 두어 나중 라우트도 반영하지만,
+# 환경마다 설치된 FastAPI 버전이 달라 이전 동작 기준으로 맞춘다).
 router.include_router(admin_router)

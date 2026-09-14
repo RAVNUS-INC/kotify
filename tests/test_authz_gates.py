@@ -98,9 +98,19 @@ def _add_audit(db_factory, action: str, target: str | None = None) -> None:
 
 
 def _numbers_write_routes() -> list[tuple[str, str]]:
+    # FastAPI 0.137+ 는 include_router 한 라우터를 복사하지 않고 트리로 보관해 app.routes 에
+    # 하위 라우트가 펼쳐지지 않는다. 그래서 0.137.2 에 추가된 iter_route_contexts 로 순회한다.
+    # 0.137.0~0.137.1 은 두 방식 모두 빈 목록이 되지만 아래 수집 테스트가 실패로 드러낸다.
+    try:
+        from fastapi.routing import iter_route_contexts
+    except ImportError:  # 0.136 이하 — app.routes 가 이미 평탄한 라우트 목록
+        candidates = app.routes
+    else:
+        candidates = iter_route_contexts(app.routes)
+
     routes = set()
-    for route in app.routes:
-        path = getattr(route, "path", "")
+    for route in candidates:
+        path = getattr(route, "path", None) or ""
         if not path.startswith("/numbers"):
             continue
         for method in (getattr(route, "methods", None) or set()) & _WRITE_METHODS:
