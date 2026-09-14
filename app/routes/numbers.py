@@ -28,9 +28,11 @@ from app.models import Caller, Campaign, User
 from app.security.csrf import verify_csrf
 from app.services import audit
 
-# 발신번호 관리는 admin 전용
+# 조회(GET)는 인증된 사용자면 가능 — 발송 담당자(sender)도 발신번호를 봐야
+# 발송 화면에서 번호를 고를 수 있다. 등록/수정/삭제 등 관리 작업은 각 라우트에서
+# require_role("admin") 로 개별 제한한다 (프론트의 canManage 설계와 일치).
 router = APIRouter(
-    dependencies=[Depends(require_role("admin")), Depends(require_setup_complete)],
+    dependencies=[Depends(require_user), Depends(require_setup_complete)],
 )
 
 KST = ZoneInfo("Asia/Seoul")
@@ -174,7 +176,11 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-@router.post("/numbers", dependencies=[Depends(verify_csrf)], response_model=None)
+@router.post(
+    "/numbers",
+    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
+    response_model=None,
+)
 def create_number(
     body: CallerCreateBody,
     user: User = Depends(require_user),
@@ -231,7 +237,7 @@ def create_number(
 
 @router.post(
     "/numbers/{nid}/toggle",
-    dependencies=[Depends(verify_csrf)],
+    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
     response_model=None,
 )
 def toggle_number(
@@ -284,7 +290,7 @@ def toggle_number(
 
 @router.post(
     "/numbers/{nid}/default",
-    dependencies=[Depends(verify_csrf)],
+    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
     response_model=None,
 )
 def set_default_number(
@@ -345,7 +351,7 @@ def set_default_number(
 
 @router.delete(
     "/numbers/{nid}",
-    dependencies=[Depends(verify_csrf)],
+    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
     response_model=None,
 )
 def delete_number(
