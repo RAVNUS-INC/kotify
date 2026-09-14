@@ -74,8 +74,9 @@ export function ComposeForm() {
   // 하이웍스 CID — 입력한 수신자 번호의 주소록 이름 미리보기(격리: 실패 시 빈 맵).
   const [cidNames, setCidNames] = useState<HiworksLookupResult>({});
   const [message, setMessage] = useState('');
-  // 기본값 없음 — 사용자가 일반/RCS 를 직접 선택해야 발송 가능(침묵의 기본값 방지).
-  const [sendChannel, setSendChannel] = useState<SendChannel | null>(null);
+  // 기본값 RCS — 라디오로 선택 상태가 보이고 견적도 즉시 표시된다.
+  // 백엔드는 여전히 sendChannel 을 필수로 받으므로 API 직접 호출은 명시가 필요하다.
+  const [sendChannel, setSendChannel] = useState<SendChannel>('rcs');
   const [mode, setMode] = useState<SendMode>('now');
   const [sendAt, setSendAt] = useState('');
   const [confirmed, setConfirmed] = useState(false);
@@ -132,13 +133,10 @@ export function ComposeForm() {
     };
   }, [recipients]);
 
-  // bytes/bytesState 는 채널과 무관(본문 길이 한계 경고용)이라 항상 계산.
-  // cost/channel 은 전송 방식 선택 후에만 표시(아래 channelChosen 게이트).
   const { bytes, channel, cost, bytesState } = useMemo(
-    () => computeEstimate(message, recipients.length, attachment != null, sendChannel ?? 'rcs'),
+    () => computeEstimate(message, recipients.length, attachment != null, sendChannel),
     [message, recipients.length, attachment, sendChannel],
   );
-  const channelChosen = sendChannel != null;
 
   const recipientsState: 'warn' | 'err' | undefined =
     recipients.length > 1000 ? 'err' : recipients.length > 500 ? 'warn' : undefined;
@@ -151,7 +149,6 @@ export function ComposeForm() {
     message.trim() !== '' &&
     bytesState !== 'err' &&
     (mode === 'now' || sendAt !== '') &&
-    channelChosen &&
     confirmed &&
     !submitting;
 
@@ -339,11 +336,7 @@ export function ComposeForm() {
           label="메시지"
           htmlFor="msg"
           required
-          hint={
-            channelChosen
-              ? `자동 채널: ${sendChannel === 'rcs' ? 'RCS·' : ''}${channel} · ${bytes} bytes`
-              : `${bytes} bytes · 전송 방식을 선택하세요`
-          }
+          hint={`자동 채널: ${sendChannel === 'rcs' ? 'RCS·' : ''}${channel} · ${bytes} bytes`}
           counter={{
             value: `${bytes} bytes`,
             state: bytesState,
@@ -393,12 +386,10 @@ export function ComposeForm() {
             footer={
               <>
                 <span className="font-mono">
-                  {bytes} bytes{channelChosen ? ` · ${channel}` : ''}
+                  {bytes} bytes · {channel}
                 </span>
                 <span className="font-mono text-ink-dim">
-                  {channelChosen
-                    ? `예상 ${recipients.length}건 · ₩${cost.toLocaleString('ko-KR')}`
-                    : '전송 방식 선택 후 견적'}
+                  예상 {recipients.length}건 · ₩{cost.toLocaleString('ko-KR')}
                 </span>
               </>
             }
