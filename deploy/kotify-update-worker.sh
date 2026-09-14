@@ -16,7 +16,8 @@
 #   - pnpm install + build
 #   - .next/static / public merge-copy (race 회피)
 #   - chown — 서비스 사용자가 읽을 수 있게
-#   - systemctl restart (2초 딜레이 비동기)
+#   - 재시작 예약 (2초 딜레이 비동기) — kotify-post-restart.sh 가 재시작 후
+#     기동을 확인하고, 실패하면 이전 커밋으로 롤백한다
 
 set -euo pipefail
 
@@ -141,19 +142,23 @@ chown -R "${SERVICE_USER}:${SERVICE_GROUP}" \
     "${WEB_DIR}/.next" \
     "${WEB_DIR}/node_modules" 2>/dev/null || true
 
-# 빌드 완료 — 이후 실패는 롤백 불가 (코드는 이미 바뀌었고 서비스 재시작만 남음).
+# 빌드 완료 — 이후 기동 실패의 롤백은 kotify-post-restart.sh 가 맡는다.
 trap - ERR
 
+NEW_HEAD=$(git -C "${INSTALL_DIR}" rev-parse HEAD)
 NEW_HASH=$(git -C "${INSTALL_DIR}" rev-parse --short HEAD)
 
 # Phase 4: 재시작 (2초 지연, 비동기).
 # unit 이름 은 PID 뿐 아니라 timestamp 까지 포함해 동시 실행 충돌 방지.
 # (flock 이 선제 차단하지만 이중 방어.)
+# systemd-run unit 에서 재시작 → 기동 확인 → 실패 시 롤백까지 수행한다.
+# systemd-run 이 없는 fallback 경로는 kotify 서비스 cgroup 안에서 돌아 재시작 때
+# 함께 종료되므로 기동 확인 없이 재시작만 한다.
 echo '{"phase": "restart_scheduled"}'
 UNIT_NAME="kotify-restart-$(date +%s)-$$"
 if command -v systemd-run >/dev/null 2>&1; then
     systemd-run --on-active=2s --unit="${UNIT_NAME}" \
-        /bin/systemctl restart "${SERVICE_API}" "${SERVICE_WEB}" >/dev/null 2>&1 || \
+        /bin/bash "${INSTALL_DIR}/deploy/kotify-post-restart.sh" "${PREV_HEAD}" "${NEW_HEAD}" >/dev/null 2>&1 || \
         (nohup bash -c "sleep 2 && systemctl restart ${SERVICE_API} ${SERVICE_WEB}" >/dev/null 2>&1 &)
 else
     nohup bash -c "sleep 2 && systemctl restart ${SERVICE_API} ${SERVICE_WEB}" >/dev/null 2>&1 &

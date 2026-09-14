@@ -152,7 +152,9 @@ claudedocs/E2E-CHECKLIST.md
 | `kotify.service` | systemd 유닛 — FastAPI (uvicorn 8080) |
 | `kotify-web.service` | systemd 유닛 — Next.js (node server 3000) |
 | `kotify-sudoers` | 웹 UI 원클릭 업데이트 허용용 sudoers fragment |
-| `kotify-update.sh` | `/settings` → System → Update 에서 호출하는 스크립트 (git pull + 양쪽 재빌드 + systemd restart) |
+| `kotify-update.sh` | `/settings` → System → Update 에서 호출하는 스크립트 (git pull 후 worker 로 넘김) |
+| `kotify-update-worker.sh` | 실제 업데이트 (의존성·마이그레이션·빌드, 실패 시 git·DB 롤백) + 재시작 예약 |
+| `kotify-post-restart.sh` | 재시작 후 기동 확인 — 실패하면 이전 커밋으로 롤백·재빌드 |
 | `kotify-backup.sh` | SQLite DB 일일 백업 스크립트 |
 | `kotify-backup.cron` | 백업 cron 설정 (`/etc/cron.d/`에 복사) |
 | `npm-config.md` | NPM Proxy Host 설정 가이드 |
@@ -178,7 +180,13 @@ systemctl restart kotify kotify-web
 # 웹 UI 업데이트 (원클릭)
 # /settings → System → Update 버튼
 # 내부적으로 sudo /opt/kotify/deploy/kotify-update.sh 실행:
-#   git pull → pip install -e . → pnpm install && pnpm build → systemctl restart
+#   git pull → pip install -e . → alembic upgrade → pnpm install && pnpm build
+#   (여기까지 실패하면 git·DB 자동 롤백, 재시작 안 함)
+#   → systemd-run 으로 kotify-post-restart.sh: 재시작 → /healthz 가 새 버전으로
+#     응답하는지 최대 120초 확인 → 실패하면 이전 커밋으로 롤백·재빌드·재시작
+#     (이번 배포에 마이그레이션 변경이 있었을 때만 DB 를 pre-migrate 백업으로 복원)
+# 결과 확인:
+tail -n 50 /var/log/kotify/update.log
 
 # 백업 수동 실행
 sudo -u kotify /opt/kotify/deploy/kotify-backup.sh
