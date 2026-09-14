@@ -29,6 +29,18 @@ pnpm lint
 pnpm build
 ```
 
+### Pre-push checks (once per clone)
+
+GitHub Actions is not used — a tracked git hook runs the checks before every push.
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`.githooks/pre-push` runs `pytest`, `ruff check`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`,
+and stops the push if any fails, if there are uncommitted changes, or if the pushed commit is not
+the one checked out. Skip only in an emergency with `git push --no-verify`.
+
 ### Running both in dev
 
 Two terminals:
@@ -92,9 +104,9 @@ Open <http://localhost:3000>. Frontend proxies `/api/*` to the backend via `next
 1. Fork the repo
 2. Create a feature branch (`feat/…`, `fix/…`)
 3. Make your changes with tests
-4. Run the full verification matrix:
-   - Backend: `pytest`
-   - Frontend: `pnpm typecheck && pnpm lint && pnpm build`
+4. Run the full verification matrix (the pre-push hook covers all but `build`):
+   - Backend: `pytest && ruff check .`
+   - Frontend: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`
 5. Ensure every check passes
 6. Open a PR with clear description and any motion/bundle/a11y impact noted
 

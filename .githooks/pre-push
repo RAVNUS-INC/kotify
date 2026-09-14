@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# 푸시 전 로컬 검사 — GitHub Actions 를 쓰지 않으므로 여기서 CI 를 대신한다.
+#
+# 설치 (클론마다 1회):  git config core.hooksPath .githooks
+# 급할 때 건너뛰기:     git push --no-verify
+#
+# next build 는 넣지 않는다. 타입·린트 오류는 아래 검사에서 걸리고, 남는 빌드
+# 실패는 배포(kotify-update-worker.sh)가 실패 처리하며 자동 롤백한다.
+
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+# 푸시할 커밋이 지금 체크아웃한 커밋인지 — 아니면 검사한 코드와 푸시할 코드가 다르다.
+head_sha=$(git rev-parse HEAD)
+pushing=false
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+    [[ "${local_sha}" =~ ^0+$ ]] && continue # 원격 브랜치 삭제
+    pushing=true
+    if [[ "${local_sha}" != "${head_sha}" ]]; then
+        echo "pre-push: 체크아웃한 커밋(${head_sha:0:7})이 아닌 ${local_ref}(${local_sha:0:7})을 푸시합니다." >&2
+        echo "          검사 대상과 달라 중단합니다. 해당 커밋을 체크아웃한 뒤 푸시하세요." >&2
+        exit 1
+    fi
+done
+[[ "${pushing}" == true ]] || exit 0
+
+# 커밋하지 않은 변경이 있으면 테스트는 통과해도 푸시된 커밋은 깨져 있을 수 있다.
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "pre-push: 커밋하지 않은 변경이 있어 중단합니다 (검사 결과가 푸시될 코드와 달라짐)." >&2
+    git status --short >&2
+    echo "          커밋하거나 'git stash -u' 후 다시 푸시하세요." >&2
+    exit 1
+fi
+
+PY=python3
+[[ -x .venv/bin/python ]] && PY=.venv/bin/python
+
+if ! command -v pnpm >/dev/null 2>&1; then
+    echo "pre-push: pnpm 을 찾을 수 없습니다 (GUI 앱에서 푸시하면 PATH 에 없을 수 있음)." >&2
+    exit 1
+fi
+
+run() {
+    local name="$1"
+    shift
+    local out
+    out=$(mktemp)
+    local started=${SECONDS}
+    printf 'pre-push: %-9s ' "${name}"
+    if "$@" >"${out}" 2>&1; then
+        echo "ok ($((SECONDS - started))s)"
+        rm -f "${out}"
+    else
+        echo "실패"
+        cat "${out}" >&2
+        rm -f "${out}"
+        echo "pre-push: ${name} 실패로 푸시를 중단합니다. (급하면 git push --no-verify)" >&2
+        exit 1
+    fi
+}
+
+run pytest "${PY}" -m pytest -q -p no:warnings
+run ruff "${PY}" -m ruff check .
+run typecheck pnpm -C web run typecheck
+run lint pnpm -C web run lint
+run vitest pnpm -C web run test
