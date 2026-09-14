@@ -18,6 +18,7 @@ from app.msghub.codes import (
     CHAT_SESSION_CAP_KRW,
     CHAT_SESSION_MAX_UNITS,
     CHAT_SESSION_WINDOW_HOURS,
+    SUCCESS_CODE,
     chat_session_cost,
 )
 from app.services.compose import (
@@ -62,6 +63,39 @@ class ChatThread:
     unread: bool          # 안읽음 = 마지막 고객(MO) 메시지가 팀 read_at 이후
     mo_count: int
     mt_count: int
+
+
+SEND_CHANNELS = ("rcs", "sms")
+
+# 캠페인 message_type → 일반(직접) 발송 채널. 신규 행은 short/long/image, 과거 행은 SMS/LMS/MMS.
+_DIRECT_CHANNEL = {
+    "short": "SMS", "long": "LMS", "image": "MMS",
+    "SMS": "SMS", "LMS": "LMS", "MMS": "MMS",
+}
+
+
+def outbound_channel(
+    report_channel: str | None,
+    rcs_messagebase_id: str | None,
+    message_type: str | None,
+    cli_key: str | None,
+    status: str | None,
+) -> str:
+    """발신(OUT) 메시지의 표시 채널 — 리포트의 실제 도달 채널, 없으면 요청한 전송 방식.
+
+    Message.channel 은 웹훅 리포트가 와야 채워진다. 접수 직후·리포트 미도착·발송 실패
+    건은 비어 있어, 예전엔 무조건 SMS 로 표시되어 RCS 로 보낸 답장도 SMS 처럼 보였다.
+
+    cliKey 가 "-fb" 인 건은 RCS 요청이 실패해 직접 SMS/LMS/MMS 로 대체 발송된 것이다
+    (compose._send_chunk_direct, webhook._send_sms_fallback). 그 리포트가 오기 전(DONE
+    아님)엔 캠페인이 RCS 여도 대체 발송 채널로 표시한다.
+    """
+    direct = _DIRECT_CHANNEL.get(message_type or "", "SMS")
+    if (cli_key or "").endswith("-fb") and status != "DONE":
+        return direct
+    if report_channel:
+        return report_channel
+    return "RCS" if rcs_messagebase_id else direct
 
 
 def _coalesce_ts(*values: str | None) -> str:
@@ -263,7 +297,13 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
                 body=campaign.content or "",
                 timestamp=ts,
                 status=msg.status,
-                channel=msg.channel,
+                channel=outbound_channel(
+                    msg.channel,
+                    campaign.rcs_messagebase_id,
+                    campaign.message_type,
+                    msg.cli_key,
+                    msg.status,
+                ),
                 cost=msg.cost,
                 campaign_id=campaign.id,
                 msg_id=msg.id,
@@ -363,21 +403,64 @@ def validate_reply_content(content: str) -> dict:
     return result
 
 
-def _latest_reply_id(db: Session, caller: str, phone: str) -> str | None:
-    """(caller, phone) 의 최신 MO 에서 양방향 reply_id 를 가져온다. 없으면 None.
+def _fresh_reply_id(db: Session, caller: str, phone: str) -> str | None:
+    """(caller, phone) 의 양방향 reply_id — 24h 세션 안에 받은 최신 MO 것만. 없으면 None.
 
-    양방향(8원) 응답은 고객 MO 의 replyId 컨텍스트가 필요하다(webhook 이 저장).
+    양방향(8원) 응답은 고객 MO 의 replyId 컨텍스트가 필요하다(webhook 이 저장). 예전엔
+    나이 제한 없이 최신 replyId 를 썼는데, 세션이 지난 replyId 는 msghub 가 거부하거나
+    접수 후 리포트에서 실패하고, 후자는 webhook 이 단방향 RCS 를 건너뛰고 일반 SMS 로
+    대체 발송한다 — 며칠 뒤 답장이 SMS 로 나가던 경로. 세션 밖이면 None 을 돌려
+    호출자가 바로 단방향 RCS 로 보내게 한다.
+
+    mo_recv_dt(msghub KST)·received_at(ISO) 포맷이 섞일 수 있어 문자열 정렬 대신
+    parse_mixed_ts 로 시각을 비교한다.
     """
-    return db.execute(
-        select(MoMessage.reply_id)
-        .where(
+    rows = db.execute(
+        select(MoMessage.reply_id, MoMessage.mo_recv_dt, MoMessage.received_at).where(
             MoMessage.mo_callback == caller,
             MoMessage.mo_number == phone,
             MoMessage.reply_id.is_not(None),
         )
-        .order_by(func.coalesce(MoMessage.mo_recv_dt, MoMessage.received_at).desc())
+    ).all()
+    latest: tuple[datetime, str] | None = None
+    for r in rows:
+        ts = parse_mixed_ts(r.mo_recv_dt) or parse_mixed_ts(r.received_at)
+        if ts is not None and (latest is None or ts > latest[0]):
+            latest = (ts, r.reply_id)
+    if latest is None:
+        return None
+    if datetime.now(UTC) - latest[0] > timedelta(hours=CHAT_SESSION_WINDOW_HOURS):
+        return None
+    return latest[1]
+
+
+def default_send_channel(db: Session, phone: str) -> str | None:
+    """답장 전송 방식 기본값 — 이 번호로 가장 최근에 전달 성공한 발송의 전송 방식.
+
+    기준은 실제 도달 채널(Message.channel)이 아니라 요청한 전송 방식이다
+    (Campaign.rcs_messagebase_id 가 있으면 RCS, 없으면 일반). RCS 로 보냈으나 단말
+    사정으로 SMS 로 대체 도달한 건도 "rcs" 로 본다 — 도달 채널을 따르면 일시적 대체
+    한 번에 기본값이 일반으로 굳어 RCS 가 다시 끊긴다. 대체 도달은 SMS 단가(9원)라
+    RCS 를 유지해도 손해가 없다.
+
+    성공 = 리포트 수신(DONE) + 성공 코드. 접수 대기·실패 건은 건너뛴다. "최근" 은
+    Message.id(발송 순) 기준 — 혼합 포맷 시각의 문자열 정렬을 피한다. 전달 성공
+    이력이 없으면 None — 프론트가 새 발송 화면과 같은 기본값(RCS)을 쓴다.
+    """
+    row = db.execute(
+        select(Campaign.rcs_messagebase_id)
+        .join(Message, Message.campaign_id == Campaign.id)
+        .where(
+            Message.to_number == phone,
+            Message.status == "DONE",
+            Message.result_code == SUCCESS_CODE,
+        )
+        .order_by(Message.id.desc())
         .limit(1)
-    ).scalar_one_or_none()
+    ).first()
+    if row is None:
+        return None
+    return "rcs" if row.rcs_messagebase_id else "sms"
 
 
 async def send_reply(
@@ -387,20 +470,26 @@ async def send_reply(
     caller: str,
     phone: str,
     content: str,
+    send_channel: str = "rcs",
 ) -> Campaign:
-    """답장을 발송한다.
+    """답장을 대화방에서 고른 전송 방식(send_channel)으로 발송한다.
 
-    고객 MO 의 reply_id 가 있으면 RCS 양방향(CHAT, 8원)으로 응답하고, 없거나 양방향
-    발송이 실패하면 단방향 RCS(dispatch_campaign, 17원)로 fallback 한다 — 어느
-    경우든 답장은 전달된다.
+    - "rcs": 24h 세션 안의 고객 MO reply_id 가 있으면 RCS 양방향(CHAT, 8원)으로
+      응답하고, 없거나 양방향 요청이 즉시 실패하면 단방향 RCS(dispatch_campaign,
+      17원)로 fallback 한다. 양방향이 접수된 뒤 리포트에서 실패하면 webhook 이 일반
+      SMS 로 대체 발송한다(routes.webhook._send_sms_fallback) — 어느 경우든 답장은 전달된다.
+    - "sms"(일반): RCS 를 쓰지 않고 직접 SMS(9원)로 보낸다.
     """
+    if send_channel not in SEND_CHANNELS:
+        raise ValueError(f"전송 방식은 'rcs' 또는 'sms' 여야 합니다: {send_channel}")
+
     # H2: 답장 길이 검증 — 90바이트 초과 시 단방향 LMS 로 강등되어 양방향 세션이
     # 끊기므로 차단한다. ValueError 는 라우트에서 422 로 변환됨.
     check = validate_reply_content(content)
     if not check["ok"]:
         raise ValueError(check["error"])
 
-    reply_id = _latest_reply_id(db, caller, phone)
+    reply_id = _fresh_reply_id(db, caller, phone) if send_channel == "rcs" else None
     if reply_id:
         try:
             return await dispatch_chat_reply(
@@ -420,7 +509,8 @@ async def send_reply(
             )
             # fall through to 단방향
 
-    # reply_id 없음 또는 양방향 실패 → 단방향 RCS(17원). 어느 경우든 답장은 전달.
+    # rcs: reply_id 없음(세션 밖) 또는 양방향 실패 → 단방향 RCS(17원).
+    # sms: 일반 직접 발송(9원).
     return await dispatch_campaign(
         db=db,
         msghub_client=msghub_client,
@@ -430,5 +520,5 @@ async def send_reply(
         recipients=[phone],
         message_type="SMS",
         subject=None,
-        send_channel="rcs",
+        send_channel=send_channel,
     )

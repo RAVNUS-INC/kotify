@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,8 +32,10 @@ from app.services.chat import (
     ChatThread as ServiceChatThread,
 )
 from app.services.chat import (
+    default_send_channel,
     get_thread,
     list_threads,
+    outbound_channel,
     thread_unread,
 )
 from app.util.time import fmt_kst_hhmm
@@ -127,12 +130,29 @@ def _batch_last_mt_channels(
         .group_by(Campaign.caller_number, Message.to_number)
     ).subquery()
 
+    # 리포트 전(channel 비어 있음)이면 요청한 전송 방식으로 표시 — outbound_channel 참고.
     rows = db.execute(
-        select(subq.c.c, subq.c.p, Message.channel).join(
-            Message, Message.id == subq.c.last_id
+        select(
+            subq.c.c,
+            subq.c.p,
+            Message.channel,
+            Message.cli_key,
+            Message.status,
+            Campaign.rcs_messagebase_id,
+            Campaign.message_type,
         )
+        .join(Message, Message.id == subq.c.last_id)
+        .join(Campaign, Campaign.id == Message.campaign_id)
     ).all()
-    return {(r.c, r.p): _channel_from_mt(r.channel) for r in rows if r.c and r.p}
+    return {
+        (r.c, r.p): _channel_from_mt(
+            outbound_channel(
+                r.channel, r.rcs_messagebase_id, r.message_type, r.cli_key, r.status
+            )
+        )
+        for r in rows
+        if r.c and r.p
+    }
 
 
 def _service_message_to_ts(m: ServiceChatMessage) -> dict:
@@ -318,6 +338,10 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         detail["unread"] = True
     if label:
         detail["lastCampaign"] = label
+    # 답장 전송 방식 기본값 — 이 번호로 가장 최근 전달 성공한 발송의 전송 방식.
+    send_channel = default_send_channel(db, phone)
+    if send_channel:
+        detail["defaultSendChannel"] = send_channel
     return {"data": detail}
 
 
@@ -326,6 +350,9 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
 
 class MessageCreateBody(BaseModel):
     text: str = Field(..., min_length=1)
+    # 대화방에서 고른 전송 방식. 기본값 "rcs" 는 이 필드가 없던 이전 클라이언트
+    # (배포 직후 새로고침 안 한 탭) 호환용 — 기존 동작과 같다.
+    sendChannel: Literal["rcs", "sms"] = "rcs"
 
     @field_validator("text")
     @classmethod
@@ -349,8 +376,8 @@ async def api_post_message(
 ) -> dict | JSONResponse:
     """답장 발송 — 단건 캠페인 생성 후 msghub 로 전송.
 
-    NOTE: 현재 구현은 단방향 RCS(RPSSAXX001) 로 발송. 양방향 CHAT(RPCSAXX001)
-    은 고객의 MO 와 연결된 replyId 가 필요해 별도 플로우 (추후 구현).
+    sendChannel="rcs" 는 24h 세션 안이면 양방향 CHAT, 아니면 단방향 RCS.
+    "sms" 는 일반 직접 SMS. 분기 상세는 services.chat.send_reply 참고.
     """
     parsed = _parse_thread_id(tid)
     if parsed is None:
@@ -378,6 +405,7 @@ async def api_post_message(
             caller=caller,
             phone=phone,
             content=body.text,
+            send_channel=body.sendChannel,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -398,7 +426,7 @@ async def api_post_message(
             "message": {
                 "id": f"m-out-{campaign.id}",
                 "side": "us",
-                "kind": "sms",  # 단방향 RCS 일 수도 있지만 preview 는 sms 안전값
+                "kind": body.sendChannel,  # 요청한 전송 방식 — 실제 도달 채널은 리포트 후 확정
                 "text": body.text,
                 "time": now_kst.strftime("%H:%M"),
             }

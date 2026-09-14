@@ -61,7 +61,12 @@ export function ThreadView({ thread }: ThreadViewProps) {
         )}
       </div>
 
-      <ThreadComposer threadId={thread.id} />
+      {/* key: 대화방이 바뀌면 입력·전송 방식 상태를 새 번호 기준으로 리셋. */}
+      <ThreadComposer
+        key={thread.id}
+        threadId={thread.id}
+        defaultSendChannel={thread.defaultSendChannel}
+      />
     </div>
   );
 }

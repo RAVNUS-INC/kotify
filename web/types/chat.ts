@@ -2,6 +2,8 @@
 // kakao 는 친구톡.
 export type ChatChannel = 'sms' | 'lms' | 'mms' | 'rcs' | 'kakao';
 export type MessageSide = 'us' | 'them';
+/** 답장 전송 방식 — 새 발송 화면과 같은 구분: 일반(SMS) / RCS. */
+export type SendChannel = 'rcs' | 'sms';
 
 export type ChatMessage = {
   id: string;
@@ -28,4 +30,6 @@ export type ChatThread = {
 
 export type ChatThreadDetail = ChatThread & {
   messages: ChatMessage[];
+  /** 이 번호로 가장 최근에 전달 성공한 발송의 전송 방식(답장 기본값). 이력 없으면 없음. */
+  defaultSendChannel?: SendChannel;
 };
