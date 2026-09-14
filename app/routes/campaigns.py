@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import uuid
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
@@ -22,7 +21,13 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth.deps import require_setup_complete, require_user
+from app.auth.deps import (
+    SEND_ROLES,
+    require_sender,
+    require_setup_complete,
+    require_user,
+    user_has_role,
+)
 from app.db import get_db
 from app.models import Attachment, Campaign, Message, User
 from app.msghub.codes import SUCCESS_CODE
@@ -295,7 +300,10 @@ def _campaign_create_response(campaign: Campaign) -> JSONResponse:
     )
 
 
-@router.post("/campaigns", dependencies=[Depends(verify_csrf)])
+@router.post(
+    "/campaigns",
+    dependencies=[Depends(require_sender), Depends(verify_csrf)],
+)
 async def create_campaign(
     body: CampaignCreateBody,
     request: Request,
@@ -388,15 +396,6 @@ async def create_campaign(
 # ── POST /campaigns/{id}/cancel — 예약 발송 취소 ─────────────────────────────
 
 
-def _user_has_role(user: User, *roles: str) -> bool:
-    """User.roles(JSON) 파싱 후 주어진 role 중 하나라도 보유하면 True."""
-    try:
-        parsed = set(json.loads(user.roles))
-    except (json.JSONDecodeError, TypeError):
-        parsed = set()
-    return bool(parsed & set(roles))
-
-
 @router.post(
     "/campaigns/{cid}/cancel",
     dependencies=[Depends(verify_csrf)],
@@ -425,7 +424,7 @@ async def cancel_campaign(
             {"error": {"code": "not_found", "message": "캠페인을 찾을 수 없습니다"}},
             status_code=404,
         )
-    if not _user_has_role(user, "sender", "admin", "owner"):
+    if not user_has_role(user, *SEND_ROLES):
         return JSONResponse(
             {"error": {"code": "forbidden", "message": "예약 취소 권한이 없습니다"}},
             status_code=403,
@@ -602,7 +601,7 @@ async def upload_attachment(
       4) attachments 테이블에 BLOB + 메타 저장
       5) 응답: {attachmentId, width, height, sizeBytes, originalFilename, url}
     """
-    if not _user_has_role(user, "sender", "admin", "owner"):
+    if not user_has_role(user, *SEND_ROLES):
         return JSONResponse(
             {"error": {"code": "forbidden", "message": "첨부 업로드 권한이 없습니다"}},
             status_code=403,

@@ -29,10 +29,16 @@ from app.security.csrf import verify_csrf
 from app.services import audit
 
 # 조회(GET)는 인증된 사용자면 가능 — 발송 담당자(sender)도 발신번호를 봐야
-# 발송 화면에서 번호를 고를 수 있다. 등록/수정/삭제 등 관리 작업은 각 라우트에서
-# require_role("admin") 로 개별 제한한다 (프론트의 canManage 설계와 일치).
+# 발송 화면에서 번호를 고를 수 있다. 등록/수정/삭제는 아래 admin_router 에만
+# 정의해 admin 제한이 기본값이 되게 한다.
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
+)
+
+# 쓰기 라우트 전용 — admin + CSRF. 여기에 정의한 라우트는 파일 끝에서 router 에
+# include 되며, router 의 인증·초기설정 게이트도 함께 적용된다.
+admin_router = APIRouter(
+    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
 )
 
 KST = ZoneInfo("Asia/Seoul")
@@ -101,9 +107,14 @@ def _daily_usage_map(db: Session) -> dict[str, int]:
 @router.get("/numbers")
 def list_numbers(
     status: str | None = None,
+    include_usage: bool = True,
     db: Session = Depends(get_db),
 ) -> dict:
-    """발신번호 목록. status 필터 지원 (approved/pending/rejected/expired/all)."""
+    """발신번호 목록. status 필터 지원 (approved/pending/rejected/expired/all).
+
+    include_usage=false 면 오늘 발송량 집계를 건너뛰고 dailyUsage 를 0 으로 둔다
+    (번호만 필요한 발송 화면용).
+    """
     q = select(Caller).order_by(Caller.is_default.desc(), Caller.id.asc())
     if status == "approved":
         q = q.where(Caller.active == 1)
@@ -115,7 +126,7 @@ def list_numbers(
     # "all" 또는 None 은 전체.
 
     callers = db.execute(q).scalars().all()
-    usage = _daily_usage_map(db)
+    usage = _daily_usage_map(db) if include_usage else {}
     rows = [_caller_to_dict(c, usage.get(c.number, 0)) for c in callers]
     return {"data": rows, "meta": {"total": len(rows)}}
 
@@ -140,7 +151,7 @@ def get_number(nid: str, db: Session = Depends(get_db)) -> dict | JSONResponse:
     return {"data": _caller_to_dict(caller, usage)}
 
 
-# ── CRUD: POST/PATCH/DELETE — admin 전용, CSRF 필수 ─────────────────────────
+# ── CRUD: POST/PATCH/DELETE — admin_router 에만 정의 (admin 전용, CSRF 필수) ──
 
 
 class CallerCreateBody(BaseModel):
@@ -176,11 +187,7 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-@router.post(
-    "/numbers",
-    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
-    response_model=None,
-)
+@admin_router.post("/numbers", response_model=None)
 def create_number(
     body: CallerCreateBody,
     user: User = Depends(require_user),
@@ -235,11 +242,7 @@ def create_number(
     return {"data": _caller_to_dict(caller, usage)}
 
 
-@router.post(
-    "/numbers/{nid}/toggle",
-    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
-    response_model=None,
-)
+@admin_router.post("/numbers/{nid}/toggle", response_model=None)
 def toggle_number(
     nid: str,
     user: User = Depends(require_user),
@@ -288,11 +291,7 @@ def toggle_number(
     return {"data": _caller_to_dict(caller, usage)}
 
 
-@router.post(
-    "/numbers/{nid}/default",
-    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
-    response_model=None,
-)
+@admin_router.post("/numbers/{nid}/default", response_model=None)
 def set_default_number(
     nid: str,
     user: User = Depends(require_user),
@@ -349,11 +348,7 @@ def set_default_number(
     return {"data": _caller_to_dict(caller, usage)}
 
 
-@router.delete(
-    "/numbers/{nid}",
-    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
-    response_model=None,
-)
+@admin_router.delete("/numbers/{nid}", response_model=None)
 def delete_number(
     nid: str,
     user: User = Depends(require_user),
@@ -392,3 +387,8 @@ def delete_number(
     db.delete(caller)
     db.commit()
     return {"data": {"id": nid, "deleted": True}}
+
+
+# 쓰기 라우트를 모두 정의한 뒤에 포함해야 한다 (include_router 는 호출 시점의
+# 라우트만 복사).
+router.include_router(admin_router)

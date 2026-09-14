@@ -28,7 +28,7 @@ def _make_app() -> FastAPI:
         token = get_csrf_token(request)
         return JSONResponse({"csrf_token": token})
 
-    @app.post("/protected")
+    @app.api_route("/protected", methods=["GET", "POST", "PATCH", "DELETE"])
     async def protected(request: Request):
         """CSRF 토큰 검증 후 처리한다."""
         await verify_csrf(request)
@@ -94,6 +94,26 @@ class TestCSRF:
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
             assert resp.status_code == 403
+
+    @pytest.mark.parametrize("method", ["PATCH", "DELETE"])
+    def test_unsafe_method_without_token_returns_403(self, method):
+        """POST 외 상태 변경 메서드도 토큰 없이는 403."""
+        with self.client as c:
+            c.get("/token")  # 세션 생성
+            resp = c.request(method, "/protected")
+            assert resp.status_code == 403
+
+    @pytest.mark.parametrize("method", ["PATCH", "DELETE"])
+    def test_unsafe_method_with_header_token_returns_200(self, method):
+        with self.client as c:
+            token = c.get("/token").json()["csrf_token"]
+            resp = c.request(method, "/protected", headers={"X-CSRF-Token": token})
+            assert resp.status_code == 200
+
+    def test_get_does_not_require_token(self):
+        with self.client as c:
+            c.get("/token")
+            assert c.get("/protected").status_code == 200
 
     def test_token_is_consistent_across_requests(self):
         """같은 세션에서 토큰은 동일해야 한다."""

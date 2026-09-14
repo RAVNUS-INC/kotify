@@ -269,6 +269,21 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         error: dict = {"code": detail["code"], "message": detail["message"]}
         if isinstance(detail.get("fields"), dict):
             error["fields"] = detail["fields"]
+    elif exc.status_code == 303:
+        # require_user / require_setup_complete 의 303 은 Location 헤더를 싣지만
+        # 여기서 헤더를 버리므로(API 클라이언트가 HTML 로그인/설정 페이지로
+        # 끌려가지 않게) 원인을 코드로 구분해 준다.
+        location = (exc.headers or {}).get("Location", "")
+        if location.startswith("/setup"):
+            error = {
+                "code": "setup_required",
+                "message": "초기 설정이 완료되지 않았습니다. 관리자에게 문의하세요.",
+            }
+        else:
+            error = {
+                "code": "auth_required",
+                "message": "로그인이 필요합니다. 다시 로그인해 주세요.",
+            }
     else:
         error = {"code": f"http_{exc.status_code}", "message": detail}
     return JSONResponse({"error": error}, status_code=exc.status_code)

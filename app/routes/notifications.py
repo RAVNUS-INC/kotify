@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.auth.deps import require_setup_complete, require_user
+from app.auth.deps import require_setup_complete, require_user, user_has_role
 from app.db import get_db
 from app.models import AuditLog, Campaign, Setting, User
 from app.security.csrf import verify_csrf
@@ -136,7 +136,9 @@ _AUDIT_ACTION_MAP: dict[str, tuple[str, str, str]] = {
 }
 
 
-def _audit_notif(log: AuditLog, actor_name: str | None) -> dict | None:
+def _audit_notif(
+    log: AuditLog, actor_name: str | None, *, is_admin: bool
+) -> dict | None:
     meta = _AUDIT_ACTION_MAP.get(log.action)
     if meta is None:
         return None
@@ -148,7 +150,8 @@ def _audit_notif(log: AuditLog, actor_name: str | None) -> dict | None:
     href = None
     if log.action.startswith("CALLER_"):
         href = "/numbers"
-    elif log.action == "SETTINGS_UPDATE":
+    elif log.action == "SETTINGS_UPDATE" and is_admin:
+        # /settings 는 admin 전용 — 비admin 에겐 링크 없이 정보성으로만 표시.
         href = "/settings"
     # LOGIN/LOGOUT 은 admin 전용 /audit 로 보내면 operator/viewer 가 403.
     # 알림 자체가 정보성이므로 href 를 생략 (클릭 불가 상태로 표시).
@@ -225,7 +228,7 @@ def _load_read_state(db: Session, sub: str) -> tuple[str, set[str]]:
 # ── 빌드 ────────────────────────────────────────────────────────────────────
 
 
-def _build_notifications(db: Session) -> list[dict]:
+def _build_notifications(db: Session, *, is_admin: bool) -> list[dict]:
     """DB 상태로부터 알림 목록 파생. 정렬 없이 raw list 반환."""
     # 최근 campaigns — created_at DESC, 상한.
     camps = db.execute(
@@ -243,7 +246,7 @@ def _build_notifications(db: Session) -> list[dict]:
         .limit(_AUDIT_LIMIT)
     ).all()
     for log, actor_name in rows:
-        n = _audit_notif(log, actor_name)
+        n = _audit_notif(log, actor_name, is_admin=is_admin)
         if n is not None:
             notifs.append(n)
     return notifs
@@ -286,7 +289,7 @@ def list_notifications(
     unreadTotal 은 kind/unread 필터와 무관하게 전체(스코프 전) 미읽음 수를
     반환한다 — 프론트에서 tab 배지/상단 badge 를 일관된 값으로 쓴다.
     """
-    all_notifs = _build_notifications(db)
+    all_notifs = _build_notifications(db, is_admin=user_has_role(user, "admin"))
     last_read_at, read_ids = _load_read_state(db, user.sub)
     stated = _apply_read_state(all_notifs, last_read_at, read_ids)
 
@@ -366,7 +369,7 @@ def mark_all_read(
     """전체 읽음 — last_read_at 을 now 로 갱신하고 read_ids 초기화."""
     with _notif_lock:
         # 현재 미읽음 개수를 계산해서 응답 (UX 용).
-        notifs = _build_notifications(db)
+        notifs = _build_notifications(db, is_admin=user_has_role(user, "admin"))
         last_read_at, read_ids = _load_read_state(db, user.sub)
         current_unread = sum(
             1 for n in _apply_read_state(notifs, last_read_at, read_ids)

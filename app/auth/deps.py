@@ -153,7 +153,12 @@ def primary_role(roles_json: str | None, default: str = "viewer") -> str:
     return default
 
 
-def require_role(*roles: str) -> Callable:
+def user_has_role(user: User, *roles: str) -> bool:
+    """사용자가 주어진 역할 중 하나라도 보유하면 True."""
+    return bool(set(parse_user_roles(user)) & set(roles))
+
+
+def require_role(*roles: str, message: str = "권한이 없습니다.") -> Callable:
     """지정된 역할 중 하나 이상을 가진 사용자만 허용하는 의존성 팩토리.
 
     Usage:
@@ -161,27 +166,32 @@ def require_role(*roles: str) -> Callable:
 
     Args:
         *roles: 허용할 역할 이름들 (하나라도 일치하면 통과).
+        message: 403 응답 메시지.
 
     Returns:
         FastAPI 의존성 함수.
     """
-    allowed = set(roles)
 
-    def _check(
-        request: Request,
-        db: Session = Depends(get_db),
-    ) -> User:
-        user = require_user(request, db)
-        try:
-            user_roles = set(json.loads(user.roles))
-        except (json.JSONDecodeError, TypeError):
-            user_roles = set()
-
-        if not user_roles.intersection(allowed):
-            raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    # require_user 를 Depends 로 받아야 라우터 레벨 Depends(require_user) 와 같은
+    # 요청 안에서 캐시가 공유된다. 직접 호출하면 user upsert·commit 이 두 번 돈다.
+    def _check(user: User = Depends(require_user)) -> User:
+        if not user_has_role(user, *roles):
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "forbidden", "message": message},
+            )
         return user
 
     return _check
+
+
+# 발송(캠페인 생성·답장·예약 취소·첨부 업로드) 허용 역할.
+SEND_ROLES: tuple[str, ...] = ("sender", "admin", "owner")
+
+require_sender = require_role(
+    *SEND_ROLES,
+    message="발송 권한이 없습니다. 관리자에게 sender 역할을 요청하세요.",
+)
 
 
 def require_setup_complete(

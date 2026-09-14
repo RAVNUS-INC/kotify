@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.auth.deps import require_setup_complete, require_user
+from app.auth.deps import require_setup_complete, require_user, user_has_role
 from app.db import get_db
 from app.models import AuditLog, Campaign, Contact, Message, MoMessage, User
 from app.routes.audit_api import _escape_like
@@ -280,9 +280,13 @@ def _empty_result() -> dict:
 @router.get("/search")
 def search(
     q: str = Query(default="", description="검색어"),
+    user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """통합 검색 — 4 섹션 병렬. 빈 쿼리는 즉시 빈 결과."""
+    """통합 검색 — 4 섹션 병렬. 빈 쿼리는 즉시 빈 결과.
+
+    감사 로그 섹션은 /audit 와 같은 조건(admin)일 때만 채운다.
+    """
     query = q.strip()
     if not query:
         return _empty_result()
@@ -292,7 +296,10 @@ def search(
     contacts, c_total = _search_contacts(db, pat)
     threads, t_total = _search_threads(db, pat)
     campaigns, cam_total = _search_campaigns(db, pat)
-    audit, a_total = _search_audit(db, pat)
+    if user_has_role(user, "admin"):
+        audit, a_total = _search_audit(db, pat)
+    else:
+        audit, a_total = [], 0
 
     # total 이 SCAN 상한에 도달하면 "이상일 수 있음" 시그널 — 프론트가
     # "500+" 같은 표기를 선택할 수 있게 한다.

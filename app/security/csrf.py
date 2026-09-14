@@ -1,6 +1,7 @@
 """CSRF 보호 — 세션 기반 토큰 검증.
 
-POST 요청의 form 필드 csrf_token 또는 헤더 X-CSRF-Token을 확인한다.
+상태 변경 요청(POST/PUT/PATCH/DELETE)의 form 필드 csrf_token 또는 헤더
+X-CSRF-Token을 확인한다.
 HTMX 요청은 헤더로 토큰을 전달해야 한다.
 
 환경변수 SMS_DISABLE_CSRF=1 로 CSRF 검증을 우회할 수 있다.
@@ -12,6 +13,8 @@ import os
 import secrets
 
 from fastapi import HTTPException, Request
+
+_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def get_csrf_token(request: Request) -> str:
@@ -34,7 +37,7 @@ def get_csrf_token(request: Request) -> str:
 
 
 async def verify_csrf(request: Request) -> None:
-    """POST 요청의 CSRF 토큰을 검증하는 FastAPI dependency.
+    """상태 변경 요청의 CSRF 토큰을 검증하는 FastAPI dependency.
 
     form 필드 csrf_token 또는 헤더 X-CSRF-Token을 확인한다.
     일치하지 않으면 403을 반환한다.
@@ -59,7 +62,8 @@ async def verify_csrf(request: Request) -> None:
             "SMS_DISABLE_CSRF=1 is set but dev_mode=false — ignoring (production safety)"
         )
 
-    if request.method != "POST":
+    # 상태를 바꾸는 메서드는 모두 검증한다 (DELETE/PATCH 도 apiSend 가 토큰을 붙인다).
+    if request.method not in _UNSAFE_METHODS:
         return
 
     try:

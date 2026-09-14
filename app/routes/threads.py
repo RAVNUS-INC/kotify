@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.orm import Session
 
-from app.auth.deps import require_setup_complete, require_user
+from app.auth.deps import require_sender, require_setup_complete, require_user
 from app.db import get_db
 from app.models import Campaign, Message, ThreadRead, User
 from app.security.csrf import verify_csrf
@@ -338,7 +338,7 @@ class MessageCreateBody(BaseModel):
 
 @router.post(
     "/threads/{tid}/messages",
-    dependencies=[Depends(verify_csrf)],
+    dependencies=[Depends(require_sender), Depends(verify_csrf)],
     response_model=None,
 )
 async def api_post_message(
