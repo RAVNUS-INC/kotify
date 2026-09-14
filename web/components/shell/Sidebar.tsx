@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { Route } from 'next';
 import { Icon, type IconName } from '@/components/ui';
+import { ADMIN_ROLES, canAccessPath, hasAnyRole } from '@/lib/access';
 import { cn } from '@/lib/cn';
 import type { SessionUser } from '@/lib/auth';
 
@@ -13,8 +14,6 @@ type NavItem = {
   icon: IconName;
   count?: number;
   alert?: boolean;
-  /** admin 역할만 노출. 비admin이 클릭 시 백엔드 403 → 크래시하던 링크 보호. */
-  adminOnly?: boolean;
 };
 
 type NavGroup = {
@@ -28,6 +27,7 @@ export type SidebarProps = {
 
 // count/alert는 Phase 8+에서 실제 unread 수를 주입하는 구조가 마련되면 복원.
 // 지금은 하드코딩 제거 — 사용자 혼란 방지.
+// 항목 노출 여부는 lib/access.ts 의 경로별 역할 규칙을 따른다 (middleware 와 동일).
 const GROUPS: ReadonlyArray<NavGroup> = [
   {
     label: 'Send',
@@ -55,22 +55,22 @@ const GROUPS: ReadonlyArray<NavGroup> = [
   {
     label: 'Admin',
     items: [
-      // 발신번호 조회는 viewer/sender 도 허용(백엔드 numbers.py = require_user).
-      // 등록/삭제 등 관리만 admin 이라 링크 자체는 전원 노출한다.
+      // 발신번호 조회는 전원 허용, 등록/삭제 등 관리만 admin (페이지에서 분기).
       { href: '/numbers', label: '발신번호', icon: 'phone' },
-      // 설정·감사 로그는 백엔드 라우터가 require_role("admin") 전용.
-      // 비admin에게 노출하면 클릭 시 403 → 서버 렌더 크래시하므로 adminOnly.
       // optional catch-all [[...tab]]은 typed routes가 구체 URL 리터럴을
-      // 자동 생성하지 않음. /settings 진입 시 server에서 /settings/org로 redirect.
-      { href: '/settings' as Route, label: '설정', icon: 'settings', adminOnly: true },
-      { href: '/audit', label: '감사 로그', icon: 'fileText', adminOnly: true },
+      // 자동 생성하지 않아 캐스팅. /settings 를 거치면 페이지 redirect 로
+      // 왕복이 한 번 더 생기므로 기본 탭으로 바로 연결한다.
+      { href: '/settings/org' as Route, label: '설정', icon: 'settings' },
+      { href: '/audit', label: '감사 로그', icon: 'fileText' },
     ],
   },
 ];
 
+// 항목의 최상위 구간(/settings/org → /settings) 안에 있으면 활성.
 function isActive(pathname: string, href: string) {
   if (href === '/') return pathname === '/';
-  return pathname === href || pathname.startsWith(`${href}/`);
+  const section = `/${href.split('/')[1]}`;
+  return pathname === section || pathname.startsWith(`${section}/`);
 }
 
 export function Sidebar({ user }: SidebarProps) {
@@ -79,8 +79,7 @@ export function Sidebar({ user }: SidebarProps) {
     .trim()
     .charAt(0)
     .toUpperCase();
-  const isAdmin = user.roles.includes('admin');
-  const org = isAdmin ? 'RAVNUS · admin' : 'RAVNUS';
+  const org = hasAnyRole(user.roles, ADMIN_ROLES) ? 'RAVNUS · admin' : 'RAVNUS';
 
   return (
     <aside className="k-side" aria-label="주 메뉴">
@@ -90,40 +89,37 @@ export function Sidebar({ user }: SidebarProps) {
       </div>
 
       <nav aria-label="네비게이션" className="flex flex-col">
-        {GROUPS.map((g) => {
-          // adminOnly 항목은 admin 에게만. 필터 후 남는 항목이 없으면 그룹 숨김.
-          const items = g.items.filter((item) => !item.adminOnly || isAdmin);
-          if (items.length === 0) return null;
-          return (
+        {GROUPS.map((g) => (
           <div key={g.label}>
             <div className="k-nav-group">{g.label}</div>
-            {items.map((item) => {
-              const active = isActive(pathname, item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn('k-nav-item', active && 'on')}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon name={item.icon} size={14} strokeWidth={1.7} />
-                    {item.label}
-                  </span>
-                  {item.count != null && (
-                    <span
-                      className={cn('count', item.alert && 'alert')}
-                      aria-label={`읽지 않음 ${item.count}개`}
-                    >
-                      {item.count}
+            {g.items
+              .filter((item) => canAccessPath(item.href, user.roles))
+              .map((item) => {
+                const active = isActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn('k-nav-item', active && 'on')}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon name={item.icon} size={14} strokeWidth={1.7} />
+                      {item.label}
                     </span>
-                  )}
-                </Link>
-              );
-            })}
+                    {item.count != null && (
+                      <span
+                        className={cn('count', item.alert && 'alert')}
+                        aria-label={`읽지 않음 ${item.count}개`}
+                      >
+                        {item.count}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
           </div>
-          );
-        })}
+        ))}
       </nav>
 
       <div className="k-user">

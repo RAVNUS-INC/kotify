@@ -15,6 +15,8 @@
  * Client component에서는 상대 경로 `/api/...`로 fetch하면 된다 (rewrite 탐).
  */
 
+import { ApiError } from './api-error';
+
 export type ApiEnvelope<T> = {
   data?: T;
   meta?: { cursor?: string; total?: number };
@@ -25,24 +27,7 @@ export type ApiEnvelope<T> = {
   };
 };
 
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly fields?: Record<string, string>;
-
-  constructor(
-    status: number,
-    code: string,
-    message: string,
-    fields?: Record<string, string>,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.code = code;
-    this.fields = fields;
-  }
-}
+export { ApiError };
 
 const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://127.0.0.1:8080';
 
@@ -96,31 +81,9 @@ export async function apiFetch<T>(
     },
   });
 
-  // FastAPI 는 세션 만료·초기설정 미완료 시 303 으로 /auth/login·/setup 같은
-  // 비-API(HTML) 페이지로 돌려보낸다. 기본 redirect:'follow' 가 이를 따라가면
-  // HTML 응답이 와서 아래 res.json() 이 'invalid_json' 으로 오분류되어(=원인 불명
-  // 크래시) 버린다. 최종 착지 경로가 인증/설정 페이지면 명확한 에러로 변환한다.
-  // (경로 슬래시 정규화용 307 은 최종 URL 이 여전히 API 경로라 여기 걸리지 않으므로
-  //  기존 동작에 회귀가 없다.)
-  if (res.redirected) {
-    let landedPath = '';
-    try {
-      landedPath = new URL(res.url).pathname;
-    } catch {
-      landedPath = '';
-    }
-    if (/^\/(auth\/login|login|setup)(\/|$)/.test(landedPath)) {
-      const needsSetup = landedPath.includes('setup');
-      throw new ApiError(
-        303,
-        needsSetup ? 'setup_required' : 'auth_required',
-        needsSetup
-          ? '초기 설정이 완료되지 않았습니다. 관리자에게 문의하세요.'
-          : '로그인이 필요합니다. 다시 로그인해 주세요.',
-      );
-    }
-  }
-
+  // 세션 만료·초기설정 미완료는 FastAPI 가 Location 없는 303 JSON 으로 돌려준다
+  // (fetch 가 따라가지 않음). error.code 가 'auth_required' / 'setup_required' 라
+  // 아래 일반 에러 분기의 ApiError 에 그대로 실린다.
   let body: ApiEnvelope<T>;
   try {
     body = (await res.json()) as ApiEnvelope<T>;

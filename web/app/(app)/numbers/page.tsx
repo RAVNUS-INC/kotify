@@ -1,7 +1,8 @@
 import { PageHeader } from '@/components/shell';
 import { NumbersAdminShell } from '@/components/numbers';
 import { LinkSegmented } from '@/components/ui';
-import { getSession, hasRole } from '@/lib/auth';
+import { ADMIN_ROLES, hasAnyRole } from '@/lib/access';
+import { getSession } from '@/lib/auth';
 import { fetchNumbers } from '@/lib/numbers';
 import type { NumberStatus } from '@/types/number';
 
@@ -39,8 +40,8 @@ export default async function NumbersPage({ searchParams }: PageProps) {
   const approvedCount = totals.filter((n) => n.status === 'approved').length;
   const pendingCount = totals.filter((n) => n.status === 'pending').length;
   const totalCount = totals.length;
-  // admin 만 등록/토글/삭제 가능. viewer/sender 는 읽기 전용.
-  const canManage = session ? hasRole(session, 'admin', 'owner') : false;
+  // 등록/토글/삭제는 백엔드 admin_router(require_role("admin"))와 같은 조건.
+  const canManage = session ? hasAnyRole(session.roles, ADMIN_ROLES) : false;
 
   return (
     <div className="k-page">

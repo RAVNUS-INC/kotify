@@ -5,4 +5,3 @@ export type {
   ErrorPageDiagnostic,
 } from './ErrorPage';
 export { ForbiddenNotice } from './ForbiddenNotice';
-export type { ForbiddenNoticeProps } from './ForbiddenNotice';

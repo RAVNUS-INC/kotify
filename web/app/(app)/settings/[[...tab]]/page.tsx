@@ -1,6 +1,4 @@
 import { redirect } from 'next/navigation';
-import { getSession, hasRole } from '@/lib/auth';
-import { ForbiddenNotice } from '@/components/error';
 import { PageHeader } from '@/components/shell';
 import {
   ApiKeysList,
@@ -41,17 +39,8 @@ function resolveTab(segments: string[] | undefined): SettingsTab {
   return 'org';
 }
 
+// 역할 게이트(admin)는 middleware 가 lib/access.ts 규칙으로 처리한다.
 export default async function SettingsPage({ params }: PageProps) {
-  // 백엔드 settings 라우터는 require_role("admin") 전용. 비admin이 링크/URL로
-  // 진입하면 하위 fetch 가 403 을 던져 서버 렌더 크래시하므로, 역할을 먼저 확인해
-  // 안내 페이지를 렌더한다(백엔드 게이트와 동일 조건 = admin).
-  const session = await getSession();
-  if (!session || !hasRole(session, 'admin')) {
-    return (
-      <ForbiddenNotice description="설정은 관리자만 접근할 수 있습니다. 필요하면 관리자에게 권한을 요청하세요." />
-    );
-  }
-
   // /settings 로 바로 진입하면 /settings/org로 리다이렉트 — 딥링크 공유에 유리
   if (!params.tab || params.tab.length === 0) {
     redirect('/settings/org');

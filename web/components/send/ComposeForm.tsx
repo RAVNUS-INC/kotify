@@ -84,11 +84,12 @@ export function ComposeForm() {
   const [attachment, setAttachment] = useState<UploadedAttachment | null>(null);
 
   // 발신번호 로딩 (승인된 번호만). stale response race 방어를 위해 cancelled flag.
+  // 번호·브랜드만 쓰므로 서버의 일일 사용량 집계는 건너뛴다.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/numbers?status=approved');
+        const res = await fetch('/api/numbers?status=approved&include_usage=false');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as { data?: SenderNumber[] };
         if (cancelled) return;
