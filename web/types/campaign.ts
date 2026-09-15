@@ -35,7 +35,9 @@ export type RecipientStatus =
   | 'read'
   | 'replied'
   | 'failed'
-  | 'fallback_sms';
+  | 'fallback_sms'
+  /** 예약 취소로 발송되지 않음. */
+  | 'cancelled';
 
 export type Recipient = {
   id: string;

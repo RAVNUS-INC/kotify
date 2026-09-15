@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -63,6 +63,7 @@ _STATUS_MAP = {
 
 # Message/result 상태 → RecipientStatus 매핑
 # web/types/campaign.ts: 'queued' | 'delivered' | 'read' | 'replied' | 'failed' | 'fallback_sms'
+#   | 'cancelled'
 _RECIPIENT_STATUS = {
     "REG": "queued",
     "ING": "queued",
@@ -70,6 +71,7 @@ _RECIPIENT_STATUS = {
     "FB_PENDING": "fallback_sms",
     "DONE": "delivered",  # SUCCESS_CODE 인지는 별도 분기
     "FAILED": "failed",
+    "CANCELED": "cancelled",  # 예약 취소 — 발송되지 않음 (cancel_campaign)
 }
 
 
@@ -410,6 +412,7 @@ async def cancel_campaign(
 
     권한: sender/admin/owner. viewer/operator 는 403.
     상태: RESERVED 만 허용. 이미 실행/완료/이미취소는 400.
+    메시지: 예약 접수로 대기(PENDING) 중인 행을 CANCELED 로 바꾼다.
     """
     try:
         campaign_id = int(cid)
@@ -464,6 +467,14 @@ async def cancel_campaign(
             campaign.web_req_id, reason="사용자 취소"
         )
         campaign.state = "RESERVE_CANCELED"
+        # 예약 접수 행(PENDING)은 이제 발송되지 않는다. 그대로 두면 대화방 말풍선·수신자
+        # 배지가 영영 대기로 보이고 재조정이 매 주기 msghub 에 조회한다. 청크 요청 실패로
+        # 기록된 FAILED 행은 결과 그대로 둔다. 이 변경 전에 취소된 행은 alembic 0017 이 정리.
+        db.execute(
+            update(Message)
+            .where(Message.campaign_id == campaign.id, Message.status == "PENDING")
+            .values(status="CANCELED")
+        )
         msg = "예약이 취소되었습니다"
     except MsghubBadRequest:
         # msghub 가 취소를 거부 — 이미 발송됐거나 이미 취소된 상태일 수 있어 단정 불가.

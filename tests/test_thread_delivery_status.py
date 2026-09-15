@@ -73,6 +73,8 @@ def _receive(db):
         ("DONE", None, "c1-0-0", "failed"),             # 코드 없는 리포트 — 캠페인 집계와 같이 실패
         ("FAILED", None, "c1-0-0", "failed"),           # 청크 요청 자체 실패
         ("FAILED", "31101", "c1-0-0", "failed"),        # item 단위 거부(수신번호 에러)
+        ("CANCELED", None, "c1-0-0", "cancelled"),      # 예약 취소 — 발송되지 않음
+        ("CANCELED", None, None, "cancelled"),          # alembic 0017 이 옮긴 NCP 시절 예약 취소
         # NCP 시절 행 — 결과를 알 수 없음. PENDING 은 그때도 썼지만 cliKey 가 없다.
         ("PENDING", None, None, None),
         ("COMPLETED", "0", None, None),

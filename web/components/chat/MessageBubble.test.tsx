@@ -27,6 +27,20 @@ describe('MessageBubble 발신 전달 상태', () => {
     expect(screen.getByLabelText('보낸 SMS 메시지, 전송 대기')).toBeInTheDocument();
   });
 
+  it('예약 취소로 발송되지 않은 발신은 대기가 아니라 취소로, 실패 색 없이 표시한다', () => {
+    render(
+      <MessageBubble side="us" kind="sms" status="cancelled" timestamp="01:36">
+        예약 안내
+      </MessageBubble>,
+    );
+
+    const meta = screen.getByText('01:36 / SMS · 취소');
+    expect(meta).toHaveClass('text-ink-dim');
+    expect(meta).not.toHaveClass('text-danger');
+    expect(screen.getByLabelText('보낸 SMS 메시지, 전송 취소')).toHaveTextContent('예약 안내');
+    expect(screen.queryByText(/대기/)).not.toBeInTheDocument();
+  });
+
   const unchanged: Array<{ name: string; status?: MessageStatus }> = [
     { name: '전달 성공', status: 'sent' },
     { name: '결과를 알 수 없는(상태 없음)' },
@@ -40,7 +54,7 @@ describe('MessageBubble 발신 전달 상태', () => {
 
     expect(screen.getByText('01:38 / RCS')).toHaveClass('text-ink-dim');
     expect(screen.getByLabelText('보낸 RCS 메시지')).toBeInTheDocument();
-    expect(screen.queryByText(/대기|실패/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/대기|실패|취소/)).not.toBeInTheDocument();
   });
 
   it('시간이 없으면 채널과 상태만 표시한다', () => {

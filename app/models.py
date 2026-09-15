@@ -163,7 +163,7 @@ class Message(Base):
     to_number_raw: Mapped[str] = mapped_column(Text, nullable=False)
     cli_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     msg_key: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # PENDING | REG | ING | DONE | FAILED
+    # PENDING | REG | ING | FB_PENDING | DONE | FAILED | CANCELED(예약 취소, 발송 안 됨)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="PENDING")
     result_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_desc: Mapped[str | None] = mapped_column(Text, nullable=True)

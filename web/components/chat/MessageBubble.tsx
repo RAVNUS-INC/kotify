@@ -6,7 +6,7 @@ export type MessageSide = 'us' | 'them';
 // 라벨 (`01:38 / RCS`) 로 표시.
 export type MessageKind = 'rcs' | 'sms' | 'lms' | 'mms' | 'kakao';
 // 발신 전달 상태 — web/types/chat.ts 의 DeliveryStatus 와 같은 값.
-export type MessageStatus = 'pending' | 'sent' | 'failed';
+export type MessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
 
 export type MessageBubbleProps = {
   side?: MessageSide;
@@ -45,10 +45,12 @@ const KIND_LABEL: Record<MessageKind, string> = {
 
 // 상태도 채널처럼 텍스트로 붙인다 (`01:38 / RCS · 실패`). 발신 대부분인 전달 성공(sent)은
 // 라벨을 늘리지 않고, 실패는 놓치지 않게 메타 라벨을 danger 색으로 — 색은 보조일 뿐.
+// 예약 취소(cancelled)는 사용자가 멈춘 것이라 실패가 아니다 — 대기처럼 기본 색.
 const STATUS_LABEL: Record<MessageStatus, string | null> = {
   pending: '대기',
   sent: null,
   failed: '실패',
+  cancelled: '취소',
 };
 
 export function MessageBubble({

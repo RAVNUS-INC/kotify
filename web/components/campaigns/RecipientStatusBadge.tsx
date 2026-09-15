@@ -8,6 +8,8 @@ const MAP: Record<RecipientStatus, { label: string; kind: BadgeKind; dot?: boole
   replied: { label: '회신', kind: 'brand', dot: true },
   failed: { label: '실패', kind: 'danger', dot: true },
   fallback_sms: { label: 'SMS 대체', kind: 'warning' },
+  // 캠페인 상태 배지(StatusBadge)의 취소와 같은 모양 — 같은 화면에서 한 가지로 읽히게.
+  cancelled: { label: '취소', kind: 'warning' },
 };
 
 export type RecipientStatusBadgeProps = {

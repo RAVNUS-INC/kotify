@@ -6,9 +6,10 @@ export type MessageSide = 'us' | 'them';
 export type SendChannel = 'rcs' | 'sms';
 /**
  * 발신 메시지 전달 상태. pending = 결과 리포트 대기(SMS 대체 발송 중 포함),
- * sent = 전달 성공 리포트, failed = msghub 요청 실패 또는 실패 리포트.
+ * sent = 전달 성공 리포트, failed = msghub 요청 실패 또는 실패 리포트,
+ * cancelled = 예약 취소로 발송되지 않음.
  */
-export type DeliveryStatus = 'pending' | 'sent' | 'failed';
+export type DeliveryStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
 
 export type ChatMessage = {
   id: string;
