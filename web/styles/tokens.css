@@ -244,6 +244,14 @@
 .k-check.partial .box{background:var(--brand); border-color:var(--brand);}
 .k-check.partial .box::after{content:''; width:8px; height:1.5px; background:#fff;}
 .k-check.disabled, .k-radio.disabled{opacity:.5;}
+/* 강제 색상 모드(Windows 고대비)는 box-shadow 를 없애고 흰 점·대시 배경을 Canvas 로 칠해 포커스·선택이 안 보인다
+   → 버튼(outline-none 이 Highlight 로 칠해짐)과 같은 outline 링과 CanvasText 점·대시로 그린다 */
+@media (forced-colors: active){
+  /* 전환이 남아 있으면 링이 기본 outline(CanvasText·3px)에서 시작해 잠깐 다른 색·굵기로 보인다 */
+  .k-check .box, .k-radio .box{transition:none;}
+  .k-check input:focus-visible + .box, .k-radio input:focus-visible + .box{outline:2px solid Highlight; outline-offset:2px;}
+  .k-radio.on .box::after, .k-check.partial .box::after{background:CanvasText;}
+}
 
 /* Toggle switch */
 .k-toggle{display:inline-flex; align-items:center; gap:10px; font-size:13px; cursor:default; user-select:none;}
