@@ -8,14 +8,18 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Campaign, Message
 from app.msghub.codes import SUCCESS_CODE, calculate_cost
-from app.msghub.schemas import ReportItem
+from app.msghub.schemas import RecvInfo, ReportItem, SendResponse
 from app.util.phone import mask_phone
+
+if TYPE_CHECKING:
+    from app.msghub.client import MsghubClient
 
 log = logging.getLogger(__name__)
 
@@ -52,21 +56,7 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
             if item.result_code != SUCCESS_CODE:
                 failed_msgs.append(msg)
 
-    # 양방향 CHAT 캠페인의 실패 메시지 → SMS fallback 필요
-    fallback_needed: list[Message] = []
-    if failed_msgs:
-        chat_cids = set(
-            db.execute(
-                select(Campaign.id).where(
-                    Campaign.id.in_({m.campaign_id for m in failed_msgs}),
-                    Campaign.rcs_messagebase_id == "RPCSAXX001",
-                )
-            ).scalars().all()
-        )
-        for msg in failed_msgs:
-            if msg.campaign_id in chat_cids and not msg.cli_key.endswith("-fb"):
-                msg.status = "FB_PENDING"
-                fallback_needed.append(msg)
+    fallback_needed = _mark_chat_fallback(db, failed_msgs)
 
     # autoflush=False 이므로 _update_message의 ORM 변경을 집계 SELECT 전에
     # 명시적으로 flush 해야 한다. flush를 안 하면 SUM(...) 쿼리가 업데이트
@@ -80,12 +70,20 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
     return processed, fallback_needed
 
 
-def process_sent_query(db: Session, raw_items: list[dict]) -> int:
-    """cliKey 기반 개별 조회 결과를 처리한다."""
+def process_sent_query(db: Session, raw_items: list[dict]) -> tuple[int, list[Message]]:
+    """cliKey 기반 개별 조회 결과를 처리한다.
+
+    Returns:
+        (처리된 메시지 건수, SMS fallback이 필요한 메시지 목록) — process_report 와 같다.
+        양방향 실패는 먼저 확정한 경로가 대체 발송해야 한다. 리포트 웹훅이 늦으면(msghub 는
+        실패한 웹훅을 72시간 재시도) 재조정이 먼저 확정하고, 뒤늦게 온 실패 리포트는 이미
+        확정된 행이라 _update_message 가 버린다 — 여기서 넘기지 않으면 답장이 끝내 안 간다.
+    """
     from app.msghub.schemas import SentQueryItem
 
     processed = 0
     campaign_ids: set[int] = set()
+    failed_msgs: list[Message] = []
 
     for raw in raw_items:
         sq = SentQueryItem.from_dict(raw)
@@ -125,10 +123,14 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
 
             campaign_ids.add(msg.campaign_id)
             processed += 1
+            if not success:
+                failed_msgs.append(msg)
         elif sq.status in ("REG", "ING") and msg.status != "FB_PENDING":
             # FB_PENDING 은 -fb 대체 SMS 접수·처리 중이라는 더 구체적인 상태라 덮지 않는다
             # (수신자 배지 fallback_sms).
             msg.status = sq.status
+
+    fallback_needed = _mark_chat_fallback(db, failed_msgs)
 
     # autoflush=False — 집계 SELECT 전에 ORM 변경을 명시 flush (process_report 참조)
     if campaign_ids:
@@ -137,7 +139,110 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
             _refresh_campaign_counters(db, cid)
 
     db.flush()
-    return processed
+    return processed, fallback_needed
+
+
+async def send_sms_fallback(
+    db: Session, client: MsghubClient | None, messages: list[Message]
+) -> int:
+    """양방향 CHAT RCS 실패 메시지에 대해 SMS fallback을 발송한다.
+
+    process_report(웹훅)·process_sent_query(재조정)가 FB_PENDING 으로 넘긴 목록을 받는다 — 실패를
+    먼저 확정한 경로가 보내고, 다른 경로에 뒤늦게 온 같은 실패는 버려진다(_update_message,
+    _is_superseded_report). 호출자는 실패 확정과 대체 발송을 한 트랜잭션으로 커밋한다.
+
+    각 메시지의 cli_key를 {원본}-fb로 갱신하여 SMS 리포트 매칭에 사용하고, report_dt 에는 대체
+    SMS 요청 시각을 남긴다 — 재조정이 -fb cliKey 를 조회할 발송일자(reconcile._query_req_dt)다.
+    양방향 실패 리포트 시각과는 날짜가 다를 수 있다(재조정의 뒤늦은 확정, 웹훅 재시도).
+
+    넘겨받은 행은 대체 SMS 가 접수됐을 때만 FB_PENDING 으로 남긴다. 접수되지 않은 건(클라이언트
+    없음, 요청 예외, 수신자 단위 거부)엔 리포트가 오지 않으므로 FAILED 로 확정한다 — 그대로 두면
+    영영 대기로 남는다.
+
+    Returns:
+        fallback 접수 건수.
+    """
+    if client is None:
+        log.error("SMS fallback 실패: msghub 클라이언트 미초기화")
+
+    # 캠페인별로 그룹화 (caller_number, content 조회용)
+    campaign_cache: dict[int, Campaign] = {}
+    for msg in messages:
+        if msg.campaign_id not in campaign_cache:
+            campaign_cache[msg.campaign_id] = db.get(Campaign, msg.campaign_id)
+
+    sent = 0
+    for msg in messages:
+        campaign = campaign_cache.get(msg.campaign_id)
+        if client is None or campaign is None:
+            msg.status = "FAILED"
+            msg.result_desc = (msg.result_desc or "") + " (SMS fallback 실패)"
+            continue
+
+        fb_cli_key = f"{msg.cli_key}-fb"
+        msg.cli_key = fb_cli_key
+        msg.status = "FB_PENDING"
+        msg.report_dt = _now_iso()
+
+        try:
+            recv = RecvInfo(cli_key=fb_cli_key, phone=msg.to_number)
+            resp = await client.send_sms(
+                callback=campaign.caller_number,
+                msg=campaign.content,
+                recv_list=[recv],
+            )
+        except Exception:
+            log.exception("SMS fallback 발송 실패: msg_id=%s, phone=%s", msg.id, mask_phone(msg.to_number))
+            msg.status = "FAILED"
+            msg.result_desc = (msg.result_desc or "") + " (SMS fallback 실패)"
+            continue
+
+        # 요청이 성공(최상위 10000)해도 수신자 단위로 거부될 수 있다(31101 수신번호 에러 등)
+        # — send_sms 는 최상위 코드만 검사한다. 판정은 dispatch_chat_reply 와 같다.
+        item = resp.items[0] if isinstance(resp, SendResponse) and resp.items else None
+        if item is not None and item.code != SUCCESS_CODE:
+            log.warning(
+                "SMS fallback 수신자 거부: msg_id=%s, phone=%s, code=%s",
+                msg.id, mask_phone(msg.to_number), item.code,
+            )
+            msg.status = "FAILED"
+            msg.result_code = item.code
+            msg.result_desc = f"{item.message} (SMS fallback 거부)"
+            continue
+
+        sent += 1
+
+    # 실패 확정 경로는 이 행들을 FB_PENDING(대기)으로 집계했다 — 실패로 확정한 건을 다시
+    # 집계해야 캠페인이 발송 중(pending_count)으로 남지 않는다. autoflush=False 라 먼저 flush.
+    db.flush()
+    for campaign_id in campaign_cache:
+        _refresh_campaign_counters(db, campaign_id)
+    return sent
+
+
+def _mark_chat_fallback(db: Session, failed_msgs: list[Message]) -> list[Message]:
+    """실패로 확정한 메시지 중 양방향 CHAT(RPCSAXX001) 답장을 FB_PENDING 으로 넘겨 반환한다.
+
+    대화방 답장(compose.dispatch_chat_reply)은 msghub 가 자동 대체하지 않아 send_sms_fallback 이
+    보낸다. -fb 행은 그 대체 SMS 의 결과라 제외한다 — 답장 하나에 대체 SMS 는 한 번이다.
+    """
+    if not failed_msgs:
+        return []
+
+    chat_cids = set(
+        db.execute(
+            select(Campaign.id).where(
+                Campaign.id.in_({m.campaign_id for m in failed_msgs}),
+                Campaign.rcs_messagebase_id == "RPCSAXX001",
+            )
+        ).scalars().all()
+    )
+    fallback_needed: list[Message] = []
+    for msg in failed_msgs:
+        if msg.campaign_id in chat_cids and not msg.cli_key.endswith("-fb"):
+            msg.status = "FB_PENDING"
+            fallback_needed.append(msg)
+    return fallback_needed
 
 
 def _find_message(
@@ -153,7 +258,7 @@ def _find_message(
     에서 phone으로 최근 발송 중인 메시지를 찾아 보조 매칭한다.
 
     {cliKey}-fb 는 양방향 실패 후 대체 SMS 를 보내며 cliKey 를 바꾼 행이다
-    (routes.webhook._send_sms_fallback). 원래 키로 재전송된 실패 리포트를 그 행에
+    (send_sms_fallback). 원래 키로 재전송된 실패 리포트를 그 행에
     붙여야 _update_message 가 버린다. 못 찾으면 msgKey(대체 SMS 리포트가 msg_key 를
     바꾼 뒤엔 불일치)도 빗나가 phone 매칭으로 같은 번호의 다른 미완료 메시지에 붙는다.
     """

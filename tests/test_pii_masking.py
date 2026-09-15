@@ -1,8 +1,8 @@
 """PII 로그 마스킹 회귀 (PIPA — 전화번호 평문 노출 방지).
 
 리포트 매칭 경로의 경고 로그가 전화번호를 평문으로 남기지 않고 mask_phone 으로
-가리는지 caplog 로 고정한다. webhook.py 의 SMS fallback 실패 로그도 동일 헬퍼를
-쓰며(코드 인스펙션 확인), 본 테스트는 트리거가 쉬운 report.py 경로 2건을 검증한다.
+가리는지 caplog 로 고정한다. SMS fallback 실패 로그(send_sms_fallback)도 동일 헬퍼를
+쓰며(코드 인스펙션 확인), 본 테스트는 트리거가 쉬운 매칭 경로 2건을 검증한다.
 """
 from __future__ import annotations
 

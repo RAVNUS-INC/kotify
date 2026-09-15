@@ -6,8 +6,9 @@
 조회해 상태를 보정한다.
 
 `process_sent_query` 가 idempotent(이미 DONE 이면 skip)하므로 주기 중복 실행에
-안전하다. 단일 uvicorn 워커(--workers 1) 전제이므로 lifespan 백그라운드 태스크가
-중복 없이 단일 실행된다.
+안전하다. 양방향 답장(CHAT) 실패를 웹훅보다 먼저 확정하면 웹훅처럼 대체 SMS 를 보낸다
+(report.send_sms_fallback). 단일 uvicorn 워커(--workers 1) 전제이므로 lifespan 백그라운드
+태스크가 중복 없이 단일 실행된다.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Message, MsghubRequest
-from app.services.report import process_sent_query
+from app.services.report import process_sent_query, send_sms_fallback
 from app.util.time import parse_mixed_ts
 
 if TYPE_CHECKING:
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 _KST = ZoneInfo("Asia/Seoul")
-# FB_PENDING: 양방향 실패 후 접수된 -fb 대체 SMS 의 리포트 대기 (routes.webhook._send_sms_fallback).
+# FB_PENDING: 양방향 실패 후 접수된 -fb 대체 SMS 의 리포트 대기 (report.send_sms_fallback).
 # 그 리포트 웹훅이 유실되면 다른 경로로는 확정되지 않는다.
 _PENDING_STATUSES = ("PENDING", "REG", "ING", "FB_PENDING")
 _QUERY_BATCH = 10  # query_sent 1회 최대 10건 (msghub 제약)
@@ -50,9 +51,9 @@ def _req_dt_kst(sent_at_iso: str) -> str:
 def _query_req_dt(cli_key: str, status: str, report_dt: str | None, sent_at: str) -> str:
     """메시지의 현재 cliKey 를 msghub 에 요청한 날짜 (query_sent reqDt).
 
-    FB_PENDING 행의 -fb cliKey 는 발송 요청(MsghubRequest.sent_at)이 아니라, 양방향 실패
-    리포트를 처리하며 곧바로 보낸 대체 SMS 의 키다. 실패 리포트는 RCS 만료 등으로 날짜가
-    바뀐 뒤에 오기도 하므로 그 리포트 시각(report_dt)의 날짜를 쓴다.
+    FB_PENDING 행의 -fb cliKey 는 발송 요청(MsghubRequest.sent_at)이 아니라, 양방향 실패를
+    확정하며 보낸 대체 SMS 의 키다. 실패는 RCS 만료 등으로 날짜가 바뀐 뒤에 확정되기도
+    하므로, 대체 발송(report.send_sms_fallback)이 report_dt 에 남긴 요청 시각의 날짜를 쓴다.
     """
     if status == "FB_PENDING" and cli_key.endswith("-fb"):
         dt = parse_mixed_ts(report_dt)
@@ -104,7 +105,11 @@ async def reconcile_pending_messages(
         except Exception:
             log.exception("query_sent 실패 — 이 배치 skip (다음 주기 재시도)")
             continue
-        processed = process_sent_query(db, raw_items)
+        processed, fallback_needed = process_sent_query(db, raw_items)
+        if fallback_needed:
+            # 웹훅처럼 실패 확정과 대체 발송을 한 트랜잭션으로 커밋한다.
+            fallback_sent = await send_sms_fallback(db, client, fallback_needed)
+            log.info("재조정 SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
         db.commit()
         total += processed
 

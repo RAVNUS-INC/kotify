@@ -1,4 +1,4 @@
-"""양방향 CHAT 답장 실패 → SMS 대체 발송(webhook._send_sms_fallback) 상태 전이.
+"""양방향 CHAT 답장 실패 → SMS 대체 발송(report.send_sms_fallback) 상태 전이.
 
 양방향(RPCSAXX001) 리포트가 실패면 process_report 가 FB_PENDING 으로 넘기고, 웹훅이
 cliKey 를 {원본}-fb 로 바꿔 SMS 를 보낸다. 행의 결과는 그 -fb SMS 의 리포트가 정한다.
@@ -7,6 +7,7 @@ cliKey 를 {원본}-fb 로 바꿔 SMS 를 보낸다. 행의 결과는 그 -fb SM
   대체 SMS 성공 리포트는 DONE 이라 버려져 고객이 받은 답장이 영구 실패로 남던 문제.
 - 대체 SMS 가 접수되지 않았는데(수신자 거부, 클라이언트 없음) FB_PENDING 으로 남아
   리포트도 재조정도 없이 영영 대기로 보이던 문제.
+- 리포트 웹훅이 늦어 재조정이 실패를 먼저 확정하면 대체 SMS 를 아무도 보내지 않던 문제.
 """
 from __future__ import annotations
 
@@ -22,17 +23,23 @@ from app.msghub.codes import SUCCESS_CODE
 from app.msghub.schemas import SendResponse, SendResultItem
 from app.routes.webhook import receive_report
 from app.security.settings_store import SettingsStore
+from app.services.reconcile import reconcile_pending_messages
 
 _PHONE = "01099998888"
 
 
 class _SmsClient:
-    """send_sms 만 흉내내는 msghub 클라이언트 — 요청은 성공(최상위 10000), 수신자 결과는 지정."""
+    """send_sms·query_sent 만 흉내내는 msghub 클라이언트 — SMS 요청은 성공(최상위 10000), 수신자
+    결과는 지정. query_sent 는 sent 에 넣어 둔 cliKey 별 조회 결과를 돌려준다."""
 
     def __init__(self, code=SUCCESS_CODE, message="성공"):
         self.cli_keys: list[str] = []
+        self.sent: dict[str, dict] = {}
         self._code = code
         self._message = message
+
+    async def query_sent(self, cli_keys):
+        return [self.sent[cli_key] for cli_key, _req_dt in cli_keys if cli_key in self.sent]
 
     async def send_sms(self, *, callback, msg, recv_list):
         self.cli_keys += [r.cli_key for r in recv_list]
@@ -189,3 +196,35 @@ def test_sms_fallback_without_client_is_failed_not_pending(db_session, sample_us
     assert msg.result_desc == "RCS 미지원 단말 (SMS fallback 실패)"
     campaign = db_session.get(Campaign, campaign.id)
     assert (campaign.fail_count, campaign.pending_count) == (1, 0)
+
+
+def test_chat_failure_settled_by_reconcile_falls_back_once_despite_late_webhook(
+    db_session, sample_user, monkeypatch
+):
+    """리포트 웹훅이 10분 넘게 실패해 재조정이 양방향 실패를 먼저 확정하면 재조정이 대체 SMS 를 보내고,
+    뒤이어 msghub 재시도로 도착한 같은 실패 리포트로는 다시 보내지 않는다. 대체 SMS 리포트로 전달 확정."""
+    _setup_token(db_session)
+    client = _SmsClient()
+    monkeypatch.setattr("app.main.get_msghub_client", lambda: client)
+    campaign, cli_key = _make_chat_reply(db_session)
+    client.sent[cli_key] = {**_chat_failure(cli_key), "status": "DONE"}
+
+    asyncio.run(reconcile_pending_messages(db_session, client, older_than_minutes=10))
+
+    assert client.cli_keys == [f"{cli_key}-fb"]
+
+    resp = _post_report(db_session, _chat_failure(cli_key))  # msghub 재시도가 이제야 성공
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body) == {"status": "ok", "processed": 0, "fallback": 0}
+    assert client.cli_keys == [f"{cli_key}-fb"]  # 다시 보내지 않는다
+    msg = _message(db_session, campaign.id)
+    assert (msg.status, msg.cli_key) == ("FB_PENDING", f"{cli_key}-fb")
+
+    _post_report(db_session, _sms_success(f"{cli_key}-fb"))
+
+    msg = _message(db_session, campaign.id)
+    assert (msg.status, msg.result_code, msg.channel, msg.cost) == ("DONE", SUCCESS_CODE, "SMS", 9)
+    campaign = db_session.get(Campaign, campaign.id)
+    assert (campaign.ok_count, campaign.fail_count, campaign.pending_count) == (1, 0, 0)
+    assert campaign.state == "COMPLETED"
