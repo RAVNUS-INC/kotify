@@ -229,6 +229,17 @@
 .k-chip.brand{background:var(--brand-soft); border-color:var(--brand-border); color:var(--brand);}
 .k-chip.grp{background:var(--white); border-color:var(--gray-4);}
 .k-chip .dot{width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.65;}
+/* 강제 색상 모드: 전역 :focus-visible 링(globals.css)이 테두리 없는 안쪽 입력에 붙으면 필드 안의 작은 상자로 보이거나 필드 테두리·툴바와 겹친다
+   → 일반 모드 :focus-within 링처럼 필드 전체에 그린다. 안쪽 입력이 :focus-visible 일 때만 그려 지우기·툴바 버튼을 마우스로 눌러도 링이 생기지 않는다.
+   :has() 를 모르는 브라우저는 @supports 블록을 건너뛰어 안쪽 입력의 링이 그대로 남는다.
+   .k-select:focus 의 outline:none 은 전역 링보다 특이도가 높아 따로 되살린다. */
+@media (forced-colors: active){
+  @supports selector(:has(*)){
+    .k-inputgroup:has(.k-input:focus-visible), .k-editor:has(.k-editor-body:focus-visible), .k-chipfield:has(.k-chipfield-input:focus-visible){outline:2px solid Highlight; outline-offset:2px;}
+    .k-inputgroup .k-input:focus-visible, .k-editor-body:focus-visible, .k-chipfield-input:focus-visible{outline:none;}
+  }
+  .k-select:focus-visible{outline:2px solid Highlight; outline-offset:2px;}
+}
 
 /* Checkbox / Radio — custom */
 .k-check, .k-radio{display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--text); cursor:default; user-select:none;}
