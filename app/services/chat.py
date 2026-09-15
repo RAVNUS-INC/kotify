@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -132,10 +133,104 @@ def thread_unread(last_mo_ts: str | None, read_at: str | None) -> bool:
     return _parse_ts_for_sort(last_mo_ts) > _parse_ts_for_sort(read_at or "")
 
 
+# 번호 목록을 IN 절로 묶는 단위 — 구버전 SQLite 바인드 변수 상한(999) 아래로 유지.
+_IN_CHUNK = 500
+
+
+def _chunks(phones: list[str]) -> Iterator[list[str]]:
+    for i in range(0, len(phones), _IN_CHUNK):
+        yield phones[i : i + _IN_CHUNK]
+
+
+def _batch_last_mo_bodies(db: Session, phones: list[str]) -> dict[str, str]:
+    """phone → 가장 최근 고객 수신(MO) 본문. 번호마다 쿼리하지 않고 창 함수로 한 번에 고른다.
+
+    번호별 `ORDER BY coalesce(mo_recv_dt, received_at) DESC LIMIT 1` 과 같은 행을 고른다.
+    시각이 같은 행이 여럿이면 SQLite 의 LIMIT 1 은 먼저 스캔한(mo_number 인덱스 순 = id 가
+    작은) 행을 남기므로 id 오름차순으로 동률을 푼다. 목록 집계와 달리 mo_callback 이 NULL
+    인 행도 후보다.
+    """
+    ts = func.coalesce(MoMessage.mo_recv_dt, MoMessage.received_at)
+    bodies: dict[str, str] = {}
+    for chunk in _chunks(phones):
+        ranked = (
+            select(
+                MoMessage.id,
+                func.row_number()
+                .over(partition_by=MoMessage.mo_number, order_by=(ts.desc(), MoMessage.id))
+                .label("rn"),
+            )
+            .where(MoMessage.mo_number.in_(chunk))
+            .subquery()
+        )
+        rows = db.execute(
+            select(MoMessage.mo_number, MoMessage.mo_msg)
+            .select_from(ranked)
+            .join(MoMessage, MoMessage.id == ranked.c.id)
+            .where(ranked.c.rn == 1)
+        ).all()
+        bodies.update((r.mo_number, r.mo_msg or "") for r in rows)
+    return bodies
+
+
+def _batch_last_mt_bodies(db: Session, phones: list[str]) -> dict[str, str]:
+    """phone → 가장 최근 발송(MT) 캠페인 본문. 고르는 규칙은 _batch_last_mo_bodies 와 같다.
+
+    기준 시각은 coalesce(complete_time, report_dt) — 둘 다 NULL(리포트 전)인 행은 DESC
+    정렬에서 맨 뒤다. 순위는 id 만 매기고 본문은 1위 행에서만 읽는다(긴 LMS 본문을 번호의
+    발송 이력 전체만큼 정렬하지 않도록).
+    """
+    ts = func.coalesce(Message.complete_time, Message.report_dt)
+    bodies: dict[str, str] = {}
+    for chunk in _chunks(phones):
+        ranked = (
+            select(
+                Message.id,
+                func.row_number()
+                .over(partition_by=Message.to_number, order_by=(ts.desc(), Message.id))
+                .label("rn"),
+            )
+            .join(Campaign, Campaign.id == Message.campaign_id)
+            .where(Message.to_number.in_(chunk))
+            .subquery()
+        )
+        rows = db.execute(
+            select(Message.to_number, Campaign.content)
+            .select_from(ranked)
+            .join(Message, Message.id == ranked.c.id)
+            .join(Campaign, Campaign.id == Message.campaign_id)
+            .where(ranked.c.rn == 1)
+        ).all()
+        bodies.update((r.to_number, r.content or "") for r in rows)
+    return bodies
+
+
+def _batch_read_at(db: Session, phones: list[str]) -> dict[str, str]:
+    """phone → 팀 공유 마지막 읽음 시각.
+
+    대화방을 phone 으로 묶으므로 같은 고객에 caller 별 읽음행이 여럿이면 가장 최근 읽음
+    시각으로 합친다(이미 읽은 대화가 안읽음으로 되살아나는 것 방지).
+    """
+    read_at: dict[str, str] = {}
+    for chunk in _chunks(phones):
+        for r in db.execute(
+            select(ThreadRead.phone, ThreadRead.read_at).where(ThreadRead.phone.in_(chunk))
+        ).all():
+            if (r.read_at or "") > read_at.get(r.phone, ""):
+                read_at[r.phone] = r.read_at or ""
+    return read_at
+
+
 def list_threads(
     db: Session, limit: int = 50, offset: int = 0
 ) -> tuple[list[ChatThread], int]:
-    """대화방 목록을 최근 활동순으로 반환한다."""
+    """대화방 목록을 최근 활동순으로 반환한다.
+
+    정렬·자르기는 번호별 집계값(마지막 시각·방향)만으로 먼저 하고, 마지막 본문과 읽음
+    상태는 잘라낸 페이지의 번호만 묶어 조회한다. 쿼리 수는 전체 번호 수와 무관하다
+    (집계 2 + 읽음 1 + 본문 MO/MT 각 1). 번호마다 본문을 조회하면 대량 발송 수신자까지
+    전부 쿼리해 번호 수에 비례해 느려진다.
+    """
     # MT 측 — campaigns.caller_number + messages.to_number로 그룹
     mt_rows = db.execute(
         select(
@@ -207,70 +302,39 @@ def list_threads(
         t["mo_count"] += r.cnt
         _maybe_set_caller(t, r.caller, r.last_t or "")
 
-    # 팀 공유 읽음 상태 — phone → 최신 read_at. 대화방을 phone 으로 묶으므로
-    # 같은 고객에 caller 별 읽음행이 여럿이면 가장 최근 읽음 시각으로 합친다
-    # (이미 읽은 대화가 안읽음으로 되살아나는 것 방지).
-    read_at_map: dict[str, str] = {}
-    for r in db.execute(
-        select(ThreadRead.phone, ThreadRead.read_at)
-    ).all():
-        prev = read_at_map.get(r.phone, "")
-        if (r.read_at or "") > prev:
-            read_at_map[r.phone] = r.read_at or ""
-
-    # 마지막 메시지 상세를 가져와 ChatThread로 빌드
-    built: list[ChatThread] = []
-    for phone, t in threads.items():
-        caller = t["caller"]  # 대표(최근) caller
-        last_mt_t = t["mt_last_t"]
-        last_mo_t = t["mo_last_t"]
-        if last_mo_t > last_mt_t:
-            last_t = last_mo_t
-            last_dir = "IN"
-            mo = db.execute(
-                select(MoMessage.mo_msg)
-                .where(MoMessage.mo_number == phone)
-                .order_by(
-                    func.coalesce(MoMessage.mo_recv_dt, MoMessage.received_at).desc()
-                )
-                .limit(1)
-            ).scalar_one_or_none()
-            last_body = mo or ""
+    # 마지막 활동 시각·방향은 집계값만으로 정해진다 — 본문을 읽기 전에 정렬해 자른다.
+    for t in threads.values():
+        if t["mo_last_t"] > t["mt_last_t"]:
+            t["last_t"], t["last_dir"] = t["mo_last_t"], "IN"
         else:
-            last_t = last_mt_t
-            last_dir = "OUT"
-            last_body_row = db.execute(
-                select(Campaign.content)
-                .join(Message, Message.campaign_id == Campaign.id)
-                .where(Message.to_number == phone)
-                .order_by(
-                    func.coalesce(Message.complete_time, Message.report_dt).desc()
-                )
-                .limit(1)
-            ).scalar_one_or_none()
-            last_body = last_body_row or ""
+            t["last_t"], t["last_dir"] = t["mt_last_t"], "OUT"
 
-        # 안읽음 = 고객(MO) 최종 메시지가 팀 마지막 읽음 시각 이후.
-        read_at = read_at_map.get(phone, "")
-        unread = thread_unread(last_mo_t, read_at)
+    # last_t 는 ISO 와 msghub 원본이 섞여 있어 parse 해서 정렬. 대량 발송 리포트는 같은
+    # 초에 몰려 같은 문자열이 반복되므로 서로 다른 값만 파싱한다. 안정 정렬이라 시각이
+    # 같은 대화방은 집계 순서를 유지한다.
+    sort_keys = {s: _parse_ts_for_sort(s) for s in {t["last_t"] for t in threads.values()}}
+    ordered = sorted(threads.values(), key=lambda t: sort_keys[t["last_t"]], reverse=True)
+    page = ordered[offset : offset + limit]
 
-        built.append(
-            ChatThread(
-                caller=caller,
-                phone=phone,
-                last_timestamp=last_t,
-                last_body=last_body,
-                last_direction=last_dir,
-                unread=unread,
-                mo_count=t["mo_count"],
-                mt_count=t["mt_count"],
-            )
+    in_bodies = _batch_last_mo_bodies(db, [t["phone"] for t in page if t["last_dir"] == "IN"])
+    out_bodies = _batch_last_mt_bodies(db, [t["phone"] for t in page if t["last_dir"] == "OUT"])
+    read_at_map = _batch_read_at(db, [t["phone"] for t in page])
+
+    built = [
+        ChatThread(
+            caller=t["caller"],  # 대표(최근) caller
+            phone=t["phone"],
+            last_timestamp=t["last_t"],
+            last_body=(in_bodies if t["last_dir"] == "IN" else out_bodies).get(t["phone"], ""),
+            last_direction=t["last_dir"],
+            # 안읽음 = 고객(MO) 최종 메시지가 팀 마지막 읽음 시각 이후.
+            unread=thread_unread(t["mo_last_t"], read_at_map.get(t["phone"], "")),
+            mo_count=t["mo_count"],
+            mt_count=t["mt_count"],
         )
-
-    # last_timestamp 도 ISO 와 msghub 원본 섞여있어 parse 해서 정렬.
-    built.sort(key=lambda t: _parse_ts_for_sort(t.last_timestamp), reverse=True)
-    total = len(built)
-    return built[offset : offset + limit], total
+        for t in page
+    ]
+    return built, len(ordered)
 
 
 def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
