@@ -8,9 +8,6 @@ import { ThreadView } from './ThreadView';
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
-vi.mock('./useChatStream', () => ({
-  useChatStream: () => {},
-}));
 vi.mock('@/lib/chat', () => ({
   markReadClient: vi.fn().mockResolvedValue(undefined),
   sendMessageClient: vi.fn(),
@@ -48,6 +45,19 @@ describe('ThreadView 대화방 전환', () => {
 
     expect(screen.getByRole('textbox', { name: '메시지 입력' })).toHaveValue('');
     expect(screen.getByRole('radio', { name: '일반 SMS' })).toBeChecked();
+  });
+});
+
+describe('ThreadView 실시간 갱신', () => {
+  it('SSE 를 따로 구독하지 않는다 — 페이지의 ChatLiveRefresh 하나가 탭당 새로고침을 1회로 맡는다', () => {
+    const EventSourceSpy = vi.fn();
+    vi.stubGlobal('EventSource', EventSourceSpy);
+    try {
+      render(<ThreadView thread={thread('0212345678:01011112222')} />);
+      expect(EventSourceSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

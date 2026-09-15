@@ -6,14 +6,13 @@ import type { ChatThreadDetail } from '@/types/chat';
 import { markReadClient } from '@/lib/chat';
 import { MessageBubble } from './MessageBubble';
 import { ThreadComposer } from './ThreadComposer';
-import { useChatStream } from './useChatStream';
 
 export type ThreadViewProps = {
   thread: ChatThreadDetail;
 };
 
+// 실시간 갱신(SSE)은 여기서 구독하지 않는다 — 페이지의 ChatLiveRefresh 가 탭당 하나로 맡는다.
 export function ThreadView({ thread }: ThreadViewProps) {
-  useChatStream();
   const router = useRouter();
 
   const scrollRef = useRef<HTMLDivElement>(null);

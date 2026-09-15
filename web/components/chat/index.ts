@@ -28,5 +28,7 @@ export { ThreadRecipientCard } from './ThreadRecipientCard';
 export type { ThreadRecipientCardProps } from './ThreadRecipientCard';
 
 export { useChatStream } from './useChatStream';
+export type { ChatStreamOptions } from './useChatStream';
 
 export { ChatLiveRefresh } from './ChatLiveRefresh';
+export type { ChatLiveRefreshProps } from './ChatLiveRefresh';

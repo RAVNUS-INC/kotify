@@ -39,6 +39,7 @@ from app.db import get_db
 from app.models import Campaign, Message, MoMessage
 from app.msghub.schemas import MoWebhookPayload, RecvInfo, WebhookReport
 from app.security.settings_store import SettingsStore
+from app.services import events
 from app.services.report import process_report
 from app.util.phone import mask_phone, normalize_phone
 
@@ -166,15 +167,21 @@ async def receive_report(
             log.info("SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
 
         db.commit()
-        log.info("웹훅 리포트 처리: %d/%d건", processed, report.rpt_cnt)
-        return JSONResponse(
-            {"status": "ok", "processed": processed, "fallback": fallback_sent},
-            status_code=200,
-        )
     except Exception:
         db.rollback()
         log.exception("웹훅 리포트 처리 실패")
         return JSONResponse({"error": "processing failed"}, status_code=400)
+
+    log.info("웹훅 리포트 처리: %d/%d건", processed, report.rpt_cnt)
+    # 열린 대화방의 전달 상태(대기 → 전달/실패)와 채널 라벨을 새로고침 없이 반영한다.
+    # 커밋이 끝나고 바뀐 행이 있을 때만. 대량 발송 리포트는 몰려오므로 창당 1회로 합쳐
+    # 발행한다 — 이벤트마다 열린 탭이 목록·상세를 다시 불러온다(events.publish_throttled).
+    if processed or fallback_sent:
+        events.publish_throttled("thread.updated")
+    return JSONResponse(
+        {"status": "ok", "processed": processed, "fallback": fallback_sent},
+        status_code=200,
+    )
 
 
 def _active_caller_digits(db: Session) -> set[str]:
@@ -339,8 +346,6 @@ async def receive_mo(
     # 방어적으로 한 번 더 감싼다(알림 실패가 msghub success 를 막지 않게).
     if saved_mos:
         try:
-            from app.services import events
-
             events.publish("message.new")
         except Exception:  # noqa: BLE001
             log.debug("SSE 이벤트 발행 실패(무시)", exc_info=True)

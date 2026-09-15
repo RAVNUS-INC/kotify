@@ -480,9 +480,11 @@ def api_mark_read(
 async def chat_stream() -> StreamingResponse:
     """SSE — 대화방 실시간 갱신 이벤트 스트림.
 
-    고객 회신(MO) 수신 시 webhook 이 events.publish("message.new") 를 호출하면
-    여기 연결된 브라우저로 즉시 전달되고, 프론트(useChatStream)가 router.refresh()
-    로 화면을 갱신한다. 이벤트가 없으면 25초마다 ping 을 보내 연결을 유지한다
+    고객 회신(MO) 수신 시 webhook 이 events.publish("message.new") 를, 발송 결과
+    리포트·재조정이 발신 전달 상태를 바꾸면 events.publish_throttled("thread.updated")
+    (창당 1회)를 호출한다. 이벤트는 여기 연결된 브라우저로 전달되고, 프론트
+    (useChatStream)가 router.refresh() 로 화면을 갱신한다 — thread.updated 는 전달 대기
+    메시지가 보이는 대화방에서만. 이벤트가 없으면 25초마다 ping 을 보내 연결을 유지한다
     (프록시 idle timeout 방지).
 
     전제: uvicorn --workers 1 (app/services/events.py 주석 참고).
