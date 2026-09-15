@@ -3,6 +3,7 @@ export type {
   MessageBubbleProps,
   MessageSide,
   MessageKind,
+  MessageStatus,
 } from './MessageBubble';
 
 export { ChatFilters } from './ChatFilters';

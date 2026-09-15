@@ -54,7 +54,13 @@ export function ThreadView({ thread }: ThreadViewProps) {
           </div>
         ) : (
           thread.messages.map((m) => (
-            <MessageBubble key={m.id} side={m.side} kind={m.kind} timestamp={m.time}>
+            <MessageBubble
+              key={m.id}
+              side={m.side}
+              kind={m.kind}
+              status={m.status}
+              timestamp={m.time}
+            >
               {m.text}
             </MessageBubble>
           ))

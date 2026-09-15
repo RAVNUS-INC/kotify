@@ -4,6 +4,11 @@ export type ChatChannel = 'sms' | 'lms' | 'mms' | 'rcs' | 'kakao';
 export type MessageSide = 'us' | 'them';
 /** 답장 전송 방식 — 새 발송 화면과 같은 구분: 일반(SMS) / RCS. */
 export type SendChannel = 'rcs' | 'sms';
+/**
+ * 발신 메시지 전달 상태. pending = 결과 리포트 대기(SMS 대체 발송 중 포함),
+ * sent = 전달 성공 리포트, failed = msghub 요청 실패 또는 실패 리포트.
+ */
+export type DeliveryStatus = 'pending' | 'sent' | 'failed';
 
 export type ChatMessage = {
   id: string;
@@ -12,6 +17,8 @@ export type ChatMessage = {
   text: string;
   /** "HH:MM" */
   time: string;
+  /** 발신(us) 전용. 결과를 알 수 없는 과거 발송은 없음. */
+  status?: DeliveryStatus;
 };
 
 export type ChatThread = {

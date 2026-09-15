@@ -50,3 +50,36 @@ describe('ThreadView 대화방 전환', () => {
     expect(screen.getByRole('radio', { name: '일반 SMS' })).toBeChecked();
   });
 });
+
+describe('ThreadView 발신 전달 상태', () => {
+  it('API 메시지의 status 를 말풍선에 넘겨 실패한 답장을 구분한다', () => {
+    render(
+      <ThreadView
+        thread={{
+          ...thread('0212345678:01011112222'),
+          messages: [
+            {
+              id: 'm-out-1',
+              side: 'us',
+              kind: 'rcs',
+              text: '전달된 답장',
+              time: '01:30',
+              status: 'sent',
+            },
+            {
+              id: 'm-out-2',
+              side: 'us',
+              kind: 'rcs',
+              text: '실패한 답장',
+              time: '01:38',
+              status: 'failed',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('01:30 / RCS')).toBeInTheDocument();
+    expect(screen.getByText('01:38 / RCS · 실패')).toBeInTheDocument();
+  });
+});

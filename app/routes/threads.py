@@ -169,13 +169,18 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
             kind = "kakao"
 
     id_suffix = f"{m.direction.lower()}-{m.mo_id or m.msg_id or 'x'}"
-    return {
+    row: dict = {
         "id": f"m-{id_suffix}",
         "side": side,
         "kind": kind,
         "text": m.body or "",
         "time": fmt_kst_hhmm(m.timestamp),
     }
+    # 발신 전달 상태(services.chat.delivery_status) — 수신(IN)엔 없고, 알 수 없는 과거
+    # 발송(None)도 생략해 대기·실패로 단정하지 않는다.
+    if m.delivery:
+        row["status"] = m.delivery
+    return row
 
 
 def _campaign_label(subject: str | None, content: str | None, cid: int) -> str:

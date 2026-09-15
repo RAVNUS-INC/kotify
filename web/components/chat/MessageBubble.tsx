@@ -5,10 +5,14 @@ export type MessageSide = 'us' | 'them';
 // RCS/SMS/LMS/MMS/카카오 세분화. 색상은 발/수신만 구분하고 채널은 텍스트
 // 라벨 (`01:38 / RCS`) 로 표시.
 export type MessageKind = 'rcs' | 'sms' | 'lms' | 'mms' | 'kakao';
+// 발신 전달 상태 — web/types/chat.ts 의 DeliveryStatus 와 같은 값.
+export type MessageStatus = 'pending' | 'sent' | 'failed';
 
 export type MessageBubbleProps = {
   side?: MessageSide;
   kind?: MessageKind;
+  /** 발신(us) 전용 — 수신(them) 말풍선에서는 무시한다. */
+  status?: MessageStatus;
   timestamp?: string;
   children: ReactNode;
   className?: string;
@@ -39,16 +43,33 @@ const KIND_LABEL: Record<MessageKind, string> = {
   kakao: '카카오',
 };
 
+// 상태도 채널처럼 텍스트로 붙인다 (`01:38 / RCS · 실패`). 발신 대부분인 전달 성공(sent)은
+// 라벨을 늘리지 않고, 실패는 놓치지 않게 메타 라벨을 danger 색으로 — 색은 보조일 뿐.
+const STATUS_LABEL: Record<MessageStatus, string | null> = {
+  pending: '대기',
+  sent: null,
+  failed: '실패',
+};
+
 export function MessageBubble({
   side = 'them',
   kind = 'sms',
+  status,
   timestamp,
   children,
   className,
 }: MessageBubbleProps) {
   const bubbleStyle = STYLES[side][kind === 'kakao' ? 'kakao' : 'default'];
+  // 수신 말풍선은 status 가 와도 기존 표시 그대로.
+  const outStatus = side === 'us' ? status : undefined;
+  const statusLabel = outStatus ? STATUS_LABEL[outStatus] : null;
   // `01:38 / RCS` 형식 — 시간이 없으면 채널만, 채널이 없으면 시간만.
-  const meta = timestamp ? `${timestamp} / ${KIND_LABEL[kind]}` : KIND_LABEL[kind];
+  const channelMeta = timestamp ? `${timestamp} / ${KIND_LABEL[kind]}` : KIND_LABEL[kind];
+  const meta = statusLabel ? `${channelMeta} · ${statusLabel}` : channelMeta;
+  const metaClass = cn(
+    'whitespace-nowrap font-mono text-[10px]',
+    outStatus === 'failed' ? 'text-danger' : 'text-ink-dim',
+  );
 
   return (
     <div
@@ -58,22 +79,16 @@ export function MessageBubble({
         className,
       )}
     >
-      {side === 'us' && (
-        <span className="whitespace-nowrap font-mono text-[10px] text-ink-dim">
-          {meta}
-        </span>
-      )}
+      {side === 'us' && <span className={metaClass}>{meta}</span>}
       <div
         className={cn(BASE, bubbleStyle)}
-        aria-label={`${side === 'us' ? '보낸' : '받은'} ${KIND_LABEL[kind]} 메시지`}
+        aria-label={`${side === 'us' ? '보낸' : '받은'} ${KIND_LABEL[kind]} 메시지${
+          statusLabel ? `, 전송 ${statusLabel}` : ''
+        }`}
       >
         {children}
       </div>
-      {side === 'them' && (
-        <span className="whitespace-nowrap font-mono text-[10px] text-ink-dim">
-          {meta}
-        </span>
-      )}
+      {side === 'them' && <span className={metaClass}>{meta}</span>}
     </div>
   );
 }
