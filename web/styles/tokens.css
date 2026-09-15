@@ -236,6 +236,8 @@
 .k-check .box{border-radius:3px;}
 .k-radio .box{border-radius:50%;}
 .k-check:hover .box, .k-radio:hover .box{border-color:var(--gray-7);}
+/* 실제 input 은 sr-only 라 전역 :focus-visible 링이 잘려 안 보인다 → 바로 뒤 .box 에 같은 링을 그린다 */
+.k-check input:focus-visible + .box, .k-radio input:focus-visible + .box{box-shadow:0 0 0 3px rgba(59,0,139,.12);}
 .k-check.on .box, .k-radio.on .box{background:var(--brand); border-color:var(--brand);}
 .k-check.on .box::after{content:''; width:9px; height:5px; border-left:1.5px solid #fff; border-bottom:1.5px solid #fff; transform:rotate(-45deg) translate(1px,-1px);}
 .k-radio.on .box::after{content:''; width:6px; height:6px; border-radius:50%; background:#fff;}
