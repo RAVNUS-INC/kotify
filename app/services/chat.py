@@ -18,6 +18,8 @@ from app.msghub.codes import (
     CHAT_SESSION_CAP_KRW,
     CHAT_SESSION_MAX_UNITS,
     CHAT_SESSION_WINDOW_HOURS,
+    REPLY_ID_SAFETY_MARGIN_MINUTES,
+    REPLY_ID_VALID_HOURS,
     SUCCESS_CODE,
     chat_session_cost,
 )
@@ -404,16 +406,18 @@ def validate_reply_content(content: str) -> dict:
 
 
 def _fresh_reply_id(db: Session, caller: str, phone: str) -> str | None:
-    """(caller, phone) 의 양방향 reply_id — 24h 세션 안에 받은 최신 MO 것만. 없으면 None.
+    """(caller, phone) 의 양방향 reply_id — 아직 유효한 최신 MO 것만. 없으면 None.
 
-    양방향(8원) 응답은 고객 MO 의 replyId 컨텍스트가 필요하다(webhook 이 저장). 예전엔
-    나이 제한 없이 최신 replyId 를 썼는데, 세션이 지난 replyId 는 msghub 가 거부하거나
-    접수 후 리포트에서 실패하고, 후자는 webhook 이 단방향 RCS 를 건너뛰고 일반 SMS 로
-    대체 발송한다 — 며칠 뒤 답장이 SMS 로 나가던 경로. 세션 밖이면 None 을 돌려
-    호출자가 바로 단방향 RCS 로 보내게 한다.
+    양방향(8원) 응답은 고객 MO 의 replyId 가 필요하다(webhook 이 저장). replyId 는 받은 뒤
+    24시간 유효하다(REPLY_ID_VALID_HOURS). 만료된 replyId 는 msghub 가 거부하거나 접수 후
+    리포트에서 실패해, 답장이 리포트를 기다렸다가 대체 발송으로 늦게 나간다 — 예전엔 나이
+    제한 없이 최신 replyId 를 써서 며칠 뒤 답장이 이 경로를 탔다. 경계 직전에 보낸 요청이
+    이통사에 닿기 전에 만료되지 않게 여유(REPLY_ID_SAFETY_MARGIN_MINUTES)를 빼고 판정하고,
+    그보다 오래됐으면 None 을 돌려 호출자가 바로 단방향 RCS 로 보내게 한다.
 
-    mo_recv_dt(msghub KST)·received_at(ISO) 포맷이 섞일 수 있어 문자열 정렬 대신
-    parse_mixed_ts 로 시각을 비교한다.
+    유효시간은 msghub 가 MO 를 받은 시각(mo_recv_dt)부터 센다 — 우리 서버 수신 시각
+    (received_at)은 웹훅 재전송으로 늦을 수 있어 mo_recv_dt 가 없을 때만 쓴다. 두 포맷
+    (msghub KST·ISO)이 섞일 수 있어 문자열 정렬 대신 parse_mixed_ts 로 시각을 비교한다.
     """
     rows = db.execute(
         select(MoMessage.reply_id, MoMessage.mo_recv_dt, MoMessage.received_at).where(
@@ -429,7 +433,10 @@ def _fresh_reply_id(db: Session, caller: str, phone: str) -> str | None:
             latest = (ts, r.reply_id)
     if latest is None:
         return None
-    if datetime.now(UTC) - latest[0] > timedelta(hours=CHAT_SESSION_WINDOW_HOURS):
+    usable_for = timedelta(hours=REPLY_ID_VALID_HOURS) - timedelta(
+        minutes=REPLY_ID_SAFETY_MARGIN_MINUTES
+    )
+    if datetime.now(UTC) - latest[0] > usable_for:
         return None
     return latest[1]
 

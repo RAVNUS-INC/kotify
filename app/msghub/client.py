@@ -333,21 +333,23 @@ class MsghubClient:
 
         ⚠️  **이 엔드포인트는 MO 응답 전용.** msghub 공식 문서 §2.3.2 §2에
         따르면 `/rcs/bi/v1.1`은 "고객의 MO 수신에 대한 응답 발송"에만 사용
-        가능하다. outbound 브로드캐스트에 사용 시 replyId(사전등록 응답
-        템플릿 ID)가 없어 29003/404로 실패한다. outbound 단문은 `send_rcs`
-        를 `messagebase_id="RPSSAXX001"`(통합 RCS SMS형)로 호출해야 한다.
+        가능하다. outbound 브로드캐스트엔 응답할 MO 의 replyId 가 없다.
+        outbound 단문은 `send_rcs`를 `messagebase_id="RPSSAXX001"`(통합 RCS
+        SMS형)로 호출해야 한다.
 
-        현재 코드에선 호출하는 곳이 없으며, 장래에 MO 자동응답 기능을
-        구현할 때 재사용한다.
+        호출: 대화방 답장(compose.dispatch_chat_reply). 요청 필드는 공식 §2.3.2 §2
+        Request Body 기준이며 moRecvDt 같은 MO 수신 시각 필드는 없다.
+        양방향엔 fbInfoLst 도 없어, 리포트 실패 시 webhook 이 대체 발송한다.
 
         messagebase_id 기본값: RPCSAXX001 (양방향 텍스트형, 8원).
-        양방향은 recvInfoLst 대신 최상위 phone/cliKey 사용.
+        양방향은 recvInfoLst 대신 최상위 phone/cliKey 사용 (cliKey 최대 20자).
         chatbot_id는 인스턴스의 _chatbot_id 사용.
 
-        reply_id: 양방향 응답메시지 ID (U+ 콘솔에 사전 등록된 UUID 형식).
-            MO 응답 발송 시 어떤 응답 템플릿을 쓸지 지정.
-        telco: 수신자 통신사 (LGU/SKT/KT). MNP 때문에 앱에서 번호만으로
-            판정 불가 → 빈 문자열이면 msghub가 자동 감지 시도.
+        reply_id: 고객 MO(rcsBiLst)의 replyId. 받은 뒤 24시간 유효
+            (codes.REPLY_ID_VALID_HOURS).
+        telco: 수신자 통신사 (LGU/SKT/KT). 공식 스펙상 필수(●)지만 RCS 양방향 MO
+            페이로드에 telco 가 없고, MNP 때문에 번호만으로 판정할 수도 없어 빈
+            문자열로 보낸다. 빈 값을 msghub 가 어떻게 처리하는지는 문서에 없다(확인 필요).
         """
         if not self._chatbot_id:
             raise MsghubError("RCS 양방향 발송에 chatbot_id가 필요합니다", code="CONFIG_ERROR")

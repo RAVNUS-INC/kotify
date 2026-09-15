@@ -1,9 +1,9 @@
 """대화방 답장(send_reply) — 전송 방식(send_channel)별 경로.
 
-rcs: 24h 세션 안의 고객 MO reply_id 가 있으면 RCS 양방향(send_rcs_chat, RPCSAXX001,
-8원)으로 응답하고, reply_id 가 없거나 세션이 지났거나 양방향 발송이 실패하면 단방향
-RCS(dispatch_campaign)로 fallback 한다. 어느 경우든 답장은 전달되며, 양방향 실패 시
-미커밋 Campaign 은 폐기되어 dangling 캠페인이 남지 않는다.
+rcs: 유효한 고객 MO reply_id(받은 뒤 24h, 만료 직전 여유 제외)가 있으면 RCS 양방향
+(send_rcs_chat, RPCSAXX001, 8원)으로 응답하고, reply_id 가 없거나 만료가 가깝거나 양방향
+발송이 실패하면 단방향 RCS(dispatch_campaign)로 fallback 한다. 어느 경우든 답장은 전달되며,
+양방향 실패 시 미커밋 Campaign 은 폐기되어 dangling 캠페인이 남지 않는다.
 sms(일반): RCS 없이 직접 SMS 로 보낸다.
 """
 from __future__ import annotations
@@ -14,7 +14,11 @@ import pytest
 from sqlalchemy import func, select
 
 from app.models import Campaign, Message, MoMessage
-from app.msghub.codes import SUCCESS_CODE
+from app.msghub.codes import (
+    REPLY_ID_SAFETY_MARGIN_MINUTES,
+    REPLY_ID_VALID_HOURS,
+    SUCCESS_CODE,
+)
 from app.msghub.schemas import MsghubError, SendResponse, SendResultItem
 from app.services.chat import send_reply
 from app.util.time import KST
@@ -132,8 +136,8 @@ async def test_reply_falls_back_when_chat_fails_no_dangling(db_session, sample_u
 async def test_reply_skips_chat_when_session_expired(db_session, sample_user, sample_caller):
     """마지막 MO 가 24h 세션 밖이면 오래된 reply_id 로 양방향을 시도하지 않고 바로 단방향 RCS.
 
-    회귀: 며칠 전 MO 의 replyId 로 양방향을 보내면 리포트 단계 실패 시 webhook 이 단방향 RCS
-    를 건너뛰고 일반 SMS 로 대체 발송해, RCS 로 대화하던 번호가 며칠 뒤 SMS 로 바뀌었다.
+    회귀: 며칠 전 MO 의 replyId 로 양방향을 보내면 리포트 단계에서 실패해 대체 발송으로 늦게
+    나갔다(당시 webhook 은 일반 SMS 로 보내 RCS 로 대화하던 번호가 SMS 로 바뀌었다).
     """
     _make_mo(db_session, reply_id="rid-stale", recv_dt=_ago(hours=25).isoformat())
     client = _ReplySpyClient()
@@ -144,6 +148,53 @@ async def test_reply_skips_chat_when_session_expired(db_session, sample_user, sa
     assert client.rcs_calls == 1
     assert client.sms_calls == 0
     assert campaign.rcs_messagebase_id == "RPSSAXX001"
+
+
+_REPLY_ID_USABLE = timedelta(hours=REPLY_ID_VALID_HOURS) - timedelta(minutes=REPLY_ID_SAFETY_MARGIN_MINUTES)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("age", "uses_chat"),
+    [
+        (_REPLY_ID_USABLE - timedelta(minutes=5), True),                   # 여유를 빼고도 유효
+        (timedelta(hours=REPLY_ID_VALID_HOURS) - timedelta(minutes=5), False),  # 만료 5분 전
+    ],
+    ids=["usable", "about-to-expire"],
+)
+async def test_reply_id_near_expiry_goes_oneway(
+    db_session, sample_user, sample_caller, age, uses_chat
+):
+    """replyId 는 받은 뒤 24시간 유효(이통 공통 규격) — 만료 직전 것은 쓰지 않는다.
+
+    24h 경계에 딱 맞춰 보내면 msghub→이통사 전달 중 만료돼 리포트에서 실패하고 대체 발송을
+    기다리게 되므로, 안전 여유(REPLY_ID_SAFETY_MARGIN_MINUTES) 안이면 바로 단방향 RCS 로 보낸다.
+    """
+    _make_mo(db_session, reply_id="rid-edge", recv_dt=(datetime.now(UTC) - age).isoformat())
+    client = _ReplySpyClient()
+
+    await send_reply(db_session, client, sample_user, _CALLER, _PHONE, "네 확인했습니다")
+
+    assert client.chat_calls == (1 if uses_chat else 0)
+    assert client.rcs_calls == (0 if uses_chat else 1)
+
+
+@pytest.mark.asyncio
+async def test_reply_id_age_counts_from_msghub_receipt(db_session, sample_user, sample_caller):
+    """유효시간은 msghub 가 MO 를 받은 시각(mo_recv_dt)부터 센다 — 우리 서버 수신 시각이 아니라.
+
+    MO 웹훅이 재전송돼 늦게 받으면 received_at 은 최근(1시간 전)이어도 replyId 는 이미 만료(25시간).
+    """
+    _make_mo(
+        db_session, reply_id="rid-late-webhook",
+        recv_dt=_ago(hours=25).isoformat(), received_at=_ago(hours=1).isoformat(),
+    )
+    client = _ReplySpyClient()
+
+    await send_reply(db_session, client, sample_user, _CALLER, _PHONE, "네 확인했습니다")
+
+    assert client.chat_calls == 0
+    assert client.rcs_calls == 1
 
 
 @pytest.mark.asyncio
