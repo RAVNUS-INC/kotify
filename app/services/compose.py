@@ -536,7 +536,8 @@ async def dispatch_campaign(
     # 요청 예외로 실패 기록한 청크도 msghub 가 실제로 접수했다면 리포트가 오고, 그 행에 매칭되면 state 는
     # 리포트 집계를 따른다. 뒤 청크를 보내는 사이 이미 처리된 앞 청크 리포트는 위 판정(발송 결과만 셈)이
     # 덮었으므로 다시 집계한다 — 뒤이어 올 리포트가 없으면 덮인 채로 남는다. 응답을 기다리는 동안(행을
-    # 기록하기 전) 온 리포트는 매칭할 행이 없어 반영되지 않는다.
+    # 기록하기 전) 온 리포트는 매칭할 행이 없어 버려지므로, 재조정이 그 행을 msghub 에 조회해 확정한다
+    # (services.reconcile).
     has_report = db.execute(
         select(Message.id).where(Message.campaign_id == campaign.id, Message.status == "DONE").limit(1)
     ).first()
@@ -875,7 +876,8 @@ def _record_failed_chunk(
 
     cliKey 는 실패한 요청에 쓴 키와 같아야 한다 — 직접 재발송(_send_chunk_direct)이면 -fb.
     요청 예외여도 msghub 가 실제로 접수했으면 리포트가 그 키로 오는데, 키가 다르면 FAILED 행은
-    phone 보조매칭 대상도 아니라 리포트가 어디에도 붙지 않는다.
+    phone 보조매칭 대상도 아니라 리포트가 어디에도 붙지 않는다. 재조정(services.reconcile)도 이
+    키로 조회한다 — 응답 코드 없는 요청(response_code NULL)과 result_code 없는 FAILED 행이 그 대상이다.
     """
     msghub_req = MsghubRequest(
         campaign_id=campaign_id,

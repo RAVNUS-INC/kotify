@@ -6,15 +6,17 @@ msghub 가 HTTP 200 으로 응답하면서 응답 본문 item 단위로 일부 �
 fail_count=0 으로 오표시되었다.
 
 청크 요청이 예외(응답 타임아웃 등)여도 msghub 는 실제로 접수했을 수 있다. 실패로 기록한
-행에도 리포트가 오면 캠페인 state 가 그 결과를 따라야 한다.
+행에도 리포트가 오면 캠페인 state 가 그 결과를 따라야 한다. 행을 기록하기 전에 와서 버려진
+리포트는 재조정 조회가 대신한다.
 """
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.models import Campaign, Message, MsghubRequest
 from app.msghub.codes import SUCCESS_CODE
@@ -27,6 +29,7 @@ from app.msghub.schemas import (
     SendResultItem,
 )
 from app.services.compose import _create_messages_from_response, dispatch_campaign
+from app.services.reconcile import reconcile_pending_messages
 from app.services.report import process_report
 
 
@@ -294,6 +297,75 @@ async def test_partially_failed_dispatch_follows_reports(db_session, sample_user
 
     process_report(db_session, [_report(f"c{campaign.id}-1-0", recipients[10])])
     assert (campaign.state, campaign.ok_count, campaign.fail_count) == ("COMPLETED", 11, 0)
+    assert campaign.completed_at == completed_at
+
+
+class _AcceptedButTimedOutClient(_FakeRcsClient):
+    """msghub 는 요청 예외 청크까지 모두 접수해 전달했다 — query_sent 는 접수한 키의 전달 결과를, 모르는
+    키엔 INVALID_KEY 를 돌려준다."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.accepted: set[str] = set()
+
+    async def send_rcs(self, *, recv_list, **kwargs):
+        self.accepted.update(r.cli_key for r in recv_list)
+        return await super().send_rcs(recv_list=recv_list, **kwargs)
+
+    async def query_sent(self, cli_keys):
+        return [
+            {"cliKey": key, "status": "DONE", "resultCode": SUCCESS_CODE, "ch": "RCS", "productCode": "SMS"}
+            if key in self.accepted else {"cliKey": key, "status": "INVALID_KEY"}
+            for key, _req_dt in cli_keys
+        ]
+
+
+@pytest.mark.asyncio
+async def test_report_dropped_while_chunk_request_waits_is_recovered_by_reconcile(
+    db_session, sample_user, sample_caller,
+):
+    """청크 요청 응답을 기다리는 사이 온 리포트는 매칭할 행이 없어 버려지고(웹훅은 200 이라 재전송도 없다),
+    요청은 결국 예외라 실패로 기록된다. 재조정이 그 행을 msghub 에 조회해 실제 전달 결과로 확정한다 —
+    완료 시각은 발송 때 정한 대로 둔다."""
+    recipients = ["01000000001", "01000000002"]
+    matched_while_waiting: list[int] = []
+
+    def webhook_before_rows_exist(chunk_idx):
+        cid = db_session.execute(select(func.max(Campaign.id))).scalar_one()
+        processed, _ = process_report(db_session, [
+            _report(f"c{cid}-{chunk_idx}-{i}", phone) for i, phone in enumerate(recipients)
+        ])
+        db_session.commit()
+        matched_while_waiting.append(processed)
+
+    client = _AcceptedButTimedOutClient(timeout_chunks={0}, on_chunk=webhook_before_rows_exist)
+    campaign = await dispatch_campaign(
+        db=db_session,
+        msghub_client=client,
+        created_by=sample_user.sub,
+        caller_number=sample_caller.number,
+        content="안내 메시지입니다",
+        recipients=recipients,
+        message_type="SMS",
+    )
+    assert matched_while_waiting == [0]
+    assert (campaign.state, campaign.fail_count) == ("FAILED", 2)
+    completed_at = campaign.completed_at
+
+    # 웹훅 도착 시간(재조정 cutoff 10분)이 지났다
+    db_session.execute(
+        update(MsghubRequest)
+        .where(MsghubRequest.campaign_id == campaign.id)
+        .values(sent_at=(datetime.now(UTC) - timedelta(minutes=11)).isoformat())
+    )
+    db_session.commit()
+
+    n = await reconcile_pending_messages(db_session, client)
+
+    assert n == 2
+    assert (campaign.state, campaign.ok_count, campaign.fail_count, campaign.pending_count) == (
+        "COMPLETED", 2, 0, 0,
+    )
     assert campaign.completed_at == completed_at
 
 

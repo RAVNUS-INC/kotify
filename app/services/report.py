@@ -81,7 +81,13 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
 
 
 def process_sent_query(db: Session, raw_items: list[dict]) -> int:
-    """cliKey 기반 개별 조회 결과를 처리한다."""
+    """cliKey 기반 개별 조회 결과를 처리한다. 확정(DONE)한 건수를 반환한다.
+
+    요청 예외로 실패 기록한 행(compose._record_failed_chunk — FAILED 인데 result_code 없음)도 받는다
+    (services.reconcile). msghub 가 접수했으면 결과대로 확정하거나 대기(REG/ING)로 되돌리고, 결과를 줄
+    수 없다고 답하면(INVALID_KEY 키 오류·OVER_DATE 조회기간 초과) 실패를 유지하며 그 답을 result_code 에
+    남긴다 — 재조정이 같은 행을 매 주기 다시 조회하지 않게 하는 표시다.
+    """
     from app.msghub.schemas import SentQueryItem
 
     processed = 0
@@ -90,6 +96,7 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
     for raw in raw_items:
         sq = SentQueryItem.from_dict(raw)
         if sq.status in ("OVER_DATE", "INVALID_KEY"):
+            _record_no_result(db, sq.cli_key, sq.status)
             continue
 
         msg = _find_message(db, sq.cli_key, sq.msg_key)
@@ -128,6 +135,10 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
         elif sq.status in ("REG", "ING") and msg.status != "FB_PENDING":
             # FB_PENDING 은 -fb 대체 SMS 접수·처리 중이라는 더 구체적인 상태라 덮지 않는다
             # (수신자 배지 fallback_sms).
+            if msg.status == "FAILED":
+                # 요청 예외로 실패 기록했지만 msghub 는 접수해 처리 중이다 — 집계를 실패에서 대기로
+                # 옮긴다. 이후엔 미완료 행이라 리포트나 재조정이 확정한다.
+                campaign_ids.add(msg.campaign_id)
             msg.status = sq.status
 
     # autoflush=False — 집계 SELECT 전에 ORM 변경을 명시 flush (process_report 참조)
@@ -138,6 +149,22 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
 
     db.flush()
     return processed
+
+
+def _record_no_result(db: Session, cli_key: str, query_status: str) -> None:
+    """조회가 결과를 주지 않은(INVALID_KEY·OVER_DATE) 요청 예외 실패 행에 그 상태를 result_code 로 남긴다.
+
+    발송 후 조회 기간(reconcile._FAILED_QUERY_WINDOW) 안의 INVALID_KEY 는 msghub 가 그 요청을 접수하지
+    않았다는 뜻으로 본다 — 접수하지 않은 키의 응답은 문서에 없고 실측 전이다. 그 키로 조회한 행에만
+    남긴다 — _find_message 의 -fb·msgKey 대체 매칭은 다른 요청의 행을 고를 수 있다. 미완료 행은 접수
+    응답을 받은 행이라 건드리지 않는다(조회 발송일 reqDt 가 어긋난 경우일 수 있다). 집계는 그대로다 —
+    result_code 가 성공 코드가 아닌 FAILED 는 계속 실패로 센다.
+    """
+    if not cli_key:
+        return
+    msg = db.execute(select(Message).where(Message.cli_key == cli_key)).scalar_one_or_none()
+    if msg is not None and msg.status == "FAILED" and msg.result_code is None:
+        msg.result_code = query_status
 
 
 def _find_message(
