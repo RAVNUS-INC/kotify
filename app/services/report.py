@@ -29,9 +29,9 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
 
     Returns:
         (처리된 메시지 건수, SMS fallback이 필요한 메시지 목록).
-        fallback 목록은 양방향 CHAT(RPCSAXX001) 캠페인의 RCS 실패 메시지 —
-        현재 outbound는 단방향 RCS(fbInfoLst 자동 fallback)만 사용하므로
-        항상 빈 목록이다. 장래 MO 자동응답 기능을 추가할 때 재사용한다.
+        fallback 목록은 양방향 CHAT(RPCSAXX001) 캠페인 — 대화방 답장
+        (compose.dispatch_chat_reply) — 의 RCS 실패 메시지다. 단방향 RCS 는
+        msghub 가 fbInfoLst 로 자동 대체하므로 해당 없다.
     """
     processed = 0
     campaign_ids: set[int] = set()
@@ -120,7 +120,9 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
 
             campaign_ids.add(msg.campaign_id)
             processed += 1
-        elif sq.status in ("REG", "ING"):
+        elif sq.status in ("REG", "ING") and msg.status != "FB_PENDING":
+            # FB_PENDING 은 -fb 대체 SMS 접수·처리 중이라는 더 구체적인 상태라 덮지 않는다
+            # (수신자 배지 fallback_sms).
             msg.status = sq.status
 
     # autoflush=False — 집계 SELECT 전에 ORM 변경을 명시 flush (process_report 참조)

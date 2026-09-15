@@ -37,9 +37,10 @@ from starlette.background import BackgroundTask
 from app.config import settings
 from app.db import get_db
 from app.models import Campaign, Message, MoMessage
-from app.msghub.schemas import MoWebhookPayload, RecvInfo, WebhookReport
+from app.msghub.codes import SUCCESS_CODE
+from app.msghub.schemas import MoWebhookPayload, RecvInfo, SendResponse, WebhookReport
 from app.security.settings_store import SettingsStore
-from app.services.report import process_report
+from app.services.report import _refresh_campaign_counters, process_report
 from app.util.phone import mask_phone, normalize_phone
 
 log = logging.getLogger(__name__)
@@ -85,15 +86,18 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
 
     각 메시지의 cli_key를 {원본}-fb로 갱신하여 SMS 리포트 매칭에 사용.
 
+    process_report 가 FB_PENDING 으로 넘긴 행은 대체 SMS 가 접수됐을 때만 FB_PENDING 으로
+    남긴다. 접수되지 않은 건(클라이언트 없음, 요청 예외, 수신자 단위 거부)엔 리포트가 오지
+    않으므로 FAILED 로 확정한다 — 그대로 두면 영영 대기로 남는다.
+
     Returns:
-        fallback 발송 시도 건수.
+        fallback 접수 건수.
     """
     from app.main import get_msghub_client
 
     client = get_msghub_client()
     if client is None:
         log.error("SMS fallback 실패: msghub 클라이언트 미초기화")
-        return 0
 
     # 캠페인별로 그룹화 (caller_number, content 조회용)
     campaign_cache: dict[int, Campaign] = {}
@@ -104,7 +108,9 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
     sent = 0
     for msg in messages:
         campaign = campaign_cache.get(msg.campaign_id)
-        if campaign is None:
+        if client is None or campaign is None:
+            msg.status = "FAILED"
+            msg.result_desc = (msg.result_desc or "") + " (SMS fallback 실패)"
             continue
 
         fb_cli_key = f"{msg.cli_key}-fb"
@@ -113,18 +119,37 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
 
         try:
             recv = RecvInfo(cli_key=fb_cli_key, phone=msg.to_number)
-            await client.send_sms(
+            resp = await client.send_sms(
                 callback=campaign.caller_number,
                 msg=campaign.content,
                 recv_list=[recv],
             )
-            sent += 1
         except Exception:
             log.exception("SMS fallback 발송 실패: msg_id=%s, phone=%s", msg.id, mask_phone(msg.to_number))
             msg.status = "FAILED"
             msg.result_desc = (msg.result_desc or "") + " (SMS fallback 실패)"
+            continue
 
+        # 요청이 성공(최상위 10000)해도 수신자 단위로 거부될 수 있다(31101 수신번호 에러 등)
+        # — send_sms 는 최상위 코드만 검사한다. 판정은 dispatch_chat_reply 와 같다.
+        item = resp.items[0] if isinstance(resp, SendResponse) and resp.items else None
+        if item is not None and item.code != SUCCESS_CODE:
+            log.warning(
+                "SMS fallback 수신자 거부: msg_id=%s, phone=%s, code=%s",
+                msg.id, mask_phone(msg.to_number), item.code,
+            )
+            msg.status = "FAILED"
+            msg.result_code = item.code
+            msg.result_desc = f"{item.message} (SMS fallback 거부)"
+            continue
+
+        sent += 1
+
+    # process_report 는 이 행들을 FB_PENDING(대기)으로 집계했다 — 실패로 확정한 건을 다시
+    # 집계해야 캠페인이 발송 중(pending_count)으로 남지 않는다. autoflush=False 라 먼저 flush.
     db.flush()
+    for campaign_id in campaign_cache:
+        _refresh_campaign_counters(db, campaign_id)
     return sent
 
 

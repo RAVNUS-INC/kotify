@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Message, MsghubRequest
 from app.services.report import process_sent_query
+from app.util.time import parse_mixed_ts
 
 if TYPE_CHECKING:
     from app.msghub.client import MsghubClient
@@ -28,7 +29,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 _KST = ZoneInfo("Asia/Seoul")
-_PENDING_STATUSES = ("PENDING", "REG", "ING")
+# FB_PENDING: 양방향 실패 후 접수된 -fb 대체 SMS 의 리포트 대기 (routes.webhook._send_sms_fallback).
+# 그 리포트 웹훅이 유실되면 다른 경로로는 확정되지 않는다.
+_PENDING_STATUSES = ("PENDING", "REG", "ING", "FB_PENDING")
 _QUERY_BATCH = 10  # query_sent 1회 최대 10건 (msghub 제약)
 
 
@@ -42,6 +45,20 @@ def _req_dt_kst(sent_at_iso: str) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt.astimezone(_KST).strftime("%Y-%m-%d")
+
+
+def _query_req_dt(cli_key: str, status: str, report_dt: str | None, sent_at: str) -> str:
+    """메시지의 현재 cliKey 를 msghub 에 요청한 날짜 (query_sent reqDt).
+
+    FB_PENDING 행의 -fb cliKey 는 발송 요청(MsghubRequest.sent_at)이 아니라, 양방향 실패
+    리포트를 처리하며 곧바로 보낸 대체 SMS 의 키다. 실패 리포트는 RCS 만료 등으로 날짜가
+    바뀐 뒤에 오기도 하므로 그 리포트 시각(report_dt)의 날짜를 쓴다.
+    """
+    if status == "FB_PENDING" and cli_key.endswith("-fb"):
+        dt = parse_mixed_ts(report_dt)
+        if dt is not None:
+            return dt.astimezone(_KST).strftime("%Y-%m-%d")
+    return _req_dt_kst(sent_at)
 
 
 async def reconcile_pending_messages(
@@ -62,7 +79,7 @@ async def reconcile_pending_messages(
     cutoff = (datetime.now(UTC) - timedelta(minutes=older_than_minutes)).isoformat()
 
     rows = db.execute(
-        select(Message.cli_key, MsghubRequest.sent_at)
+        select(Message.cli_key, Message.status, Message.report_dt, MsghubRequest.sent_at)
         .join(MsghubRequest, Message.msghub_request_id == MsghubRequest.id)
         .where(
             Message.status.in_(_PENDING_STATUSES),
@@ -78,7 +95,10 @@ async def reconcile_pending_messages(
     total = 0
     for i in range(0, len(rows), _QUERY_BATCH):
         batch = rows[i : i + _QUERY_BATCH]
-        cli_keys = [(r.cli_key, _req_dt_kst(r.sent_at)) for r in batch]
+        cli_keys = [
+            (r.cli_key, _query_req_dt(r.cli_key, r.status, r.report_dt, r.sent_at))
+            for r in batch
+        ]
         try:
             raw_items = await client.query_sent(cli_keys)
         except Exception:
