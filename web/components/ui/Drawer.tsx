@@ -72,7 +72,9 @@ export function Drawer({
             </header>
           )}
 
-          <div className="flex-1 overflow-y-auto">{children}</div>
+          {/* 본문 여백은 여기서 준다 — 헤더·푸터 px-5 와 맞추고, 스크롤 영역 가장자리에
+              붙은 입력·버튼의 포커스 링이 잘리지 않게. children 쪽에서 또 주지 않는다. */}
+          <div className="flex-1 overflow-y-auto p-5">{children}</div>
 
           {footer && (
             <footer className="border-t border-line bg-surface px-5 py-3">

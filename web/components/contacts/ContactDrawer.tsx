@@ -114,7 +114,7 @@ export function ContactDrawer({
     >
       {dialog}
       {contact && (
-        <div className="flex flex-col gap-6 p-5">
+        <div className="flex flex-col gap-6">
           <Section title="기본 정보">
             <InfoRow label="이메일" value={contact.email ?? '—'} mono={!!contact.email} />
             <InfoRow label="팀" value={contact.team ?? '—'} />
