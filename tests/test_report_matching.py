@@ -2,7 +2,8 @@
 
 cliKey/msgKey 없이 phone 만으로 도달한 delivery report 가, 동일 번호의 여러
 미완료 메시지 중 엉뚱한 캠페인에 귀속되지 않도록 "정확히 1건일 때만 매칭"
-정책을 검증한다.
+정책을 검증한다. 대체 발송(-fb)으로 cliKey 가 바뀐 행에 대체 전 시도의 리포트가
+붙거나 적용되지 않는지도 검증한다.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from app.msghub.schemas import ReportItem
 from app.services.report import process_report
 
 
-def _make_campaign_message(db, *, phone, status, cli_key, sub="test-sub-001"):
+def _make_campaign_message(db, *, phone, status, cli_key, msg_key=None, sub="test-sub-001"):
     """캠페인 1개 + 메시지 1개를 만들어 (campaign, message) 반환."""
     campaign = Campaign(
         created_by=sub, caller_number="0212345678", message_type="short",
@@ -32,7 +33,7 @@ def _make_campaign_message(db, *, phone, status, cli_key, sub="test-sub-001"):
     msg = Message(
         campaign_id=campaign.id, msghub_request_id=req.id,
         to_number=phone, to_number_raw=phone,
-        cli_key=cli_key, status=status,
+        cli_key=cli_key, msg_key=msg_key, status=status,
     )
     db.add(msg)
     db.commit()
@@ -88,3 +89,48 @@ def test_phone_match_ignores_completed_messages(db_session, sample_user):
     assert processed == 1
     assert _status_of(db_session, "c-d-0") == "DONE"  # 기존 DONE 불변
     assert _status_of(db_session, "c-d-1") == "DONE"  # 미완료였던 건만 갱신
+
+
+# ── 대체 발송(-fb)으로 cliKey 가 바뀐 행 ─────────────────────────────────────────
+
+
+def _chat_failure(*, cli_key, msg_key, phone):
+    """양방향 답장(CHAT) 실패 리포트."""
+    return ReportItem(
+        msg_key=msg_key, cli_key=cli_key, ch="RCS",
+        result_code="51004", result_code_desc="RCS 미지원 단말",
+        product_code="CHAT", phone=phone,
+    )
+
+
+def test_stale_report_for_renamed_fallback_key_not_matched_by_phone(db_session, sample_user):
+    """대체 SMS 로 확정된 뒤 원래 cliKey 의 실패 리포트가 재전송돼도 같은 번호의 다른 미완료
+    메시지에 phone 으로 붙지 않는다 — {cliKey}-fb 행으로 찾아 버린다."""
+    # 대체 SMS 성공 리포트까지 받은 답장 — msg_key 도 SMS 의 것으로 바뀌어 원래 msgKey 로는 못 찾는다
+    _make_campaign_message(
+        db_session, phone="01033332222", status="DONE", cli_key="c-f-0-fb", msg_key="mk-sms",
+    )
+    # 같은 고객에게 이어 보낸 답장 — 아직 리포트 대기
+    _make_campaign_message(db_session, phone="01033332222", status="REG", cli_key="c-g-0")
+
+    processed, fallback = process_report(
+        db_session, [_chat_failure(cli_key="c-f-0", msg_key="mk-chat", phone="01033332222")],
+    )
+
+    assert (processed, fallback) == (0, [])
+    assert _status_of(db_session, "c-g-0") == "REG"
+
+
+def test_report_without_fb_cli_key_does_not_settle_fallback_row(db_session, sample_user):
+    """-fb 행은 그 cliKey 로 온 리포트만 확정한다 — cliKey 없이 msgKey 로 매칭된 리포트는
+    대체 전 시도(양방향)의 것이다. (cliKey 없는 대체 SMS 리포트는 재조정이 -fb 로 확정)"""
+    _make_campaign_message(
+        db_session, phone="01044443333", status="FB_PENDING", cli_key="c-h-0-fb", msg_key="mk-chat",
+    )
+
+    processed, _ = process_report(
+        db_session, [_chat_failure(cli_key="", msg_key="mk-chat", phone="01044443333")],
+    )
+
+    assert processed == 0
+    assert _status_of(db_session, "c-h-0-fb") == "FB_PENDING"

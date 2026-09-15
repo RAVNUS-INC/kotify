@@ -100,6 +100,11 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> int:
         if msg.status == "DONE":
             continue
 
+        # 원래 cliKey 로 조회하는 사이 웹훅이 대체 발송해 cliKey 를 바꿨다 — 조회 결과는
+        # 대체 전 시도의 것이다 (_update_message 와 같은 이유).
+        if _is_superseded_report(msg, sq.cli_key):
+            continue
+
         if sq.status == "DONE" and sq.result_code:
             success = sq.result_code == SUCCESS_CODE
             msg.status = "DONE"
@@ -141,11 +146,16 @@ def _find_message(
     msg_key: str | None,
     phone: str | None = None,
 ) -> Message | None:
-    """cliKey → msgKey → (phone, status=REG/ING/PENDING) 순으로 Message를 찾는다.
+    """cliKey → {cliKey}-fb → msgKey → (phone, status=REG/ING/PENDING) 순으로 Message를 찾는다.
 
     msghub v11 delivery report는 cliKey 외에도 phone 필드를 포함한다. cliKey
     없이 리포트가 도달하는 엣지 케이스(콘솔 설정 누락, 대량발송 일부 유실 등)
     에서 phone으로 최근 발송 중인 메시지를 찾아 보조 매칭한다.
+
+    {cliKey}-fb 는 양방향 실패 후 대체 SMS 를 보내며 cliKey 를 바꾼 행이다
+    (routes.webhook._send_sms_fallback). 원래 키로 재전송된 실패 리포트를 그 행에
+    붙여야 _update_message 가 버린다. 못 찾으면 msgKey(대체 SMS 리포트가 msg_key 를
+    바꾼 뒤엔 불일치)도 빗나가 phone 매칭으로 같은 번호의 다른 미완료 메시지에 붙는다.
     """
     if cli_key:
         msg = db.execute(
@@ -153,6 +163,12 @@ def _find_message(
         ).scalar_one_or_none()
         if msg:
             return msg
+        if not cli_key.endswith("-fb"):
+            msg = db.execute(
+                select(Message).where(Message.cli_key == f"{cli_key}-fb")
+            ).scalar_one_or_none()
+            if msg:
+                return msg
 
     if msg_key:
         msg = db.execute(
@@ -187,14 +203,34 @@ def _find_message(
     return None
 
 
+def _is_superseded_report(msg: Message, report_cli_key: str) -> bool:
+    """대체 발송(-fb)으로 cliKey 가 바뀐 행에 온, 대체 전 시도의 리포트인가.
+
+    -fb 행의 결과는 그 cliKey 로 보낸 대체 발송의 리포트만 정한다. 다른 cliKey 로 온
+    리포트(원래 RCS 키, 또는 cliKey 없이 msgKey·phone 으로 매칭된 것)를 적용하면 안 된다
+    — msghub 가 양방향 실패 리포트를 재전송하면(웹훅 응답 유실·지연) FB_PENDING 행이
+    DONE·실패 코드로 덮이고, 뒤이은 대체 SMS 성공 리포트는 DONE 이라 버려져 고객이 받은
+    답장이 영구 실패로 남았다. cliKey 없이 온 대체 SMS 리포트도 여기서 버려지지만, FB_PENDING
+    행은 재조정(services.reconcile)이 -fb cliKey 로 조회해 확정한다.
+    """
+    return (msg.cli_key or "").endswith("-fb") and report_cli_key != msg.cli_key
+
+
 def _update_message(msg: Message, item: ReportItem) -> bool:
-    """ReportItem으로 Message를 업데이트한다. 이미 DONE이면 skip.
+    """ReportItem으로 Message를 업데이트한다. 이미 DONE이거나 대체 전 시도의 리포트면 skip.
 
     Returns:
         True if updated, False if skipped (idempotency).
     """
     if msg.status == "DONE":
         log.debug("이미 완료된 메시지 skip: id=%s, cliKey=%s", msg.id, msg.cli_key)
+        return False
+
+    if _is_superseded_report(msg, item.cli_key):
+        log.info(
+            "대체 발송 전 시도의 리포트 skip: id=%s, cliKey=%s (현재 %s)",
+            msg.id, item.cli_key, msg.cli_key,
+        )
         return False
 
     success = item.result_code == SUCCESS_CODE

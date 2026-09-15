@@ -3,6 +3,8 @@
 양방향(RPCSAXX001) 리포트가 실패면 process_report 가 FB_PENDING 으로 넘기고, 웹훅이
 cliKey 를 {원본}-fb 로 바꿔 SMS 를 보낸다. 행의 결과는 그 -fb SMS 의 리포트가 정한다.
 
+- 재전송된 양방향 실패 리포트가 msgKey 로 FB_PENDING 행을 DONE·실패로 덮고, 뒤이은
+  대체 SMS 성공 리포트는 DONE 이라 버려져 고객이 받은 답장이 영구 실패로 남던 문제.
 - 대체 SMS 가 접수되지 않았는데(수신자 거부, 클라이언트 없음) FB_PENDING 으로 남아
   리포트도 재조정도 없이 영영 대기로 보이던 문제.
 """
@@ -12,6 +14,7 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 from sqlalchemy import select
 
 from app.models import Campaign, Message, MsghubRequest
@@ -79,6 +82,14 @@ def _chat_failure(cli_key):
     }
 
 
+def _sms_success(cli_key):
+    return {
+        "msgKey": "mk-sms", "cliKey": cli_key, "ch": "SMS", "resultCode": SUCCESS_CODE,
+        "resultCodeDesc": "성공", "productCode": "SMS", "phone": _PHONE,
+        "rptDt": "20260915100005",
+    }
+
+
 def _post_report(db, *items):
     request = MagicMock()
     request.json = AsyncMock(return_value={"rptCnt": len(items), "rptLst": list(items)})
@@ -91,6 +102,31 @@ def _message(db, campaign_id):
     return db.execute(
         select(Message).where(Message.campaign_id == campaign_id)
     ).scalar_one()
+
+
+def test_redelivered_chat_failure_does_not_undo_sms_fallback(db_session, sample_user, monkeypatch):
+    """양방향 실패 리포트가 재전송돼도 FB_PENDING 을 유지하고, 대체 SMS 성공 리포트로 전달 확정."""
+    _setup_token(db_session)
+    client = _SmsClient()
+    monkeypatch.setattr("app.main.get_msghub_client", lambda: client)
+    campaign, cli_key = _make_chat_reply(db_session)
+
+    _post_report(db_session, _chat_failure(cli_key))
+    # 웹훅 응답이 유실·지연돼 msghub 가 같은 실패 리포트를 다시 보낸다
+    resp = _post_report(db_session, _chat_failure(cli_key))
+
+    assert resp.status_code == 200
+    msg = _message(db_session, campaign.id)
+    assert (msg.status, msg.cli_key) == ("FB_PENDING", f"{cli_key}-fb")
+    assert client.cli_keys == [f"{cli_key}-fb"]  # 재전송으로 SMS 를 또 보내지 않는다
+
+    _post_report(db_session, _sms_success(f"{cli_key}-fb"))
+
+    msg = _message(db_session, campaign.id)
+    assert (msg.status, msg.result_code, msg.channel, msg.cost) == ("DONE", SUCCESS_CODE, "SMS", 9)
+    campaign = db_session.get(Campaign, campaign.id)
+    assert (campaign.ok_count, campaign.fail_count, campaign.pending_count) == (1, 0, 0)
+    assert campaign.state == "COMPLETED"
 
 
 def test_rejected_sms_fallback_is_failed_not_pending(db_session, sample_user, monkeypatch):
@@ -111,6 +147,32 @@ def test_rejected_sms_fallback_is_failed_not_pending(db_session, sample_user, mo
     campaign = db_session.get(Campaign, campaign.id)
     assert (campaign.ok_count, campaign.fail_count, campaign.pending_count) == (0, 1, 0)
     assert campaign.state == "PARTIAL_FAILED"
+
+
+class _TimeoutSmsClient:
+    """msghub 는 접수했지만 응답을 못 받은 경우 — send_sms 가 예외를 던진다."""
+
+    async def send_sms(self, *, callback, msg, recv_list):
+        raise httpx.ReadTimeout("응답 대기 시간 초과")
+
+
+def test_sms_sent_despite_request_error_is_settled_by_its_report(db_session, sample_user, monkeypatch):
+    """대체 SMS 요청이 예외라 FAILED 로 뒀어도 실제로 발송됐다면, 양방향 실패 리포트가 재전송된
+    뒤에도 -fb 리포트로 전달 성공이 확정된다 — 판정 기준이 FB_PENDING 상태가 아니라 -fb 키인 이유."""
+    _setup_token(db_session)
+    monkeypatch.setattr("app.main.get_msghub_client", lambda: _TimeoutSmsClient())
+    campaign, cli_key = _make_chat_reply(db_session)
+
+    _post_report(db_session, _chat_failure(cli_key))
+    assert _message(db_session, campaign.id).status == "FAILED"
+
+    _post_report(db_session, _chat_failure(cli_key))  # 재전송
+    _post_report(db_session, _sms_success(f"{cli_key}-fb"))
+
+    msg = _message(db_session, campaign.id)
+    assert (msg.status, msg.result_code, msg.channel) == ("DONE", SUCCESS_CODE, "SMS")
+    campaign = db_session.get(Campaign, campaign.id)
+    assert (campaign.ok_count, campaign.fail_count, campaign.pending_count) == (1, 0, 0)
 
 
 def test_sms_fallback_without_client_is_failed_not_pending(db_session, sample_user, monkeypatch):

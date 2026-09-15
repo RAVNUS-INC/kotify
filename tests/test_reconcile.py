@@ -2,7 +2,7 @@
 
 reconcile_pending_messages 가 미완료 메시지를 msghub query_sent 로 조회해 상태를
 보정하는지, cutoff(최근 건 제외)·idempotency(DONE 제외)가 동작하는지 검증한다.
-양방향 실패 후 대체 SMS(-fb) 대기(FB_PENDING)의 확정도 다룬다.
+양방향 실패 후 대체 SMS(-fb) 대기(FB_PENDING)의 확정과 조회 중 대체 발송 경합도 다룬다.
 """
 from __future__ import annotations
 
@@ -16,19 +16,25 @@ from app.services.reconcile import _req_dt_kst, reconcile_pending_messages
 
 
 class _FakeClient:
-    """query_sent 만 흉내내는 테스트용 msghub 클라이언트 (덕 타이핑)."""
+    """query_sent 만 흉내내는 테스트용 msghub 클라이언트 (덕 타이핑).
 
-    def __init__(self, result: list[dict]):
+    during_query: 조회 응답을 기다리는 사이 다른 요청(웹훅)이 DB 를 바꾸는 경합 재현용.
+    """
+
+    def __init__(self, result: list[dict], during_query=None):
         self._result = result
+        self._during_query = during_query
         self.calls: list = []
 
     async def query_sent(self, cli_keys):
         self.calls.append(cli_keys)
+        if self._during_query:
+            self._during_query()
         return self._result
 
 
 def _make_pending(
-    db, sub, sent_at, *, status="REG", cli_key="c1-0-0", report_dt=None,
+    db, sub, sent_at, *, status="REG", cli_key="c1-0-0", msg_key=None, report_dt=None,
 ):
     campaign = Campaign(
         created_by=sub, caller_number="0212345678", message_type="short",
@@ -43,7 +49,7 @@ def _make_pending(
     msg = Message(
         campaign_id=campaign.id, msghub_request_id=req.id,
         to_number="01011112222", to_number_raw="01011112222",
-        cli_key=cli_key, status=status, report_dt=report_dt,
+        cli_key=cli_key, msg_key=msg_key, status=status, report_dt=report_dt,
     )
     db.add(msg)
     db.commit()
@@ -103,6 +109,29 @@ def test_reconcile_skips_done_messages(db_session, sample_user):
 
 def _status_of(db, cli_key):
     return db.execute(select(Message.status).where(Message.cli_key == cli_key)).scalar_one()
+
+
+def test_reconcile_ignores_result_for_key_renamed_by_fallback(db_session, sample_user):
+    """조회하는 사이 웹훅이 양방향 실패로 대체 SMS 를 보내 cliKey 를 -fb 로 바꾸면, 원래 키의
+    조회 결과(양방향 실패)로 FB_PENDING 을 덮지 않는다 — 덮으면 대체 SMS 리포트가 버려진다."""
+    _, msg = _make_pending(
+        db_session, sample_user.sub, "2026-01-01T00:00:00+00:00",
+        cli_key="c-r-3", msg_key="mk-r-3",
+    )
+
+    def webhook_falls_back():
+        msg.cli_key, msg.status = "c-r-3-fb", "FB_PENDING"
+        db_session.commit()
+
+    client = _FakeClient([{
+        "cliKey": "c-r-3", "msgKey": "mk-r-3", "status": "DONE",
+        "resultCode": "51004", "ch": "RCS", "productCode": "CHAT",
+    }], during_query=webhook_falls_back)
+
+    n = asyncio.run(reconcile_pending_messages(db_session, client, older_than_minutes=10))
+
+    assert n == 0
+    assert _status_of(db_session, "c-r-3-fb") == "FB_PENDING"
 
 
 def test_reconcile_settles_fallback_pending_by_fb_key_on_sms_request_date(db_session, sample_user):
