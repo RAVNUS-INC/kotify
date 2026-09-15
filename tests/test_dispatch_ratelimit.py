@@ -23,13 +23,15 @@ class _RateLimitThenSmsClient:
     def __init__(self):
         self.rcs_calls = 0
         self.sms_calls = 0
+        self.sms_resv_yn: list[str | None] = []
 
     async def send_rcs(self, **kwargs):
         self.rcs_calls += 1
         raise MsghubRateLimited("[29002] CPS 초과", code="29002", status_code=400)
 
-    async def send_sms(self, *, callback, msg, recv_list):
+    async def send_sms(self, *, callback, msg, recv_list, resv_yn=None, resv_req_dt=None):
         self.sms_calls += 1
+        self.sms_resv_yn.append(resv_yn)
         items = [
             SendResultItem(
                 cli_key=r.cli_key, msg_key=f"mk-{r.cli_key}",
@@ -64,6 +66,7 @@ async def test_rate_limited_retry_no_duplicate(db_session, sample_user, sample_c
     # 첫 RCS 1회 → 29002, 재시도 SMS 1회 (재시도 1회만)
     assert client.rcs_calls == 1
     assert client.sms_calls == 1
+    assert client.sms_resv_yn == [None]  # 즉시 발송 캠페인의 재시도는 예약이 아니다
 
     # 수신자당 메시지 정확히 1건 — 중복 발송 없음 (29002 는 전체거부라 접수분 0)
     total = db_session.execute(

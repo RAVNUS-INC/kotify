@@ -40,15 +40,17 @@ def _campaign(
     campaign = Campaign(
         created_by=sub, caller_number=_CALLER, message_type="short",
         content="9월 정기 점검 안내", total_count=total, pending_count=total, state=state,
-        created_at=created_at, reserve_time="2026-06-01 12:00", web_req_id=f"wr-{key}",
+        created_at=created_at, reserve_time="2026-06-01 12:00",
         rcs_messagebase_id="RPSSAXX001",
     )
     db.add(campaign)
     db.flush()
     n = 0
     for chunk_index, statuses in enumerate(chunks):
+        # 예약 webReqId 는 청크(요청)마다 따로다(alembic 0018).
         req = MsghubRequest(
-            campaign_id=campaign.id, chunk_index=chunk_index, sent_at=_RESERVED_AT
+            campaign_id=campaign.id, chunk_index=chunk_index, sent_at=_RESERVED_AT,
+            web_req_id=f"wr-{key}-{chunk_index}",
         )
         db.add(req)
         db.flush()
@@ -169,8 +171,9 @@ def test_phone_only_report_is_not_held_by_cancelled_message(db_session, sample_u
 
 
 def test_delivery_report_replaces_cancelled_when_msghub_sent_it(db_session, sample_user):
-    """캠페인엔 마지막 청크의 webReqId 만 저장돼 앞 청크엔 취소가 닿지 않을 수 있다. 그 청크가
-    실제 발송돼 리포트가 오면 CANCELED 를 덮어 전달 결과를 남긴다 — 받은 메시지를 취소로 두지 않는다.
+    """청크별 webReqId(alembic 0018) 이전엔 캠페인에 마지막 청크 ID 만 남아 앞 청크엔 취소가 닿지
+    않았는데, 0017 은 그 행도 CANCELED 로 옮겼다. 그 청크가 실제 발송돼 리포트가 오면 CANCELED 를
+    덮어 전달 결과를 남긴다 — 받은 메시지를 취소로 두지 않는다.
     """
     _campaign(
         db_session, sample_user.sub, key="resv-g", chunks=[["CANCELED"], ["CANCELED"]],
@@ -210,10 +213,9 @@ def _cancel_audit(db, sub, campaign, created_at):
     db.commit()
 
 
-def test_migration_0017_is_the_single_head_after_0016():
-    scripts = _alembic_scripts()
-    assert scripts.get_heads() == ["0017"]
-    assert scripts.get_revision("0017").down_revision == "0016"
+def test_migration_0017_follows_0016():
+    # 헤드 단일성은 최신 리비전 테스트(test_reservation_chunks 의 0018)가 본다.
+    assert _alembic_scripts().get_revision("0017").down_revision == "0016"
 
 
 def test_migration_0017_moves_only_reservations_cancelled_before_send(db_session, sample_user):

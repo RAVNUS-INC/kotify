@@ -77,6 +77,17 @@ def validate_message(
 # 1회 발송 최대 수신자 수
 MAX_RECIPIENTS_PER_CAMPAIGN = 1000
 
+# 청크를 보내는 중인 캠페인 id. 캠페인은 첫 청크 전에 RESERVED 로 커밋돼 목록에서 취소할 수
+# 있는데, 그때 취소가 끼면 이미 접수된 청크 행만 보고 전체 취소로 마무리해 뒤 청크가 예약
+# 시각에 발송된다. 단일 uvicorn 워커 전제(deploy/kotify.service --workers 1, events·reconcile 과
+# 같음)라 프로세스 메모리로 충분하다 — 재시작하면 진행 중이던 발송도 함께 끝났다.
+_dispatching: set[int] = set()
+
+
+def is_dispatching(campaign_id: int) -> bool:
+    """이 캠페인의 청크 발송(예약 접수)이 아직 진행 중인가."""
+    return campaign_id in _dispatching
+
 
 def dedupe_recipients(recipients: list[str]) -> list[str]:
     """수신자 중복 제거 — 순서 보존 (C2).
@@ -168,6 +179,13 @@ def parse_reserve_time(reserve_time_local: str) -> tuple[str, str]:
 def _make_cli_key(campaign_id: int, chunk_idx: int, recipient_idx: int) -> str:
     """cliKey 생성. 패턴: c{campaign_id}-{chunk}-{idx}"""
     return f"c{campaign_id}-{chunk_idx}-{recipient_idx}"
+
+
+def _reservation_id(resp: SendResponse | ReserveResponse | None) -> str | None:
+    """예약 접수 응답의 webReqId. 즉시 발송 응답이거나 값이 비었으면 None."""
+    if isinstance(resp, ReserveResponse) and resp.web_req_id:
+        return resp.web_req_id
+    return None
 
 
 def _build_fallback(
@@ -276,12 +294,10 @@ async def _dispatch_rcs_chunks(
                 response_message=resp.message if resp else None,
                 error_body=None,
                 sent_at=sent_at,
+                web_req_id=_reservation_id(resp),
             )
             db.add(msghub_req)
             db.flush()
-
-            if isinstance(resp, ReserveResponse) and resp.web_req_id:
-                campaign.web_req_id = resp.web_req_id
 
             _, n_failed = _create_messages_from_response(
                 db, campaign.id, msghub_req.id, resp, chunk, chunk_idx
@@ -299,11 +315,12 @@ async def _dispatch_rcs_chunks(
             # data[].code 경로 — 여기와 무관). 검증: claudedocs/review/c3-verification.md
             db.rollback()
             await asyncio.sleep(30)
-            sent_at = _now_iso()
+            sent_at = reserve_utc_iso if is_reserved else _now_iso()
             try:
                 resp = await _send_chunk_direct(
                     client, campaign, callback, content,
                     subject, chunk, chunk_idx, msg_type, mms_file_id,
+                    is_reserved, msghub_reserve_time,
                 )
                 msghub_req = MsghubRequest(
                     campaign_id=campaign.id,
@@ -312,11 +329,12 @@ async def _dispatch_rcs_chunks(
                     response_message=resp.message,
                     error_body=None,
                     sent_at=sent_at,
+                    web_req_id=_reservation_id(resp),
                 )
                 db.add(msghub_req)
                 db.flush()
                 _, n_failed = _create_messages_from_response(
-                    db, campaign.id, msghub_req.id, resp, chunk, chunk_idx
+                    db, campaign.id, msghub_req.id, resp, chunk, chunk_idx, fallback=True,
                 )
                 item_failed += n_failed
                 db.flush()
@@ -335,11 +353,12 @@ async def _dispatch_rcs_chunks(
                 msg_type.upper(), chunk_idx, exc,
             )
             db.rollback()
-            sent_at = _now_iso()
+            sent_at = reserve_utc_iso if is_reserved else _now_iso()
             try:
                 resp = await _send_chunk_direct(
                     client, campaign, callback, content,
                     subject, chunk, chunk_idx, msg_type, mms_file_id,
+                    is_reserved, msghub_reserve_time,
                 )
                 msghub_req = MsghubRequest(
                     campaign_id=campaign.id,
@@ -348,11 +367,12 @@ async def _dispatch_rcs_chunks(
                     response_message=f"RCS 실패 → 직접 발송: {resp.message}",
                     error_body=None,
                     sent_at=sent_at,
+                    web_req_id=_reservation_id(resp),
                 )
                 db.add(msghub_req)
                 db.flush()
                 _, n_failed = _create_messages_from_response(
-                    db, campaign.id, msghub_req.id, resp, chunk, chunk_idx,
+                    db, campaign.id, msghub_req.id, resp, chunk, chunk_idx, fallback=True,
                 )
                 item_failed += n_failed
                 db.flush()
@@ -493,18 +513,24 @@ async def dispatch_campaign(
     db.commit()
 
     # 4. 발송 — RCS 우선(+fallback) 또는 일반 직접(SMS/LMS/MMS).
-    if is_rcs:
-        failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
-            db, msghub_client, campaign, caller_number, content, subject,
-            recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
-            is_reserved, reserve_utc_iso, msghub_reserve_time,
-        )
-    else:
-        failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_direct_chunks(
-            db, msghub_client, campaign, caller_number, content, subject,
-            recipients, msg_type, mms_file_id,
-            is_reserved, reserve_utc_iso, msghub_reserve_time,
-        )
+    # 청크를 보내는 동안은 진행 중으로 표시한다(취소 라우트가 기다리게). 5·6 단계엔 await 가
+    # 없어 표시를 푼 뒤 마지막 커밋 전에 다른 요청이 끼어들지 않는다.
+    _dispatching.add(campaign.id)
+    try:
+        if is_rcs:
+            failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
+                db, msghub_client, campaign, caller_number, content, subject,
+                recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
+                is_reserved, reserve_utc_iso, msghub_reserve_time,
+            )
+        else:
+            failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_direct_chunks(
+                db, msghub_client, campaign, caller_number, content, subject,
+                recipients, msg_type, mms_file_id,
+                is_reserved, reserve_utc_iso, msghub_reserve_time,
+            )
+    finally:
+        _dispatching.discard(campaign.id)
     chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
 
     # 5. Campaign state + counters 업데이트 — 수신자 수 기반 판정.
@@ -645,6 +671,11 @@ async def dispatch_chat_reply(
     return campaign
 
 
+def _fallback_cli_key(campaign_id: int, chunk_idx: int, recipient_idx: int) -> str:
+    """RCS 요청이 거부돼 직접 발송하는 청크의 cliKey — 원본 키 10분 중복 금지를 피한다."""
+    return f"{_make_cli_key(campaign_id, chunk_idx, recipient_idx)}-fb"
+
+
 async def _send_chunk_direct(
     client: MsghubClient,
     campaign: Campaign,
@@ -654,32 +685,23 @@ async def _send_chunk_direct(
     chunk: list[str],
     chunk_idx: int,
     msg_type: str,
-    mms_file_id: str | None = None,
+    mms_file_id: str | None,
+    is_reserved: bool,
+    msghub_reserve_time: str | None,
 ) -> SendResponse | ReserveResponse:
     """RCS 실패 시 직접 SMS/LMS/MMS 발송 (재시도 fallback).
 
-    cliKey 10분 중복 금지 규칙을 피하기 위해 원본 키에 -fb 접미사를 붙인다.
+    cliKey 만 -fb 키로 바꾸고 발송은 _send_direct 에 맡긴다. 예전엔 따로 호출해 예약
+    파라미터가 빠져, 예약 캠페인의 이 청크만 예약 시각을 무시하고 즉시 발송됐다.
     """
     recv_list = [
-        RecvInfo(
-            cli_key=f"{_make_cli_key(campaign.id, chunk_idx, i)}-fb",
-            phone=phone,
-        )
+        RecvInfo(cli_key=_fallback_cli_key(campaign.id, chunk_idx, i), phone=phone)
         for i, phone in enumerate(chunk)
     ]
-
-    if msg_type == "short":
-        return await client.send_sms(
-            callback=callback, msg=content, recv_list=recv_list,
-        )
-    else:
-        return await client.send_mms(
-            callback=callback,
-            title=subject or "",
-            msg=content,
-            recv_list=recv_list,
-            file_id_lst=[mms_file_id] if mms_file_id else None,
-        )
+    return await _send_direct(
+        client, callback, content, subject, recv_list,
+        msg_type, mms_file_id, is_reserved, msghub_reserve_time,
+    )
 
 
 async def _send_direct(
@@ -693,10 +715,10 @@ async def _send_direct(
     is_reserved: bool,
     msghub_reserve_time: str | None,
 ) -> SendResponse | ReserveResponse:
-    """일반(직접) 발송 — short→SMS, long→LMS, image→MMS (예약 지원).
+    """직접 발송 — short→SMS, long→LMS, image→MMS (예약 지원).
 
-    RCS 우선/fallback 이 없는 1차 직접 발송이라, RCS fallback 용 _send_chunk_direct
-    (cliKey 에 -fb 접미사를 붙임) 와 달리 전달받은 정상 cliKey(recv_list) 를 그대로 쓴다.
+    전달받은 recv_list 의 cliKey 를 그대로 쓴다. 일반 모드 1차 발송은 정상 키로, RCS
+    fallback(_send_chunk_direct)은 -fb 키로 만들어 넘긴다.
     """
     resv_yn = "Y" if is_reserved else None
     if msg_type == "short":
@@ -762,12 +784,10 @@ async def _dispatch_direct_chunks(
                 response_message=resp.message if resp else None,
                 error_body=None,
                 sent_at=sent_at,
+                web_req_id=_reservation_id(resp),
             )
             db.add(msghub_req)
             db.flush()
-
-            if isinstance(resp, ReserveResponse) and resp.web_req_id:
-                campaign.web_req_id = resp.web_req_id
 
             _, n_failed = _create_messages_from_response(
                 db, campaign.id, msghub_req.id, resp, chunk, chunk_idx
@@ -799,8 +819,13 @@ def _create_messages_from_response(
     resp: SendResponse | ReserveResponse,
     chunk: list[str],
     chunk_idx: int,
+    *,
+    fallback: bool = False,
 ) -> tuple[int, int]:
     """발송 응답에서 Message 레코드 생성.
+
+    예약 응답엔 수신자별 item 이 없어 cliKey 를 다시 만든다. 이때 보낸 키와 같아야 리포트가
+    매칭되므로, -fb 키로 보낸 대체 발송 청크는 fallback=True 로 같은 키를 만든다.
 
     Returns:
         (accepted, failed) — accepted 는 접수(REG)·예약(PENDING) 건수, failed 는
@@ -808,6 +833,7 @@ def _create_messages_from_response(
         처리된 건수. dispatch 가 웹훅 도착 전에도 fail_count/pending_count 를
         정확히 반영하기 위해 호출자가 사용한다 (H1).
     """
+    make_cli_key = _fallback_cli_key if fallback else _make_cli_key
     accepted = 0
     failed = 0
     if isinstance(resp, SendResponse) and resp.items:
@@ -836,7 +862,7 @@ def _create_messages_from_response(
                 msghub_request_id=msghub_request_id,
                 to_number=_norm_to_number(phone),
                 to_number_raw=phone,
-                cli_key=_make_cli_key(campaign_id, chunk_idx, i),
+                cli_key=make_cli_key(campaign_id, chunk_idx, i),
                 msg_key=None,
                 status="PENDING",
             )

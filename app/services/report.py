@@ -219,7 +219,11 @@ def _update_message(msg: Message, item: ReportItem) -> bool:
 
 
 def _refresh_campaign_counters(db: Session, campaign_id: int) -> None:
-    """캠페인의 ok/fail/pending/cost 카운터를 SQL 집계로 재계산한다."""
+    """캠페인의 ok/fail/pending/cost 카운터를 SQL 집계로 재계산한다.
+
+    예약 취소(CANCELED) 행은 성공·실패·대기 어디에도 세지 않는다. 대기로 세면 일부 청크만
+    취소돼 RESERVED 로 남은 캠페인이 나머지가 전달돼도 완료로 전이하지 못한다.
+    """
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         return
@@ -229,6 +233,7 @@ def _refresh_campaign_counters(db: Session, campaign_id: int) -> None:
     is_fail = (Message.status.in_(("FAILED", "DONE"))) & (
         (Message.result_code != SUCCESS_CODE) | (Message.result_code.is_(None))
     )
+    is_canceled = Message.status == "CANCELED"
     is_rcs = (Message.channel == "RCS") & is_success
     is_fallback = (Message.channel.in_(("SMS", "LMS", "MMS"))) & is_success
 
@@ -237,6 +242,7 @@ def _refresh_campaign_counters(db: Session, campaign_id: int) -> None:
             func.count().label("total"),
             func.sum(case((is_success, 1), else_=0)).label("ok"),
             func.sum(case((is_fail, 1), else_=0)).label("fail"),
+            func.sum(case((is_canceled, 1), else_=0)).label("canceled"),
             func.coalesce(func.sum(Message.cost), 0).label("total_cost"),
             func.sum(case((is_rcs, 1), else_=0)).label("rcs_count"),
             func.sum(case((is_fallback, 1), else_=0)).label("fallback_count"),
@@ -245,7 +251,9 @@ def _refresh_campaign_counters(db: Session, campaign_id: int) -> None:
 
     campaign.ok_count = row.ok or 0
     campaign.fail_count = row.fail or 0
-    campaign.pending_count = max(0, (row.total or 0) - (row.ok or 0) - (row.fail or 0))
+    campaign.pending_count = max(
+        0, (row.total or 0) - (row.ok or 0) - (row.fail or 0) - (row.canceled or 0)
+    )
     campaign.total_cost = row.total_cost or 0
     campaign.rcs_count = row.rcs_count or 0
     campaign.fallback_count = row.fallback_count or 0
