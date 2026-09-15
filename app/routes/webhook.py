@@ -341,12 +341,14 @@ async def receive_mo(
         payload.mo_cnt,
     )
 
-    # 대화방 실시간 갱신 — 접속 중인 브라우저(SSE)로 즉시 알린다. 이벤트 발행은
-    # 인메모리 큐에 넣기만 하는 논블로킹 연산이고, publish 자체가 예외를 삼키지만
-    # 방어적으로 한 번 더 감싼다(알림 실패가 msghub success 를 막지 않게).
+    # 대화방 실시간 갱신 — 접속 중인 브라우저(SSE)로 알린다. 새로 저장한 회신이 있을 때만.
+    # 회신을 부르는 캠페인("YES 로 답장")이면 MO 가 몰려오므로 창당 1회로 합쳐 발행한다 —
+    # 이벤트마다 열린 탭이 목록·상세를 다시 불러온다(events.publish_throttled). 조용하던 뒤 첫
+    # 회신은 바로, 몰려온 회신의 마지막 것도 창 길이 안에 반영된다. 발행은 논블로킹이고
+    # 예외를 던지지 않지만 방어적으로 한 번 더 감싼다(알림 실패가 msghub success 를 막지 않게).
     if saved_mos:
         try:
-            events.publish("message.new")
+            events.publish_throttled("message.new")
         except Exception:  # noqa: BLE001
             log.debug("SSE 이벤트 발행 실패(무시)", exc_info=True)
 

@@ -2,20 +2,22 @@
 
 - publish → 구독자 큐 전달, 구독 해제 후엔 미전달.
 - 구독자 없어도/큐 가득 차도 publish 는 예외 없이 동작(webhook 보호).
-- MO 수신 시 "message.new" 이벤트가 실제로 발행된다(새로고침 없이 갱신되는 근거).
 - publish_throttled: 몰려온 변경도 창(window)당 1회 — 첫 변경은 즉시, 마지막 변경은 창 끝에.
+- MO 웹훅은 새로 저장한 회신이 있을 때만, 커밋 뒤에 "message.new" 를 합쳐 발행한다(회신이
+  새로고침 없이 뜨는 근거). 몰려온 회신도 창당 1회, 발행이 실패해도 msghub 에는 success.
 - 리포트 웹훅·재조정은 발신 전달 상태가 바뀌었을 때만, 커밋 뒤에 "thread.updated" 를
   합쳐 발행한다(열린 대화방의 대기 라벨이 새로고침 없이 바뀌는 근거).
 """
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
 
-from app.models import Campaign, Message, MsghubRequest
+from app.models import Caller, Campaign, Message, MoMessage, MsghubRequest
 from app.msghub.codes import SUCCESS_CODE
 from app.routes.webhook import receive_mo, receive_report
 from app.security.settings_store import SettingsStore
@@ -38,11 +40,31 @@ def _json_request(body: dict):
     return request
 
 
-def _mo_body(key="e1"):
-    return {"moCnt": 1, "moLst": [{
-        "moKey": key, "moNumber": "01012345678", "moMsg": "회신",
+def _mo_body(key="e1", *, number="01012345678", callback=None):
+    item = {
+        "moKey": key, "moNumber": number, "moMsg": "회신",
         "moRecvDt": "2026-01-01 10:00:00",
-    }]}
+    }
+    if callback is not None:
+        item["moCallback"] = callback
+    return {"moCnt": 1, "moLst": [item]}
+
+
+def _record_commits_and_publishes(db, monkeypatch) -> list[str]:
+    """커밋과 발행을 일어난 순서대로 기록한다 — "커밋 뒤에만 발행" 검증용.
+
+    데이터 준비(커밋)가 끝난 뒤에 설치할 것.
+    """
+    calls: list[str] = []
+    real_commit = db.commit
+
+    def commit() -> None:
+        real_commit()
+        calls.append("commit")
+
+    monkeypatch.setattr(db, "commit", commit)
+    monkeypatch.setattr(events, "publish", lambda event: calls.append(event) or 0)
+    return calls
 
 
 # ── 이벤트 버스 ──────────────────────────────────────────────────────────────
@@ -219,7 +241,7 @@ def test_throttled_without_running_loop_publishes_directly(monkeypatch):
 
 
 def test_receive_mo_publishes_event(db_session):
-    """고객 회신 저장 시 message.new 발행 → 브라우저가 즉시 갱신."""
+    """조용하던 뒤 첫 회신은 기다리지 않고 message.new 발행 → 브라우저가 바로 갱신."""
     _setup_token(db_session)
 
     async def run():
@@ -234,22 +256,80 @@ def test_receive_mo_publishes_event(db_session):
     asyncio.run(run())
 
 
-def test_duplicate_mo_does_not_publish(db_session):
-    """중복 MO(재전송)는 저장 안 되므로 이벤트도 발행 안 함(불필요 갱신 방지)."""
+def test_mo_burst_is_throttled(db_session, monkeypatch):
+    """회신을 부르는 캠페인("YES 로 답장")에 MO 가 몰려도 창 안에선 바로 발행이 한 번뿐이다.
+
+    나머지 회신은 버리지 않고 창 끝에 한 번 싣는다 — 마지막 회신도 창 길이 안에 화면에 뜬다.
+    """
     _setup_token(db_session)
+    calls = _record_commits_and_publishes(db_session, monkeypatch)
 
     async def run():
-        # 1회차 — 저장 + 발행
-        await receive_mo("wtok", _json_request(_mo_body("dup1")), db_session)
-        # 2회차 — 같은 moKey → 중복, 구독 후 확인
-        q = events.subscribe()
-        try:
-            await receive_mo("wtok", _json_request(_mo_body("dup1")), db_session)
-            assert q.empty()  # 중복이라 발행 없음
-        finally:
-            events.unsubscribe(q)
+        clock = _ManualClock(asyncio.get_running_loop())
+        for i in range(3):  # 1초 간격, 서로 다른 고객의 회신
+            body = _mo_body(f"burst-{i}", number=f"0101234000{i}")
+            resp = await receive_mo("wtok", _json_request(body), db_session)
+            assert resp.status_code == 200
+            await clock.advance(1)
+        assert calls == ["commit", "message.new", "commit", "commit"]
+
+        await clock.advance(events._THROTTLE_WINDOW_SECONDS - clock.now)  # 첫 발행의 창 끝
+        assert calls == ["commit", "message.new", "commit", "commit", "message.new"]
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        pytest.param(_mo_body("first"), id="duplicate-mo"),
+        pytest.param(_mo_body("forged", callback="07099998888"), id="unregistered-callback"),
+    ],
+)
+def test_mo_without_new_rows_does_not_publish(db_session, monkeypatch, follow_up):
+    """저장한 회신이 없는 MO(재전송 중복·미등록 발신번호 거부)는 새로고침을 부르지 않는다.
+
+    직전 회신의 창 안에 와도 창 끝 발행을 예약하지 않아야 한다. 합쳐 발행하면 잘못 부른
+    발행도 창 끝까지 미뤄질 뿐이라, 창이 지난 뒤에 확인한다.
+    """
+    _setup_token(db_session)
+    db_session.add(Caller(
+        number="0212345678", label="발신", active=1, created_at="2026-01-01T00:00:00+00:00",
+    ))
+    db_session.commit()
+
+    async def run():
+        clock = _ManualClock(asyncio.get_running_loop())
+        await receive_mo("wtok", _json_request(_mo_body("first")), db_session)  # 저장 + 발행
+        calls = _record_commits_and_publishes(db_session, monkeypatch)
+
+        resp = await receive_mo("wtok", _json_request(follow_up), db_session)
+        await clock.advance(events._THROTTLE_WINDOW_SECONDS)
+
+        assert resp.status_code == 200
+        assert calls == ["commit"]
+
+    asyncio.run(run())
+
+
+def test_mo_publish_failure_does_not_block_success(db_session, monkeypatch):
+    """발행이 예외로 끝나도 회신은 커밋되고 msghub 에는 success.
+
+    success 를 못 받은 msghub 가 재전송하면 그 MO 는 중복이라, 대화방 갱신도 n8n 알림도
+    다시는 나가지 않는다.
+    """
+    _setup_token(db_session)
+
+    def broken_publish(event: str) -> int:
+        raise RuntimeError("event bus down")
+
+    monkeypatch.setattr(events, "publish", broken_publish)
+
+    resp = asyncio.run(receive_mo("wtok", _json_request(_mo_body()), db_session))
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body) == {"code": "10000", "message": "success"}
+    assert db_session.execute(select(MoMessage.mo_key)).scalars().all() == ["e1"]
 
 
 # ── 리포트 웹훅·재조정 → thread.updated (통합) ───────────────────────────────
@@ -292,23 +372,6 @@ def _report_body(cli_key=_CLI_KEY, result_code=SUCCESS_CODE):
         "cliKey": cli_key, "msgKey": "mk-1", "ch": "RCS", "resultCode": result_code,
         "resultCodeDesc": "결과", "productCode": "SMS", "rptDt": "2026-09-01 09:00:05",
     }]}
-
-
-def _record_commits_and_publishes(db, monkeypatch) -> list[str]:
-    """커밋과 발행을 일어난 순서대로 기록한다 — "커밋 뒤에만 발행" 검증용.
-
-    데이터 준비(커밋)가 끝난 뒤에 설치할 것.
-    """
-    calls: list[str] = []
-    real_commit = db.commit
-
-    def commit() -> None:
-        real_commit()
-        calls.append("commit")
-
-    monkeypatch.setattr(db, "commit", commit)
-    monkeypatch.setattr(events, "publish", lambda event: calls.append(event) or 0)
-    return calls
 
 
 def test_report_publishes_thread_updated_after_commit(db_session, sample_user, monkeypatch):
