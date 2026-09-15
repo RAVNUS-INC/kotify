@@ -32,6 +32,10 @@ _RETRY_PREFIXES: tuple[str, ...] = ("49",)
 
 SUCCESS_CODE = "10000"
 
+# 같은 cliKey 가 이미 접수됐다는 결과 코드 — 29005 중복발송, 29024 중복키 (공식 2.9 결과코드).
+# cliKey 는 10분 안에 다시 쓰면 중복으로 거부된다(claudedocs/msghub-migration-spec.md §2.3).
+DUPLICATE_SEND_CODES: frozenset[str] = frozenset({"29005", "29024"})
+
 # 건당 요금 (원, VAT 별도, 후불)
 PRICE_TABLE: dict[tuple[str, str], int] = {
     # (channel, productCode) → 단가

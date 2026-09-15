@@ -153,13 +153,30 @@ def test_direct_fallback_before_report_is_labeled_direct(db_session, sample_user
 
 
 def test_webhook_sms_fallback_pending_is_labeled_sms(db_session, sample_user):
-    """양방향 리포트 실패 → webhook SMS 대체 발송 대기(FB_PENDING)는 실패한 RCS 가 아니라 SMS."""
+    """양방향 리포트 실패 → 직접 SMS 대체 발송 대기(-fb, FB_PENDING)는 실패한 RCS 가 아니라 SMS.
+
+    webhook 이 단방향 RCS 요청을 거부당해 직접 보낸 건과, 이전 webhook(일반 SMS 대체) 이력.
+    """
     _send(
         db_session, rcs_messagebase_id=_CHAT, status="FB_PENDING", result_code="59999",
         channel="RCS", cli_key="c1-0-0-fb",
     )
     detail = api_get_thread(_TID, db=db_session)["data"]
     assert detail["messages"][-1]["kind"] == "sms"
+
+
+def test_webhook_rcs_fallback_pending_is_labeled_rcs(db_session, sample_user):
+    """양방향 리포트 실패 → 단방향 RCS 대체 발송 대기(-rcs-fb)는 SMS 가 아니라 RCS.
+
+    실패한 양방향 리포트의 channel 이 남아 있어도 대체 발송 채널로 표시한다.
+    """
+    _send(
+        db_session, rcs_messagebase_id=_CHAT, status="FB_PENDING", result_code="55715",
+        channel="SMS", cli_key="c1-0-0-rcs-fb",
+    )
+    detail = api_get_thread(_TID, db=db_session)["data"]
+    assert detail["messages"][-1]["kind"] == "rcs"
+    assert detail["channel"] == "rcs"
 
 
 def test_direct_fallback_after_report_uses_report_channel(db_session, sample_user):

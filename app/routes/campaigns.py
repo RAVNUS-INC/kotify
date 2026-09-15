@@ -149,6 +149,9 @@ def _message_to_recipient(m: Message) -> dict:
                 rstatus = "delivered"
         else:
             rstatus = "failed"
+    elif m.status == "FB_PENDING" and (m.cli_key or "").endswith("-rcs-fb"):
+        # 양방향 답장 실패 → 단방향 RCS 로 다시 보내는 중 — SMS 로 떨어진 게 아니라 발송 대기
+        rstatus = "queued"
     else:
         rstatus = _RECIPIENT_STATUS.get(m.status or "", "queued")
 

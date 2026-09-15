@@ -28,10 +28,12 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
         items: ReportItem 목록 (웹훅 또는 폴링에서 수신).
 
     Returns:
-        (처리된 메시지 건수, SMS fallback이 필요한 메시지 목록).
-        fallback 목록은 양방향 CHAT(RPCSAXX001) 캠페인의 RCS 실패 메시지 —
-        현재 outbound는 단방향 RCS(fbInfoLst 자동 fallback)만 사용하므로
-        항상 빈 목록이다. 장래 MO 자동응답 기능을 추가할 때 재사용한다.
+        (처리된 메시지 건수, 대체 발송이 필요한 메시지 목록).
+        대체 발송 목록은 대화방 양방향 답장(CHAT, RPCSAXX001 캠페인)이 리포트에서 실패한
+        메시지다. 양방향 요청엔 fbInfoLst 가 없어 msghub 가 대체 발송하지 않으므로 FB_PENDING
+        으로 두고 호출자(webhook)가 단방향 RCS 로 보낸다(compose.dispatch_chat_fallback).
+        cliKey 가 "-fb"(직접 발송)·"-rcs-fb"(단방향 RCS)로 끝나는 건은 이미 대체 발송이라
+        실패해도 다시 넣지 않는다.
     """
     processed = 0
     campaign_ids: set[int] = set()
@@ -45,6 +47,13 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
                 item.cli_key, item.msg_key, mask_phone(item.phone),
             )
             continue
+        if _superseded_by_fallback(item.cli_key, msg.cli_key):
+            log.info("대체 발송 전 원본 리포트 재수신 — 건너뜀: cliKey=%s", item.cli_key)
+            continue
+        if item.cli_key and _fallback_base_key(item.cli_key) == msg.cli_key:
+            # 대체 발송 키로 바꾼 커밋이 롤백돼 원본 키 행에 매칭됨 — 실제 발송 키로 맞춰야 실패
+            # 리포트여도 아래에서 다시 대체 발송하지 않고, 원본 리포트 재수신도 걸러진다.
+            msg.cli_key = item.cli_key
 
         if _update_message(msg, item):
             campaign_ids.add(msg.campaign_id)
@@ -52,7 +61,7 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
             if item.result_code != SUCCESS_CODE:
                 failed_msgs.append(msg)
 
-    # 양방향 CHAT 캠페인의 실패 메시지 → SMS fallback 필요
+    # 양방향 CHAT 캠페인의 실패 메시지 → 대체 발송 필요 (이미 대체 발송한 "-fb" 건 제외)
     fallback_needed: list[Message] = []
     if failed_msgs:
         chat_cids = set(
@@ -143,7 +152,9 @@ def _find_message(
 
     msghub v11 delivery report는 cliKey 외에도 phone 필드를 포함한다. cliKey
     없이 리포트가 도달하는 엣지 케이스(콘솔 설정 누락, 대량발송 일부 유실 등)
-    에서 phone으로 최근 발송 중인 메시지를 찾아 보조 매칭한다.
+    에서 phone으로 최근 발송 중인 메시지를 찾아 보조 매칭한다. cliKey 가 있는데
+    맞는 행이 없는 리포트는 우리 발송이 아니거나 이미 처리한 원본(대체 발송으로 키가
+    바뀜)이라 phone 매칭하지 않는다 — 같은 번호의 다른 발송에 결과가 붙는다.
     """
     if cli_key:
         msg = db.execute(
@@ -151,6 +162,16 @@ def _find_message(
         ).scalar_one_or_none()
         if msg:
             return msg
+        # 대체 발송 키(-rcs-fb/-fb) 리포트인데 행은 아직 원본 키 — 대체 발송이 접수된 뒤 그 키로
+        # 바꾼 커밋이 롤백된 경우(webhook 400 → msghub 재전송 대기). 발송은 이미 나갔으므로 원본
+        # 키 행이 이 리포트의 메시지다. phone 보조매칭이 모호해 버려지면 FB_PENDING 영구 대기.
+        base_key = _fallback_base_key(cli_key)
+        if base_key:
+            msg = db.execute(
+                select(Message).where(Message.cli_key == base_key)
+            ).scalar_one_or_none()
+            if msg:
+                return msg
 
     if msg_key:
         msg = db.execute(
@@ -164,7 +185,7 @@ def _find_message(
     # 어느 캠페인의 결과인지 확신할 수 없다. limit(1)+order_by 로 "가장 최근 1건"을
     # 집으면 엉뚱한 캠페인에 결과가 귀속돼 과금·집계가 오염되므로, 모호하면 보류한다.
     # limit(2) 는 "정확히 1건 vs 2건+" 판별에 필요한 최소 조회량이다.
-    if phone:
+    if phone and not cli_key:
         candidates = db.execute(
             select(Message)
             .where(
@@ -183,6 +204,29 @@ def _find_message(
             )
 
     return None
+
+
+_FALLBACK_SUFFIXES = ("-rcs-fb", "-fb")  # -rcs-fb 가 -fb 로도 끝나므로 긴 것부터
+
+
+def _fallback_base_key(cli_key: str) -> str | None:
+    """대체 발송 cliKey 의 원본 키. 대체 발송 키가 아니면 None."""
+    for suffix in _FALLBACK_SUFFIXES:
+        if cli_key.endswith(suffix):
+            return cli_key[: -len(suffix)]
+    return None
+
+
+def _superseded_by_fallback(report_cli_key: str, msg_cli_key: str | None) -> bool:
+    """리포트가 대체 발송으로 cliKey 를 바꾸기 전 원본 요청의 것인가.
+
+    원본 결과는 대체 발송을 시작할 때 이미 반영했다. 그 리포트를 msghub 가 다시 보내면(웹훅
+    응답 지연 등) cliKey 는 안 맞아도 원본 msgKey 가 남은 행(중복 코드로 접수만 확인했거나
+    대체 발송이 FAILED)에 매칭돼, 대체 발송 결과를 원본 실패로 덮어쓴다 — 그래서 건너뛴다.
+    """
+    return bool(report_cli_key) and msg_cli_key in {
+        f"{report_cli_key}{suffix}" for suffix in _FALLBACK_SUFFIXES
+    }
 
 
 def _update_message(msg: Message, item: ReportItem) -> bool:
@@ -251,11 +295,21 @@ def _refresh_campaign_counters(db: Session, campaign_id: int) -> None:
     campaign.fallback_count = row.fallback_count or 0
 
     # 모든 메시지 처리 완료 시 상태 전환
+    total_msgs = row.total or 0
     if campaign.pending_count == 0 and campaign.state in ("DISPATCHING", "DISPATCHED", "RESERVED"):
-        total_msgs = row.total or 0
         if total_msgs >= campaign.total_count:
             campaign.state = "COMPLETED" if campaign.fail_count == 0 else "PARTIAL_FAILED"
             campaign.completed_at = _now_iso()
+    elif (
+        campaign.state in ("PARTIAL_FAILED", "FAILED")
+        and campaign.pending_count == 0
+        and campaign.fail_count == 0
+        and total_msgs >= campaign.total_count
+    ):
+        # 실패로 마감한 메시지가 늦게 온 리포트로 전부 성공 보정됨 — 예: 타임아웃이라 FAILED 로
+        # 둔 대체 발송이 실제론 접수돼 도달. 대시보드·알림이 실패로 남지 않게 완료로 고친다.
+        campaign.state = "COMPLETED"
+        campaign.completed_at = campaign.completed_at or _now_iso()
 
 
 def _now_iso() -> str:

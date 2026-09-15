@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Attachment, Caller, Campaign, Message, MsghubRequest
 from app.msghub.client import CHUNK_SIZE
-from app.msghub.codes import SUCCESS_CODE
+from app.msghub.codes import DUPLICATE_SEND_CODES, SUCCESS_CODE
 from app.msghub.schemas import (
     FbInfo,
     MsghubAuthError,
@@ -28,7 +28,7 @@ from app.msghub.schemas import (
     SendResponse,
 )
 from app.services import audit
-from app.util.phone import normalize_phone, parse_phone_list
+from app.util.phone import mask_phone, normalize_phone, parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
 
 if TYPE_CHECKING:
@@ -643,6 +643,144 @@ async def dispatch_chat_reply(
     )
     db.commit()
     return campaign
+
+
+async def dispatch_chat_fallback(
+    db: Session,
+    msghub_client: MsghubClient,
+    messages: list[Message],
+) -> int:
+    """양방향 답장이 리포트에서 실패한 메시지를 단방향 RCS 로 다시 보낸다 — webhook 전용.
+
+    양방향(/rcs/bi/v1.1) 요청엔 fbInfoLst 가 없어 msghub 가 대체 발송해 주지 않는다. 예전엔
+    webhook 이 일반 SMS 로 보내, 대화방에서 RCS 로 고른 답장이 SMS 로 떨어졌다. 즉시 실패
+    경로(chat.send_reply → dispatch_campaign)와 같은 단방향 RCS + fbInfoLst 로 보내고
+    (_dispatch_rcs_chunks 와 같은 요청), RCS 요청이 거부되면(MsghubBadRequest) 직접 발송으로
+    전환한다. 실패한 양방향 요청은 과금되지 않는다(이통 공통 규격: 세션 메시지 실패는 비과금).
+
+    cliKey 는 원본에 접미사를 붙인다 — 단방향 RCS "-rcs-fb", 직접 발송 "-fb". 10분 중복 금지를
+    피하고, 둘 다 "-fb" 로 끝나 그 리포트가 실패해도 다시 대체 발송하지 않는다
+    (report.process_report). 표시 채널은 chat.outbound_channel 이 접미사로 가른다.
+
+    멱등성: 커밋은 호출자(webhook)가 리포트 처리와 한 트랜잭션으로 한다. 발송이 접수된 뒤
+    커밋이 실패하면 msghub 가 리포트를 재전송하고, 같은 cliKey 재요청은 중복 코드
+    (DUPLICATE_SEND_CODES)로 거부된다. 이미 접수된 것이므로 다음 단계로 넘어가지 않고 그
+    리포트를 기다린다 — RCS·SMS 이중 발송 방지.
+
+    발송 예외는 메시지별로 FAILED 로 남기고 삼킨다(되돌려 재시도하면 접수 여부가 불확실한 건을
+    다시 보낼 수 있다). FAILED 는 리포트가 더 오지 않으므로 여기서 캠페인 집계를 다시 계산한다.
+    예외: 29002(CPS 초과, MsghubRateLimited)는 요청 전체 거부라 접수된 것이 없다
+    (review/c3-verification.md). 버리지 않고 다시 던져 webhook 이 롤백·400 → msghub 가 리포트를
+    재전송할 때 다시 보낸다.
+
+    Returns:
+        대체 발송이 접수된(이미 접수돼 있던 건 포함) 메시지 수.
+    """
+    from app.services.report import _refresh_campaign_counters
+
+    accepted = 0
+    campaign_ids: set[int] = set()
+    for msg in messages:
+        campaign = db.get(Campaign, msg.campaign_id)
+        if campaign is None:
+            continue
+        campaign_ids.add(campaign.id)
+        if await _send_chat_fallback(msghub_client, campaign, msg):
+            accepted += 1
+
+    # autoflush=False — 집계 SELECT 전에 상태 변경을 flush (report.process_report 참조)
+    db.flush()
+    for cid in campaign_ids:
+        _refresh_campaign_counters(db, cid)
+    db.flush()
+    return accepted
+
+
+async def _send_chat_fallback(client: MsghubClient, campaign: Campaign, msg: Message) -> bool:
+    """메시지 1건 대체 발송 — 단방향 RCS, 요청이 거부되면 직접 발송. 접수됐으면 True."""
+    msg_type = campaign.message_type or "short"
+    content = campaign.content
+    base_key = msg.cli_key
+    log.warning(
+        "양방향 답장 리포트 실패 → 단방향 RCS 대체 발송: msg_id=%s, code=%s, phone=%s",
+        msg.id, msg.result_code, mask_phone(msg.to_number),
+    )
+    msg.status = "FB_PENDING"
+
+    rcs_key = f"{base_key}-rcs-fb"
+    try:
+        resp = await client.send_rcs(
+            messagebase_id=_MESSAGEBASE_MAP.get(msg_type) or "RPSSAXX001",
+            callback=campaign.caller_number,
+            recv_list=[
+                RecvInfo(
+                    cli_key=rcs_key,
+                    phone=msg.to_number,
+                    merge_data=_build_merge_data(msg_type, content, campaign.subject, None),
+                )
+            ],
+            fb_info_lst=_build_fallback(msg_type, content, campaign.subject, None),
+        )
+        return _apply_fallback_response(msg, rcs_key, resp)
+    except MsghubBadRequest as exc:
+        if exc.code in DUPLICATE_SEND_CODES:
+            return _apply_fallback_response(msg, rcs_key, None)
+        rcs_error = exc
+    except MsghubRateLimited:
+        raise
+    except Exception as exc:
+        log.exception("단방향 RCS 대체 발송 실패: msg_id=%s", msg.id)
+        _mark_fallback_failed(msg, rcs_key, f"RCS: {exc}")
+        return False
+
+    # RCS 설정 문제(29003 등)로 요청 전체가 거부됨(접수 0) → 직접 발송 전환
+    log.warning(
+        "단방향 RCS 대체 요청 거부 → %s 직접 발송 전환: msg_id=%s, err=%s",
+        msg_type.upper(), msg.id, rcs_error,
+    )
+    direct_key = f"{base_key}-fb"
+    try:
+        resp = await _send_direct(
+            client, campaign.caller_number, content, campaign.subject,
+            [RecvInfo(cli_key=direct_key, phone=msg.to_number)],
+            msg_type, None, False, None,
+        )
+        return _apply_fallback_response(msg, direct_key, resp)
+    except MsghubRateLimited:
+        raise
+    except Exception as exc:
+        if isinstance(exc, MsghubBadRequest) and exc.code in DUPLICATE_SEND_CODES:
+            return _apply_fallback_response(msg, direct_key, None)
+        log.exception("직접 대체 발송도 실패: msg_id=%s", msg.id)
+        _mark_fallback_failed(msg, direct_key, f"RCS: {rcs_error} / 직접 발송: {exc}")
+        return False
+
+
+def _apply_fallback_response(
+    msg: Message, cli_key: str, resp: SendResponse | ReserveResponse | None
+) -> bool:
+    """대체 발송 요청 결과를 메시지에 반영한다. 접수됐으면 True — FB_PENDING 으로 리포트 대기.
+
+    resp 가 None 이면 같은 cliKey 가 이미 접수돼 있던 경우(중복 코드)다. HTTP 200 이어도
+    수신자(item) 단위로 실패할 수 있어 item 코드를 본다 (H1, _create_messages_from_response).
+    """
+    msg.cli_key = cli_key
+    item = resp.items[0] if isinstance(resp, SendResponse) and resp.items else None
+    if item is None or item.code in DUPLICATE_SEND_CODES:
+        return True
+    if item.code == SUCCESS_CODE:
+        msg.msg_key = item.msg_key or msg.msg_key
+        return True
+    msg.result_code = item.code
+    _mark_fallback_failed(msg, cli_key, f"[{item.code}] {item.message}")
+    return False
+
+
+def _mark_fallback_failed(msg: Message, cli_key: str, error: str) -> None:
+    """대체 발송 요청 실패 — 실패한 양방향 결과 설명 뒤에 대체 발송 오류를 덧붙인다."""
+    msg.cli_key = cli_key
+    msg.status = "FAILED"
+    msg.result_desc = f"{msg.result_desc or ''} (대체 발송 실패 — {error})".strip()
 
 
 async def _send_chunk_direct(
