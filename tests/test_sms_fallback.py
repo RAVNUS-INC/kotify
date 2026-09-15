@@ -7,6 +7,8 @@ cliKey 를 {원본}-fb 로 바꿔 SMS 를 보낸다. 행의 결과는 그 -fb SM
   대체 SMS 성공 리포트는 DONE 이라 버려져 고객이 받은 답장이 영구 실패로 남던 문제.
 - 대체 SMS 가 접수되지 않았는데(수신자 거부, 클라이언트 없음) FB_PENDING 으로 남아
   리포트도 재조정도 없이 영영 대기로 보이던 문제.
+- 대체 SMS 요청 예외로 실패 확정한 뒤 실제 전달 리포트가 오면 집계만 성공이 되고 캠페인
+  state 는 실패로 남아 대시보드·알림에 "일부 실패 · 1/1 성공" 으로 보이던 문제.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from sqlalchemy import select
 from app.models import Campaign, Message, MsghubRequest
 from app.msghub.codes import SUCCESS_CODE
 from app.msghub.schemas import SendResponse, SendResultItem
+from app.routes.notifications import list_notifications, mark_all_read
 from app.routes.webhook import receive_report
 from app.security.settings_store import SettingsStore
 
@@ -146,7 +149,7 @@ def test_rejected_sms_fallback_is_failed_not_pending(db_session, sample_user, mo
     # FB_PENDING(대기)으로 집계된 캠페인도 실패로 다시 집계돼 발송 중에 머물지 않는다
     campaign = db_session.get(Campaign, campaign.id)
     assert (campaign.ok_count, campaign.fail_count, campaign.pending_count) == (0, 1, 0)
-    assert campaign.state == "PARTIAL_FAILED"
+    assert campaign.state == "FAILED"  # 1건 중 1건 실패 — "일부 실패 · 0/1 성공" 이 아니다
 
 
 class _TimeoutSmsClient:
@@ -173,6 +176,32 @@ def test_sms_sent_despite_request_error_is_settled_by_its_report(db_session, sam
     assert (msg.status, msg.result_code, msg.channel) == ("DONE", SUCCESS_CODE, "SMS")
     campaign = db_session.get(Campaign, campaign.id)
     assert (campaign.ok_count, campaign.fail_count, campaign.pending_count) == (1, 0, 0)
+
+
+def test_campaign_state_follows_late_sms_fallback_report(db_session, sample_user, monkeypatch):
+    """요청 예외로 실패 확정한 답장이 -fb 리포트로 전달되면 캠페인도 COMPLETED 로 따라간다.
+
+    처음 확정 시각(completed_at)은 그대로라, 실패 알림을 읽은 사용자에게 같은 알림이 새 알림으로
+    다시 뜨지 않고 내용만 "발송 완료" 로 바뀐다 — 알림센터는 캠페인 state 의 파생 뷰다.
+    """
+    _setup_token(db_session)
+    monkeypatch.setattr("app.main.get_msghub_client", lambda: _TimeoutSmsClient())
+    campaign, cli_key = _make_chat_reply(db_session)
+
+    _post_report(db_session, _chat_failure(cli_key))
+    completed_at = db_session.get(Campaign, campaign.id).completed_at
+    assert completed_at is not None
+    mark_all_read(user=sample_user, db=db_session)  # 실패 알림을 읽었다
+
+    _post_report(db_session, _sms_success(f"{cli_key}-fb"))
+
+    campaign = db_session.get(Campaign, campaign.id)
+    assert (campaign.ok_count, campaign.fail_count, campaign.pending_count) == (1, 0, 0)
+    assert (campaign.state, campaign.completed_at) == ("COMPLETED", completed_at)
+    notifs = list_notifications(kind="send_result", user=sample_user, db=db_session)["data"]
+    [notif] = [n for n in notifs if n["id"] == f"campaign-{campaign.id}"]
+    assert (notif["title"], notif["subtitle"]) == ("답장입니다 발송 완료", "1/1 도달")
+    assert "unread" not in notif
 
 
 def test_sms_fallback_without_client_is_failed_not_pending(db_session, sample_user, monkeypatch):

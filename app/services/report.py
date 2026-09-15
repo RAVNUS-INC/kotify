@@ -256,8 +256,40 @@ def _update_message(msg: Message, item: ReportItem) -> bool:
     return True
 
 
+# 리포트 집계로 state 를 정하는 캠페인 state — 발송 중인 state 와 결과 state.
+# 결과 state 도 다시 정한다. _update_message 는 DONE 만 건너뛰어 FAILED 행도 리포트를 받는데,
+# 요청 예외(응답 타임아웃)로 실패 처리한 건을 msghub 는 실제로 접수했을 수 있다 —
+# routes.webhook._send_sms_fallback, compose._record_failed_chunk(발송 때 FAILED·PARTIAL_FAILED·
+# RESERVE_FAILED). RESERVE_CANCELED 는 msghub 가 취소를 받아들인 state 라 바꾸지 않는다 — 취소된
+# 메시지가 재조정 조회에서 실패 코드로 확정되면 "발송 실패" 로 오표기된다.
+_REPORT_DRIVEN_STATES = frozenset({
+    "DISPATCHING", "DISPATCHED", "RESERVED",
+    "COMPLETED", "PARTIAL_FAILED", "FAILED", "RESERVE_FAILED",
+})
+
+
+def _settled_state(ok_count: int, fail_count: int) -> str:
+    """결과가 다 정해진 캠페인의 state (SPEC §4.1) — 실패 0 이면 COMPLETED, 성공 0 이면 FAILED.
+
+    PARTIAL_FAILED 는 성공과 실패가 섞였을 때만이다. 소비자가 그렇게 읽는다 — 목록은 "sent"(일부
+    성공), 알림은 "일부 실패 · {ok}/{total} 성공". 전건 실패는 발송 때(compose)처럼 FAILED 다.
+    """
+    if fail_count == 0:
+        return "COMPLETED"
+    if ok_count == 0:
+        return "FAILED"
+    return "PARTIAL_FAILED"
+
+
 def _refresh_campaign_counters(db: Session, campaign_id: int) -> None:
-    """캠페인의 ok/fail/pending/cost 카운터를 SQL 집계로 재계산한다."""
+    """캠페인의 ok/fail/pending/cost 카운터를 SQL 집계로 재계산하고, 결과가 다 정해졌으면 state 를 맞춘다.
+
+    이미 결과 state 인 캠페인도 집계를 따른다 — 늦게 온 리포트가 실패로 기록한 행을 전달 성공으로
+    바꾸면 집계만 성공이 되고 대시보드·알림센터·목록은 state 대로 실패를 보여 줬다.
+    completed_at 은 결과가 처음 정해질 때만 기록한다(발송 때 전건 실패면 compose.dispatch_campaign).
+    알림센터는 알림을 저장하지 않고 캠페인에서 파생하며 이 시각으로 정렬·읽음을 판정하므로, state 를
+    다시 정할 때 새로 찍으면 읽은 알림이 새 알림으로 다시 뜬다.
+    """
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         return
@@ -288,11 +320,16 @@ def _refresh_campaign_counters(db: Session, campaign_id: int) -> None:
     campaign.rcs_count = row.rcs_count or 0
     campaign.fallback_count = row.fallback_count or 0
 
-    # 모든 메시지 처리 완료 시 상태 전환
-    if campaign.pending_count == 0 and campaign.state in ("DISPATCHING", "DISPATCHED", "RESERVED"):
-        total_msgs = row.total or 0
-        if total_msgs >= campaign.total_count:
-            campaign.state = "COMPLETED" if campaign.fail_count == 0 else "PARTIAL_FAILED"
+    # 모든 메시지 처리 완료 시 상태 전환. 청크 전송 중엔 아직 만들지 않은 메시지가 있어 pending 이
+    # 0 으로 보일 수 있으므로 메시지 수가 total_count 에 이르렀는지도 본다.
+    total_msgs = row.total or 0
+    if (
+        campaign.pending_count == 0
+        and total_msgs >= campaign.total_count
+        and campaign.state in _REPORT_DRIVEN_STATES
+    ):
+        campaign.state = _settled_state(campaign.ok_count, campaign.fail_count)
+        if campaign.completed_at is None:
             campaign.completed_at = _now_iso()
 
 

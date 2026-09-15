@@ -28,6 +28,7 @@ from app.msghub.schemas import (
     SendResponse,
 )
 from app.services import audit
+from app.services.report import _refresh_campaign_counters
 from app.util.phone import normalize_phone, parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
 
@@ -323,7 +324,9 @@ async def _dispatch_rcs_chunks(
                 db.commit()
             except Exception as retry_exc:
                 db.rollback()
-                _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, str(retry_exc))
+                _record_failed_chunk(
+                    db, campaign.id, chunk_idx, chunk, sent_at, str(retry_exc), cli_key_suffix="-fb",
+                )
                 db.commit()
                 failed_chunks.append(chunk_idx)
                 failed_chunk_sizes.append(len(chunk))
@@ -361,7 +364,7 @@ async def _dispatch_rcs_chunks(
                 db.rollback()
                 _record_failed_chunk(
                     db, campaign.id, chunk_idx, chunk, sent_at,
-                    f"RCS: {exc} / 직접 발송: {retry_exc}",
+                    f"RCS: {exc} / 직접 발송: {retry_exc}", cli_key_suffix="-fb",
                 )
                 db.commit()
                 failed_chunks.append(chunk_idx)
@@ -523,8 +526,22 @@ async def dispatch_campaign(
 
     campaign.fail_count = failed_recipients
     campaign.pending_count = max(0, total_recipients - failed_recipients)
+    if campaign.pending_count == 0:
+        # 전건 실패로 결과가 정해진 시각. 뒤에 리포트로 state 가 바뀌어도 유지된다 — 알림센터의
+        # 정렬·읽음 기준이라 그때 처음 찍으면 읽은 알림이 다시 뜬다 (report._refresh_campaign_counters).
+        campaign.completed_at = _now_iso()
 
     db.flush()
+
+    # 요청 예외로 실패 기록한 청크도 msghub 가 실제로 접수했다면 리포트가 오고, 그 행에 매칭되면 state 는
+    # 리포트 집계를 따른다. 뒤 청크를 보내는 사이 이미 처리된 앞 청크 리포트는 위 판정(발송 결과만 셈)이
+    # 덮었으므로 다시 집계한다 — 뒤이어 올 리포트가 없으면 덮인 채로 남는다. 응답을 기다리는 동안(행을
+    # 기록하기 전) 온 리포트는 매칭할 행이 없어 반영되지 않는다.
+    has_report = db.execute(
+        select(Message.id).where(Message.campaign_id == campaign.id, Message.status == "DONE").limit(1)
+    ).first()
+    if has_report is not None:
+        _refresh_campaign_counters(db, campaign.id)
 
     # 6. 감사 로그
     audit.log(
@@ -852,8 +869,14 @@ def _record_failed_chunk(
     chunk: list[str],
     sent_at: str,
     error_body: str,
+    cli_key_suffix: str = "",
 ) -> None:
-    """실패 청크의 MsghubRequest + Message 레코드를 기록한다."""
+    """실패 청크의 MsghubRequest + Message 레코드를 기록한다.
+
+    cliKey 는 실패한 요청에 쓴 키와 같아야 한다 — 직접 재발송(_send_chunk_direct)이면 -fb.
+    요청 예외여도 msghub 가 실제로 접수했으면 리포트가 그 키로 오는데, 키가 다르면 FAILED 행은
+    phone 보조매칭 대상도 아니라 리포트가 어디에도 붙지 않는다.
+    """
     msghub_req = MsghubRequest(
         campaign_id=campaign_id,
         chunk_index=chunk_idx,
@@ -871,7 +894,7 @@ def _record_failed_chunk(
             msghub_request_id=msghub_req.id,
             to_number=_norm_to_number(to_num),
             to_number_raw=to_num,
-            cli_key=_make_cli_key(campaign_id, chunk_idx, i),
+            cli_key=f"{_make_cli_key(campaign_id, chunk_idx, i)}{cli_key_suffix}",
             msg_key=None,
             status="FAILED",
             result_code=None,
