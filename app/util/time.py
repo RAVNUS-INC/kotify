@@ -5,8 +5,11 @@
     우리 DB 에는 두 포맷이 섞여 저장된다.
       - `Campaign.created_at`, `AuditLog.created_at`, `User.created_at` 등:
         `datetime.now(UTC).isoformat()` 결과 (+00:00 접미사).
-      - `Message.complete_time`, `Message.report_dt`:
-        msghub webhook 원본 `yyyyMMddHHmmss` 를 **그대로 저장** (KST).
+      - `Message.complete_time`·`report_dt`(rptDt), `MoMessage.mo_recv_dt`(moRecvDt):
+        msghub 원본을 **그대로 저장** — 공식 문서·운영 캡처(2026-04-22) 기준 오프셋 없는
+        KST `yyyy-MM-ddTHH:mm:ss`. rptDt 가 비면 `datetime.now(UTC).isoformat()` 이,
+        moRecvDt 가 비면 received_at(UTC) 이 대신 쓰인다. 14자리 `yyyyMMddHHmmss` 도
+        받지만 운영 저장값으로 확인된 적은 없다.
 
     이전엔 각 route 파일마다 로컬 `_fmt_kst_*` 를 두고 `datetime.fromisoformat`
     만 호출했는데, msghub 원본을 만나면 ValueError → except 로 빈 문자열 반환.

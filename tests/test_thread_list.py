@@ -1,10 +1,11 @@
-"""대화방 목록(list_threads) — 페이지 번호만 본문을 조회해도 응답이 같고, 쿼리 수가 번호 수와 무관하다.
+"""대화방 목록(list_threads) — 포맷이 섞인 시각을 실제 시각으로 비교하고, 쿼리 수가 번호 수와 무관하다.
 
-예전 구현은 메시지를 주고받은 모든 번호(대량 발송 수신자 포함)마다 마지막 본문을 쿼리한 뒤
-잘랐다(로컬 측정 2만 번호 ≈ 2.5초, 새로고침마다 반복). 지금은 집계값으로 정렬·자른 뒤 페이지
-번호만 묶어 조회한다. _legacy_list_threads 는 바꾸기 직전(405a254) 구현을 그대로 옮긴 비교
-기준이다 — ISO·msghub 원본 시각이 섞이고 시각 동률·NULL·여러 발신번호가 있는 데이터에서 두
-구현의 결과가 필드 단위로 같아야 한다.
+시각 저장 포맷(2026-09-15 확인): msghub 리포트 rptDt·MO moRecvDt 는 오프셋 없는 KST
+'yyyy-MM-ddTHH:mm:ss'(공식 문서·운영 캡처 tests/test_msghub_schemas.py)이고, 값이 비면 우리가 기록한
+UTC ISO(report._now_iso()·received_at, 마이크로초 포함)가 들어간다. 파서가 받는 공백 구분
+moRecvDt(구 문서)와 14자리 yyyyMMddHHmmss 도 함께 쓴다. 문자열 대소로 비교하면 KST 벽시계와 UTC
+가 9시간 어긋나고, 같은 날짜면 공백이 'T' 보다, '2026-..' 이 '2026..' 보다 늘 작다 — 아래 시각은
+문자열 순서와 실제 순서가 반대가 되게 골랐다.
 """
 from __future__ import annotations
 
@@ -14,154 +15,18 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import Engine, event, func, select
+from sqlalchemy import Engine, event, literal, select
 from sqlalchemy.orm import Session
 
 from app.models import Campaign, Message, MoMessage, MsghubRequest, ThreadRead
 from app.routes.threads import api_list_threads
 from app.services import chat
-from app.services.chat import ChatThread, _parse_ts_for_sort, list_threads, thread_unread
+from app.services.chat import ChatThread, _ts_rank, _ts_shape, list_threads
 from app.util.time import KST
 
 _CALLERS = ["0212345678", "025771000", "CHATBOT_0123"]
+_PHONE = "01012345678"
 _BASE = datetime(2026, 6, 1, 3, 0, tzinfo=UTC)
-
-
-# ── 비교 기준: 바꾸기 직전 구현 (수정하지 말 것) ───────────────────────────────
-
-
-def _legacy_list_threads(
-    db: Session, limit: int = 50, offset: int = 0
-) -> tuple[list[ChatThread], int]:
-    """대화방 목록을 최근 활동순으로 반환한다."""
-    # MT 측 — campaigns.caller_number + messages.to_number로 그룹
-    mt_rows = db.execute(
-        select(
-            Campaign.caller_number.label("caller"),
-            Message.to_number.label("phone"),
-            func.max(
-                func.coalesce(Message.complete_time, Message.report_dt)
-            ).label("last_t"),
-            func.count().label("cnt"),
-        )
-        .join(Campaign, Campaign.id == Message.campaign_id)
-        .group_by(Campaign.caller_number, Message.to_number)
-    ).all()
-
-    # MO 측 — mo_callback + mo_number로 그룹
-    mo_rows = db.execute(
-        select(
-            MoMessage.mo_callback.label("caller"),
-            MoMessage.mo_number.label("phone"),
-            func.max(
-                func.coalesce(MoMessage.mo_recv_dt, MoMessage.received_at)
-            ).label("last_t"),
-            func.count().label("cnt"),
-        )
-        .where(MoMessage.mo_callback.is_not(None))
-        .group_by(MoMessage.mo_callback, MoMessage.mo_number)
-    ).all()
-
-    threads: dict[str, dict] = {}
-
-    def _touch(phone: str) -> dict:
-        return threads.setdefault(
-            phone,
-            {
-                "caller": "",
-                "phone": phone,
-                "mt_last_t": "",
-                "mt_count": 0,
-                "mo_last_t": "",
-                "mo_count": 0,
-                "caller_last_t": "",  # 대표 caller 선정용 최신 활동 시각
-            },
-        )
-
-    def _maybe_set_caller(t: dict, caller: str, ts: str) -> None:
-        """더 최근(ts) 활동의 caller 를 대표로 채택."""
-        if caller and ts >= t["caller_last_t"]:
-            t["caller"] = caller
-            t["caller_last_t"] = ts
-
-    for r in mt_rows:
-        if not r.caller or not r.phone:
-            continue
-        t = _touch(r.phone)
-        t["mt_last_t"] = r.last_t or ""
-        t["mt_count"] += r.cnt
-        _maybe_set_caller(t, r.caller, r.last_t or "")
-    for r in mo_rows:
-        if not r.caller or not r.phone:
-            continue
-        t = _touch(r.phone)
-        # 같은 phone 에 여러 mo_callback 이 있으면 최신 것으로 갱신.
-        if (r.last_t or "") >= t["mo_last_t"]:
-            t["mo_last_t"] = r.last_t or ""
-        t["mo_count"] += r.cnt
-        _maybe_set_caller(t, r.caller, r.last_t or "")
-
-    read_at_map: dict[str, str] = {}
-    for r in db.execute(
-        select(ThreadRead.phone, ThreadRead.read_at)
-    ).all():
-        prev = read_at_map.get(r.phone, "")
-        if (r.read_at or "") > prev:
-            read_at_map[r.phone] = r.read_at or ""
-
-    # 마지막 메시지 상세를 가져와 ChatThread로 빌드
-    built: list[ChatThread] = []
-    for phone, t in threads.items():
-        caller = t["caller"]  # 대표(최근) caller
-        last_mt_t = t["mt_last_t"]
-        last_mo_t = t["mo_last_t"]
-        if last_mo_t > last_mt_t:
-            last_t = last_mo_t
-            last_dir = "IN"
-            mo = db.execute(
-                select(MoMessage.mo_msg)
-                .where(MoMessage.mo_number == phone)
-                .order_by(
-                    func.coalesce(MoMessage.mo_recv_dt, MoMessage.received_at).desc()
-                )
-                .limit(1)
-            ).scalar_one_or_none()
-            last_body = mo or ""
-        else:
-            last_t = last_mt_t
-            last_dir = "OUT"
-            last_body_row = db.execute(
-                select(Campaign.content)
-                .join(Message, Message.campaign_id == Campaign.id)
-                .where(Message.to_number == phone)
-                .order_by(
-                    func.coalesce(Message.complete_time, Message.report_dt).desc()
-                )
-                .limit(1)
-            ).scalar_one_or_none()
-            last_body = last_body_row or ""
-
-        # 안읽음 = 고객(MO) 최종 메시지가 팀 마지막 읽음 시각 이후.
-        read_at = read_at_map.get(phone, "")
-        unread = thread_unread(last_mo_t, read_at)
-
-        built.append(
-            ChatThread(
-                caller=caller,
-                phone=phone,
-                last_timestamp=last_t,
-                last_body=last_body,
-                last_direction=last_dir,
-                unread=unread,
-                mo_count=t["mo_count"],
-                mt_count=t["mt_count"],
-            )
-        )
-
-    # last_timestamp 도 ISO 와 msghub 원본 섞여있어 parse 해서 정렬.
-    built.sort(key=lambda t: _parse_ts_for_sort(t.last_timestamp), reverse=True)
-    total = len(built)
-    return built[offset : offset + limit], total
 
 
 # ── 데이터 헬퍼 ───────────────────────────────────────────────────────────────
@@ -188,6 +53,7 @@ def _add_mt(db, *, caller, phone, content, complete_time=None, report_dt=None):
 
 
 def _add_mo(db, *, key, caller, phone, body, recv_dt, received_at="2026-06-01T00:00:00+00:00"):
+    """moRecvDt 가 없던 회신은 recv_dt=None — 목록은 received_at(UTC) 으로 대신 비교한다."""
     db.add(MoMessage(
         mo_key=key, mo_number=phone, mo_callback=caller, mo_type="message", mo_msg=body,
         mo_recv_dt=recv_dt, raw_payload="{}", received_at=received_at,
@@ -195,23 +61,324 @@ def _add_mo(db, *, key, caller, phone, body, recv_dt, received_at="2026-06-01T00
     db.flush()
 
 
-def _stamp(rng: random.Random) -> str | None:
-    """시각 문자열 — 같은 순간을 운영 DB 에 섞여 있는 포맷 중 하나로 쓴다.
+def _only_thread(db: Session) -> ChatThread:
+    threads, total = list_threads(db, limit=200)
+    assert total == len(threads) == 1
+    return threads[0]
 
-    포맷이 섞이면 문자열 대소와 실제 시각 순서가 어긋난다(ISO '2026-..' 는 원본 '2026..'
-    보다 늘 작다). 순간 후보를 좁혀 대화방 사이·한 번호 안의 시각 동률이 자주 나게 한다.
+
+# ── 방향·마지막 시각·미리보기 ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("mt", "mo", "expected"),
+    [
+        pytest.param(
+            {"complete_time": "2026-06-01T12:00:00"},                               # KST 12:00
+            {"recv_dt": None, "received_at": "2026-06-01T03:10:00.123456+00:00"},  # KST 12:10
+            ("IN", "2026-06-01T03:10:00.123456+00:00", "회신"),
+            id="utc-received_at-reply-after-report",
+        ),
+        pytest.param(
+            {"complete_time": "2026-06-01T12:00:00"},  # KST 12:00
+            {"recv_dt": "2026-06-01 12:10:00"},        # KST 12:10, 공백 구분
+            ("IN", "2026-06-01 12:10:00", "회신"),
+            id="space-separated-reply-after-report",
+        ),
+        pytest.param(
+            {"complete_time": "20260601120000"},  # KST 12:00, 14자리
+            {"recv_dt": "2026-06-01T12:10:00"},   # KST 12:10
+            ("IN", "2026-06-01T12:10:00", "회신"),
+            id="iso-reply-after-native-report",
+        ),
+        pytest.param(
+            {"report_dt": "2026-06-01T03:20:00.500000+00:00"},  # KST 12:20, 개별 조회 결과는 report_dt 만
+            {"recv_dt": "2026-06-01T12:10:00"},                 # KST 12:10
+            ("OUT", "2026-06-01T03:20:00.500000+00:00", "발송"),
+            id="utc-report-after-reply",
+        ),
+        pytest.param(
+            {"complete_time": "2026-06-01T03:20:00+00:00"},  # KST 12:20
+            {"recv_dt": "20260601121000"},                   # KST 12:10
+            ("OUT", "2026-06-01T03:20:00+00:00", "발송"),
+            id="native-reply-before-iso-report",
+        ),
+    ],
+)
+def test_direction_and_preview_follow_real_time(db_session, sample_user, mt, mo, expected):
+    """실제로 더 늦은 쪽이 마지막 활동 — 고객 회신이 늦으면 IN 이고 미리보기·시각도 회신 것이다.
+
+    예전엔 문자열로 비교해 늦게 온 회신이 우리 발송에 가려 목록 미리보기·순서가 발송 기준이었다.
     """
+    _add_mt(db_session, caller=_CALLERS[0], phone=_PHONE, content="발송", **mt)
+    _add_mo(db_session, key="mo", caller=_CALLERS[0], phone=_PHONE, body="회신", **mo)
+    db_session.commit()
+
+    t = _only_thread(db_session)
+
+    assert (t.last_direction, t.last_timestamp, t.last_body) == expected
+
+
+@pytest.mark.parametrize("later", [0, 1], ids=["first-caller-later", "second-caller-later"])
+def test_latest_send_across_callers(db_session, sample_user, later):
+    """발신번호가 여럿이면 그중 가장 늦은 발송이 기준 — 발신번호별 집계 행의 순서와 무관하다.
+
+    예전엔 발신번호별 행을 차례로 덮어써 마지막 행이 이겼다. 더 이른 발송 행이 마지막에 오면
+    그보다 늦은 회신이 마지막 활동으로 보였다.
+    """
+    times = ["2026-06-01T12:00:00", "2026-06-01T09:00:00"]
+    if later:
+        times.reverse()
+    _add_mt(db_session, caller=_CALLERS[0], phone=_PHONE, content="0번 발송", complete_time=times[0])
+    _add_mt(db_session, caller=_CALLERS[1], phone=_PHONE, content="1번 발송", complete_time=times[1])
+    _add_mo(db_session, key="mo", caller=_CALLERS[0], phone=_PHONE, body="회신",
+            recv_dt="2026-06-01T10:00:00")
+    db_session.commit()
+
+    t = _only_thread(db_session)
+
+    assert (t.last_direction, t.last_timestamp, t.last_body) == ("OUT", "2026-06-01T12:00:00", f"{later}번 발송")
+    assert t.caller == _CALLERS[later]
+    assert (t.mt_count, t.mo_count) == (2, 1)
+
+
+def test_latest_reply_across_callbacks(db_session, sample_user):
+    """회신 경로(mo_callback)가 여럿이면 실제로 가장 늦은 회신 — 대표 caller 도 그 경로다."""
+    _add_mt(db_session, caller=_CALLERS[0], phone=_PHONE, content="발송", complete_time="2026-06-01T11:00:00")
+    _add_mo(db_session, key="sms", caller=_CALLERS[0], phone=_PHONE, body="문자 회신",
+            recv_dt="2026-06-01T12:10:00")  # KST 12:10
+    _add_mo(db_session, key="rcs", caller=_CALLERS[2], phone=_PHONE, body="RCS 회신",
+            recv_dt=None, received_at="2026-06-01T03:20:00.654321+00:00")  # KST 12:20
+    db_session.commit()
+
+    t = _only_thread(db_session)
+
+    assert (t.last_direction, t.last_timestamp, t.last_body) == (
+        "IN", "2026-06-01T03:20:00.654321+00:00", "RCS 회신",
+    )
+    assert t.caller == _CALLERS[2]
+    assert (t.mt_count, t.mo_count) == (1, 2)
+
+
+def test_representative_caller_is_latest_activity(db_session, sample_user):
+    """대표 caller(답장 발송·읽음 처리에 쓰임)는 실제로 가장 늦은 활동의 발신번호다."""
+    _add_mo(db_session, key="rcs", caller=_CALLERS[2], phone=_PHONE, body="RCS 회신",
+            recv_dt="2026-06-01T12:00:00")  # KST 12:00
+    _add_mt(db_session, caller=_CALLERS[0], phone=_PHONE, content="문자 발송",
+            report_dt="2026-06-01T03:30:00.500000+00:00")  # KST 12:30
+    db_session.commit()
+
+    t = _only_thread(db_session)
+
+    assert (t.caller, t.last_direction, t.last_body) == (_CALLERS[0], "OUT", "문자 발송")
+
+
+@pytest.mark.parametrize("direction", ["OUT", "IN"])
+@pytest.mark.parametrize(
+    ("stamps", "latest"),
+    [
+        pytest.param(
+            [
+                "2026-06-01T12:00:00",               # KST 12:00
+                "2026-06-01 12:05:00",               # KST 12:05
+                "2026-06-01T03:10:00.250000+00:00",  # KST 12:10 — 가장 늦다
+                "20260601113000",                    # KST 11:30 — 문자열로는 가장 크다
+            ],
+            2,
+            id="listed-shapes",
+        ),
+        pytest.param(
+            [
+                "2026-06-01T12:00:00",      # KST 12:00
+                "2026-06-01T12:50:00.123",  # KST 12:50 — 목록에 없는 모양, 아래보다 문자열이 크다
+                "2026-06-01T04:00:00Z",     # KST 13:00 — 목록에 없는 모양, 가장 늦다
+                "20260601113000",           # KST 11:30
+            ],
+            2,
+            id="unlisted-shapes",
+        ),
+    ],
+)
+def test_latest_within_one_caller_across_formats(db_session, sample_user, direction, stamps, latest):
+    """같은 (발신번호, 번호) 안에서도 실제로 가장 늦은 행 — SQL 문자열 max 가 아니다.
+
+    리포트·수신 시각이 비어 대체된 UTC 값도, 모양 목록에 없는 표기도 각자 후보가 된다.
+    """
+    for n, stamp in enumerate(stamps):
+        if direction == "OUT":
+            _add_mt(db_session, caller=_CALLERS[0], phone=_PHONE, content=f"발송 {n}", complete_time=stamp)
+        elif stamp.endswith("+00:00"):  # moRecvDt 가 비어 received_at 으로 대체된 회신
+            _add_mo(db_session, key=f"mo-{n}", caller=_CALLERS[2], phone=_PHONE, body=f"회신 {n}",
+                    recv_dt=None, received_at=stamp)
+        else:
+            _add_mo(db_session, key=f"mo-{n}", caller=_CALLERS[2], phone=_PHONE, body=f"회신 {n}",
+                    recv_dt=stamp)
+    db_session.commit()
+
+    t = _only_thread(db_session)
+
+    body = f"발송 {latest}" if direction == "OUT" else f"회신 {latest}"
+    assert (t.last_direction, t.last_timestamp, t.last_body) == (direction, stamps[latest], body)
+    assert t.mt_count + t.mo_count == len(stamps)
+
+
+def test_same_instant_prefers_earlier_row(db_session, sample_user):
+    """같은 순간이면 먼저 저장된(id 가 작은) 행의 본문이다 — 표기가 달라도.
+
+    발송과 회신이 같은 순간이면 미리보기는 발송(OUT)이고 대표 caller 는 회신 경로다 — 답장이 그
+    회신의 replyId 세션(_fresh_reply_id 는 mo_callback 으로 찾는다)을 쓸 수 있게.
+    """
+    phone_mt, phone_mo, phone_both = "01000000001", "01000000002", "01000000003"
+    _add_mt(db_session, caller=_CALLERS[0], phone=phone_mt, content="먼저 저장된 발송",
+            complete_time="2026-06-01T03:00:00+00:00")
+    _add_mt(db_session, caller=_CALLERS[1], phone=phone_mt, content="나중 저장된 발송",
+            complete_time="20260601120000")  # 같은 순간(KST 12:00)
+    _add_mo(db_session, key="mo-1", caller=_CALLERS[2], phone=phone_mo, body="먼저 온 회신",
+            recv_dt="2026-06-01T12:00:00")
+    _add_mo(db_session, key="mo-2", caller=_CALLERS[2], phone=phone_mo, body="나중 온 회신",
+            recv_dt="2026-06-01T12:00:00")
+    _add_mt(db_session, caller=_CALLERS[0], phone=phone_both, content="발송", complete_time="2026-06-01T12:00:00")
+    _add_mo(db_session, key="mo-3", caller=_CALLERS[2], phone=phone_both, body="회신",
+            recv_dt=None, received_at="2026-06-01T03:00:00+00:00")
+    db_session.commit()
+
+    threads = {t.phone: t for t in list_threads(db_session, limit=200)[0]}
+
+    assert {phone: (t.last_direction, t.last_body) for phone, t in threads.items()} == {
+        phone_mt: ("OUT", "먼저 저장된 발송"),
+        phone_mo: ("IN", "먼저 온 회신"),
+        phone_both: ("OUT", "발송"),
+    }
+    assert threads[phone_both].caller == _CALLERS[2]
+
+
+def test_threads_without_time_sort_last(db_session, sample_user):
+    """리포트 전(시각 없음)만 있는 대화방은 맨 뒤다. 파싱할 수 없는 시각은 그 바로 앞.
+
+    시각이 없어도 대표 caller 는 정해진다 — 대화방 id 가 'caller:phone' 이다.
+    """
+    phone_real, phone_garbage, phone_pending = "01000000001", "01000000002", "01000000003"
+    _add_mt(db_session, caller=_CALLERS[1], phone=phone_pending, content="대기 A")
+    _add_mt(db_session, caller=_CALLERS[1], phone=phone_pending, content="대기 B")
+    _add_mo(db_session, key="mo", caller=_CALLERS[2], phone=phone_garbage, body="회신", recv_dt="N/A")
+    _add_mt(db_session, caller=_CALLERS[0], phone=phone_real, content="발송", complete_time="20260101090000")
+    db_session.commit()
+
+    threads, total = list_threads(db_session, limit=200)
+
+    assert total == 3
+    assert [(t.phone, t.last_direction, t.last_timestamp, t.last_body, t.caller) for t in threads] == [
+        (phone_real, "OUT", "20260101090000", "발송", _CALLERS[0]),
+        (phone_garbage, "IN", "N/A", "회신", _CALLERS[2]),
+        (phone_pending, "OUT", "", "대기 A", _CALLERS[1]),
+    ]
+
+
+def test_unread_follows_last_reply_even_when_we_sent_after(db_session, sample_user):
+    """안읽음은 방향과 무관하게 마지막 회신이 팀 읽음 시각 이후인가다 — 회신 뒤 발송이 있어도 같다."""
+    phone_unread, phone_read = "01000000001", "01000000002"
+    for phone, read_at in [
+        (phone_unread, "2026-06-01T02:30:00.100000+00:00"),  # KST 11:30 — 회신 전에 읽음
+        (phone_read, "2026-06-01T03:10:00.100000+00:00"),    # KST 12:10 — 회신 뒤에 읽음
+    ]:
+        _add_mo(db_session, key=f"mo-{phone}", caller=_CALLERS[0], phone=phone, body="회신",
+                recv_dt="2026-06-01T12:00:00")  # KST 12:00
+        _add_mt(db_session, caller=_CALLERS[0], phone=phone, content="발송",
+                complete_time="2026-06-01T12:30:00")  # KST 12:30 — 방향은 OUT
+        db_session.add(ThreadRead(caller=_CALLERS[0], phone=phone, read_at=read_at))
+    db_session.commit()
+
+    threads, _ = list_threads(db_session, limit=200)
+
+    assert {t.phone: (t.last_direction, t.unread) for t in threads} == {
+        phone_unread: ("OUT", True),
+        phone_read: ("OUT", False),
+    }
+
+
+def test_reply_without_callback_is_body_candidate_but_not_counted(db_session, sample_user):
+    """mo_callback 이 없는 회신은 집계(방향·시각·건수)엔 빠지지만 미리보기 본문 후보다 (기존 규칙)."""
+    _add_mt(db_session, caller=_CALLERS[0], phone=_PHONE, content="발송", complete_time="2026-06-01T11:00:00")
+    _add_mo(db_session, key="counted", caller=_CALLERS[0], phone=_PHONE, body="집계된 회신",
+            recv_dt="2026-06-01T12:00:00")
+    _add_mo(db_session, key="no-callback", caller=None, phone=_PHONE, body="콜백 없는 회신",
+            recv_dt=None, received_at="2026-06-01T03:10:00.100000+00:00")  # KST 12:10
+    db_session.commit()
+
+    t = _only_thread(db_session)
+
+    assert (t.last_direction, t.last_timestamp, t.last_body, t.mo_count) == (
+        "IN", "2026-06-01T12:00:00", "콜백 없는 회신", 1,
+    )
+
+
+def test_orders_by_real_time_across_formats_and_picks_latest_body(db_session, sample_user):
+    """문자열로는 원본 KST 가 ISO 보다 늘 크지만 목록은 실제 시각순이다.
+
+    본문은 id 가 아니라 기준 시각이 가장 늦은 행에서 온다 — 리포트가 늦게 오면 먼저 저장된
+    발송이 나중에 완료될 수 있다.
+    """
+    phone_out, phone_iso, phone_kst = "01000000001", "01000000002", "01000000003"
+    _add_mt(db_session, caller=_CALLERS[0], phone=phone_out, content="최근 발송",
+            complete_time="20260601130000")  # KST 13:00 = 04:00Z
+    _add_mt(db_session, caller=_CALLERS[0], phone=phone_out, content="이전 발송",
+            complete_time="20260601090000")  # id 는 더 크지만 00:00Z
+    _add_mo(db_session, key="iso", caller=_CALLERS[0], phone=phone_iso, body="ISO 회신",
+            recv_dt=None, received_at="2026-06-01T04:30:00+00:00")
+    _add_mo(db_session, key="kst", caller=_CALLERS[2], phone=phone_kst, body="KST 회신",
+            recv_dt="2026-06-01 12:45:00")  # 오프셋 없음 = KST → 03:45Z
+    db_session.commit()
+
+    threads, total = list_threads(db_session, limit=2)
+
+    assert total == 3
+    assert [(t.phone, t.last_direction, t.last_body) for t in threads] == [
+        (phone_iso, "IN", "ISO 회신"),    # 04:30Z
+        (phone_out, "OUT", "최근 발송"),  # 04:00Z
+    ]
+
+
+def test_known_time_formats_share_a_shape_key(db_session):
+    """저장되는 포맷은 모양 키로 묶여 번호당 후보 행이 모양 수만큼만 생긴다.
+
+    모양 목록에 없는 표기는 문자열마다 따로 묶인다 — 결과는 같고 행만 늘어나므로 운영 포맷이
+    목록에서 빠지면 결과 테스트로는 드러나지 않는다.
+    """
+    def shape(raw: str) -> str:
+        return db_session.execute(select(_ts_shape(literal(raw)))).scalar_one()
+
+    utc = datetime(2026, 6, 1, 3, 0, tzinfo=UTC)
+    same_shape_pairs = [
+        ("2026-06-01T12:00:00", "2026-12-31T23:59:59"),  # msghub rptDt·moRecvDt
+        (utc.replace(microsecond=123456).isoformat(), (utc + timedelta(days=9)).replace(microsecond=1).isoformat()),
+        (utc.isoformat(), (utc + timedelta(hours=9)).isoformat()),  # 마이크로초 0 인 isoformat()
+        ("2026-06-01 12:00:00", "2027-01-01 00:00:00"),
+        ("20260601120000", "20270101000000"),
+    ]
+    keys = [shape(a) for a, _ in same_shape_pairs]
+    for (a, b), key in zip(same_shape_pairs, keys, strict=True):
+        assert shape(b) == key != "~" + a
+    assert len(set(keys)) == len(keys)
+    assert shape("2026-06-01T03:00:00Z") == "~2026-06-01T03:00:00Z"
+
+
+# ── 페이지·IN 절 나눔 ──────────────────────────────────────────────────────────
+
+
+def _stamp(rng: random.Random) -> str | None:
+    """시각 문자열 — 같은 순간을 저장될 수 있는 포맷 중 하나로 쓴다. 순간 후보를 좁혀 동률이 자주 난다."""
     roll = rng.random()
     if roll < 0.1:
         return None  # 리포트 전
     if roll < 0.13:
-        return "N/A"  # 파싱 불가 — 정렬 키 0.0
-    dt = _BASE + timedelta(minutes=rng.choice([0, 5, 30, 90, 540, 541]))
+        return "N/A"  # 파싱 불가
+    dt = _BASE + timedelta(minutes=rng.choice([0, 5, 30, 90, 540, 541]), microseconds=rng.choice([0, 250000]))
     kst = dt.astimezone(KST)
     return rng.choice([
-        kst.strftime("%Y%m%d%H%M%S"),       # msghub 리포트 complete_time·report_dt (KST)
-        kst.strftime("%Y-%m-%d %H:%M:%S"),  # msghub moRecvDt (오프셋 없음 = KST)
-        dt.isoformat(),                     # 우리가 기록하는 시각 (+00:00)
+        kst.strftime("%Y-%m-%dT%H:%M:%S"),  # msghub rptDt·moRecvDt (KST)
+        kst.strftime("%Y-%m-%d %H:%M:%S"),  # moRecvDt 공백 구분 (KST)
+        kst.strftime("%Y%m%d%H%M%S"),       # yyyyMMddHHmmss (KST)
+        dt.isoformat(),                     # 우리가 기록하는 시각 (UTC)
         dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
     ])
 
@@ -242,72 +409,21 @@ def _seed_random_threads(db: Session, seed: int, phones: int = 60) -> None:
     db.commit()
 
 
-def _seed_edge_threads(db: Session) -> None:
-    """무작위로는 드물게 나오는 경우를 항상 넣는다."""
-    # 같은 시각의 발송 2건(발신번호 다름) — 본문 동률
-    _add_mt(db, caller=_CALLERS[1], phone="01099990001", content="동률 발송 A", complete_time="20260601120000")
-    _add_mt(db, caller=_CALLERS[0], phone="01099990001", content="동률 발송 B", complete_time="20260601120000")
-    # 같은 시각의 회신 2건 — 본문 동률
-    _add_mo(db, key="edge-1", caller=_CALLERS[2], phone="01099990002", body="동률 회신 A", recv_dt="20260601130000")
-    _add_mo(db, key="edge-2", caller=_CALLERS[2], phone="01099990002", body="동률 회신 B", recv_dt="20260601130000")
-    # 리포트 전 발송만 2건 — 기준 시각이 전부 NULL
-    _add_mt(db, caller=_CALLERS[0], phone="01099990003", content="대기 A")
-    _add_mt(db, caller=_CALLERS[0], phone="01099990003", content="대기 B")
-    # 가장 늦은 회신의 mo_callback 이 NULL — 집계엔 빠져도 본문 후보다
-    _add_mo(db, key="edge-3", caller=_CALLERS[0], phone="01099990004", body="집계된 회신", recv_dt="20260601100000")
-    _add_mo(db, key="edge-4", caller=None, phone="01099990004", body="콜백 없는 회신", recv_dt="20260601110000")
-    db.commit()
-
-
-# ── 예전 구현과 같은 응답 ──────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("chunk", [500, 3], ids=["one-chunk", "many-chunks"])
-@pytest.mark.parametrize("seed", range(4))
-def test_matches_legacy_on_mixed_format_data(db_session, sample_user, monkeypatch, seed, chunk):
-    monkeypatch.setattr(chat, "_IN_CHUNK", chunk)  # IN 절을 나눠 조회해도 합친 결과가 같아야 한다
+@pytest.mark.parametrize("seed", range(3))
+def test_pages_and_in_chunks_match_full_list(db_session, sample_user, monkeypatch, seed):
+    """페이지는 전체 목록의 같은 구간이고(본문은 페이지 번호만 조회), IN 절을 나눠 조회해도 같다."""
     _seed_random_threads(db_session, seed)
-    _seed_edge_threads(db_session)
-
-    everything, total = _legacy_list_threads(db_session, limit=200)
-    assert total == len(everything)  # 전부 한 페이지 — 모든 대화방을 필드 단위로 비교한다
-    # 비교가 헛돌지 않게: 두 방향이 다 있고, 정렬 키 동률(안정 정렬 순서)이 있고, 문자열
-    # 순서로 정렬하면 달라지는(포맷이 섞인) 데이터여야 한다.
+    everything, total = list_threads(db_session, limit=10_000)
+    assert total == len(everything) > 0
     assert {t.last_direction for t in everything} == {"IN", "OUT"}
-    keys = [_parse_ts_for_sort(t.last_timestamp) for t in everything]
-    assert len(set(keys)) < len(keys)
-    assert sorted(everything, key=lambda t: t.last_timestamp, reverse=True) != everything
+    ranks = [_ts_rank(t.last_timestamp) for t in everything]
+    assert ranks == sorted(ranks, reverse=True)  # 실제 시각순
 
-    for limit, offset in [(200, 0), (50, 0), (10, 0), (7, 13), (25, 40), (10, total - 4), (10, total + 5)]:
-        assert list_threads(db_session, limit=limit, offset=offset) == _legacy_list_threads(
-            db_session, limit=limit, offset=offset
-        ), f"limit={limit} offset={offset}"
-
-
-def test_orders_by_real_time_across_formats_and_picks_latest_body(db_session, sample_user):
-    """문자열로는 원본 KST 가 ISO 보다 늘 크지만 목록은 실제 시각순이다.
-
-    본문은 id 가 아니라 기준 시각이 가장 늦은 행에서 온다 — 리포트가 늦게 오면 먼저 저장된
-    발송이 나중에 완료될 수 있다.
-    """
-    phone_out, phone_iso, phone_kst = "01000000001", "01000000002", "01000000003"
-    _add_mt(db_session, caller=_CALLERS[0], phone=phone_out, content="최근 발송",
-            complete_time="20260601130000")  # KST 13:00 = 04:00Z
-    _add_mt(db_session, caller=_CALLERS[0], phone=phone_out, content="이전 발송",
-            complete_time="20260601090000")  # id 는 더 크지만 00:00Z
-    _add_mo(db_session, key="iso", caller=_CALLERS[0], phone=phone_iso, body="ISO 회신",
-            recv_dt=None, received_at="2026-06-01T04:30:00+00:00")
-    _add_mo(db_session, key="kst", caller=_CALLERS[2], phone=phone_kst, body="KST 회신",
-            recv_dt="2026-06-01 12:45:00")  # 오프셋 없음 = KST → 03:45Z
-    db_session.commit()
-
-    threads, total = list_threads(db_session, limit=2)
-
-    assert total == 3
-    assert [(t.phone, t.last_direction, t.last_body) for t in threads] == [
-        (phone_iso, "IN", "ISO 회신"),    # 04:30Z
-        (phone_out, "OUT", "최근 발송"),  # 04:00Z
-    ]
+    monkeypatch.setattr(chat, "_IN_CHUNK", 3)
+    assert list_threads(db_session, limit=10_000) == (everything, total)
+    for limit, offset in [(50, 0), (10, 0), (7, 13), (25, 40), (10, total - 4), (10, total + 5)]:
+        page = list_threads(db_session, limit=limit, offset=offset)
+        assert page == (everything[offset : offset + limit], total), f"limit={limit} offset={offset}"
 
 
 # ── 쿼리 수 ────────────────────────────────────────────────────────────────────
@@ -376,7 +492,3 @@ def test_query_count_does_not_grow_with_phones(db_engine, db_session, sample_use
 
     assert service[6] == service[240] == 5  # 집계 2 + 읽음 1 + 본문 MO·MT 각 1
     assert route[6] == route[240]
-
-    with _count_queries(db_engine) as statements:
-        _legacy_list_threads(db_session, limit=200)
-    assert len(statements) == 3 + 240  # 예전: 번호마다 본문 쿼리 1회
