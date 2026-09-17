@@ -7,7 +7,8 @@
 
 청크 요청이 예외(응답 타임아웃 등)라 실패로 기록한 메시지(compose._record_failed_chunk)도
 조회한다. msghub 가 실제로 접수했으면 그 리포트가 요청 응답을 기다리는 사이(행을 기록하기 전)
-와서 매칭 실패로 버려질 수 있고, 웹훅은 200 으로 응답해 재전송도 없다.
+올 수 있다. 웹훅은 400 으로 재전송을 받지만(report.awaiting_record), msghub 의 재시도 횟수·중단
+조건은 문서에 없어(간격 기본 10초·보관 72시간만 있다) 재전송이 끝내 오지 않을 수 있다.
 
 `process_sent_query` 가 idempotent(이미 DONE 이면 skip)하므로 주기 중복 실행에
 안전하다. 단일 uvicorn 워커(--workers 1) 전제이므로 lifespan 백그라운드 태스크가

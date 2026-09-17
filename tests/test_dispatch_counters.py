@@ -6,13 +6,15 @@ msghub 가 HTTP 200 으로 응답하면서 응답 본문 item 단위로 일부 �
 fail_count=0 으로 오표시되었다.
 
 청크 요청이 예외(응답 타임아웃 등)여도 msghub 는 실제로 접수했을 수 있다. 실패로 기록한
-행에도 리포트가 오면 캠페인 state 가 그 결과를 따라야 한다. 행을 기록하기 전에 와서 버려진
-리포트는 재조정 조회가 대신한다.
+행에도 리포트가 오면 캠페인 state 가 그 결과를 따라야 한다. 행을 기록하기 전에 온 리포트는
+웹훅이 400 으로 재전송을 받고, 재전송이 끝내 오지 않으면 재조정 조회가 대신한다.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -28,9 +30,11 @@ from app.msghub.schemas import (
     SendResponse,
     SendResultItem,
 )
+from app.routes.webhook import receive_report
+from app.security.settings_store import SettingsStore
 from app.services.compose import _create_messages_from_response, dispatch_campaign
 from app.services.reconcile import reconcile_pending_messages
-from app.services.report import process_report
+from app.services.report import ReportBeforeRecord, process_report
 
 
 class _FakeRcsClient:
@@ -300,6 +304,68 @@ async def test_partially_failed_dispatch_follows_reports(db_session, sample_user
     assert campaign.completed_at == completed_at
 
 
+class _ReportingBeforeResponseClient(_FakeRcsClient):
+    """msghub 가 청크를 접수하고 요청 응답보다 리포트를 먼저 보낸다 — 응답을 기다리는 사이 웹훅(during_send)이 온다."""
+
+    def __init__(self, during_send):
+        super().__init__()
+        self.during_send = during_send
+
+    async def send_rcs(self, *, recv_list, **kwargs):
+        await self.during_send(recv_list)
+        return await super().send_rcs(recv_list=recv_list, **kwargs)
+
+
+async def _post_report(db, *items):
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"rptCnt": len(items), "rptLst": list(items)})
+    request.client = MagicMock()
+    request.client.host = "10.0.0.1"
+    return await receive_report("wtok", request, db)
+
+
+def _delivered(cli_key, phone):
+    return {
+        "msgKey": f"mk-{cli_key}", "cliKey": cli_key, "ch": "RCS", "resultCode": SUCCESS_CODE,
+        "resultCodeDesc": "성공", "productCode": "SMS", "phone": phone,
+    }
+
+
+@pytest.mark.asyncio
+async def test_report_while_chunk_request_waits_is_redelivered_not_matched_by_phone(
+    db_session, sample_user, sample_caller,
+):
+    """청크 요청 응답을 기다리는 사이(행 기록 전) 온 리포트는 400 으로 msghub 재전송을 받고, 행을 기록한 뒤 재전송되면
+    제 행에 붙는다. 전엔 같은 번호의 다른 캠페인 미완료 메시지에 phone 으로 붙어(200) 그 메시지가 이 발송의 결과로
+    확정되고, 이 발송의 행은 리포트를 영영 못 받았다."""
+    SettingsStore(db_session).set("msghub.webhook_token", "wtok", is_secret=True, updated_by="test")
+    db_session.commit()
+    phone = "01000000001"
+    earlier = await dispatch_campaign(
+        db=db_session, msghub_client=_FakeRcsClient(), created_by=sample_user.sub,
+        caller_number=sample_caller.number, content="먼저 보낸 안내", recipients=[phone], message_type="SMS",
+    )
+    responses = []
+
+    async def webhook_meanwhile(recv_list):
+        responses.append(await _post_report(db_session, *[_delivered(r.cli_key, r.phone) for r in recv_list]))
+
+    campaign = await dispatch_campaign(
+        db=db_session, msghub_client=_ReportingBeforeResponseClient(webhook_meanwhile), created_by=sample_user.sub,
+        caller_number=sample_caller.number, content="안내 메시지입니다", recipients=[phone], message_type="SMS",
+    )
+
+    assert [(r.status_code, json.loads(r.body)) for r in responses] == [(400, {"error": "report before record"})]
+    assert (campaign.state, campaign.pending_count) == ("DISPATCHED", 1)
+
+    resp = await _post_report(db_session, _delivered(f"c{campaign.id}-0-0", phone))  # msghub 재전송
+
+    assert resp.status_code == 200
+    assert (campaign.state, campaign.ok_count, campaign.total_cost) == ("COMPLETED", 1, 17)
+    assert (earlier.state, earlier.ok_count, earlier.pending_count) == ("DISPATCHED", 0, 1)
+    assert _status_counts(db_session, earlier.id) == {"REG": 1}
+
+
 class _AcceptedButTimedOutClient(_FakeRcsClient):
     """msghub 는 요청 예외 청크까지 모두 접수해 전달했다 — query_sent 는 접수한 키의 전달 결과를, 모르는
     키엔 INVALID_KEY 를 돌려준다."""
@@ -321,22 +387,23 @@ class _AcceptedButTimedOutClient(_FakeRcsClient):
 
 
 @pytest.mark.asyncio
-async def test_report_dropped_while_chunk_request_waits_is_recovered_by_reconcile(
+async def test_request_failure_is_recovered_by_reconcile_when_report_is_not_redelivered(
     db_session, sample_user, sample_caller,
 ):
-    """청크 요청 응답을 기다리는 사이 온 리포트는 매칭할 행이 없어 버려지고(웹훅은 200 이라 재전송도 없다),
-    요청은 결국 예외라 실패로 기록된다. 재조정이 그 행을 msghub 에 조회해 실제 전달 결과로 확정한다 —
-    완료 시각은 발송 때 정한 대로 둔다."""
+    """청크 요청 응답을 기다리는 사이 온 리포트는 행이 없어 반영하지 않고 재전송을 받는데(웹훅 400), 요청은 결국
+    예외라 실패로 기록되고 재전송은 끝내 오지 않을 수 있다(msghub 재시도 횟수·중단 조건은 문서에 없다). 재조정이
+    그 행을 msghub 에 조회해 실제 전달 결과로 확정한다 — 완료 시각은 발송 때 정한 대로 둔다."""
     recipients = ["01000000001", "01000000002"]
-    matched_while_waiting: list[int] = []
+    redelivery_asked: list[str] = []
 
     def webhook_before_rows_exist(chunk_idx):
         cid = db_session.execute(select(func.max(Campaign.id))).scalar_one()
-        processed, _ = process_report(db_session, [
-            _report(f"c{cid}-{chunk_idx}-{i}", phone) for i, phone in enumerate(recipients)
-        ])
-        db_session.commit()
-        matched_while_waiting.append(processed)
+        with pytest.raises(ReportBeforeRecord) as asked:
+            process_report(db_session, [
+                _report(f"c{cid}-{chunk_idx}-{i}", phone) for i, phone in enumerate(recipients)
+            ])
+        db_session.rollback()
+        redelivery_asked.append(asked.value.cli_key)
 
     client = _AcceptedButTimedOutClient(timeout_chunks={0}, on_chunk=webhook_before_rows_exist)
     campaign = await dispatch_campaign(
@@ -348,7 +415,7 @@ async def test_report_dropped_while_chunk_request_waits_is_recovered_by_reconcil
         recipients=recipients,
         message_type="SMS",
     )
-    assert matched_while_waiting == [0]
+    assert redelivery_asked == [f"c{campaign.id}-0-0"]
     assert (campaign.state, campaign.fail_count) == ("FAILED", 2)
     completed_at = campaign.completed_at
 

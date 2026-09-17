@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections import Counter
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from sqlalchemy import case, func, select
@@ -18,6 +22,88 @@ from app.msghub.schemas import ReportItem
 from app.util.phone import mask_phone
 
 log = logging.getLogger(__name__)
+
+# 메시지 행이 아직 안 보일 수 있는 캠페인 id → 겹친 표시 수 (awaiting_record).
+_awaiting_record: Counter[int] = Counter()
+
+# compose._make_cli_key 의 c{캠페인}-{청크}-{순번}, 대체 발송은 -fb.
+_CLI_KEY = re.compile(r"c(\d+)-\d+-\d+(?:-fb)?")
+
+
+class ReportBeforeRecord(Exception):
+    """행을 아직 커밋하지 않은 발송의 리포트 — 반영하지 않고 msghub 재전송을 받아야 한다 (awaiting_record)."""
+
+    def __init__(self, cli_key: str) -> None:
+        super().__init__(f"행 기록 전 리포트: cliKey={cli_key}")
+        self.cli_key = cli_key
+
+
+@contextmanager
+def awaiting_record(campaign_ids: Iterable[int]) -> Iterator[None]:
+    """블록 동안 캠페인의 리포트가 메시지 행 기록(커밋)보다 먼저 올 수 있다고 표시한다.
+
+    msghub 는 요청 응답보다 리포트를 먼저 보내기도 한다. 청크 발송(compose.dispatch_campaign)은 응답을 받아야
+    행을 기록하고, 양방향 답장(compose.dispatch_chat_reply)과 웹훅 대체 SMS(routes.webhook, -fb)는 발송을 기다린
+    트랜잭션이 커밋돼야 행이 보인다 — 응답은 httpx 타임아웃(30초)까지 걸린다. 그사이 온 리포트는 매칭할 행이 없어
+    200 으로 버려졌다. 웹훅은 표시된 캠페인의 리포트인데 그 cliKey 행이 없으면 반영하지 않고(split_unrecorded)
+    400 으로 답해 msghub 재전송을 받는다(공식 문서 2.8 §3 — 400 은 "실패로 전달시 재처리 가능", 재시도 기본
+    10초, 리포트 보관 72시간).
+
+    재전송 요청은 그 cliKey 행이 커밋되거나 블록이 끝나면(발송 포기·롤백 포함) 멈춘다 — 캠페인의 청크 발송 전체,
+    답장 발송, 대체 SMS 트랜잭션보다 길어지지 않는다. 그 뒤에도 행이 없는 리포트는 기록하지 않은 메시지의 것이라
+    버린다(_find_message).
+
+    단일 uvicorn 워커 전제(deploy/kotify.service --workers 1, services.events 와 같음)라 프로세스 메모리로
+    충분하다 — 재시작하면 진행 중이던 발송도 끝났다.
+    """
+    ids = list(campaign_ids)
+    _awaiting_record.update(ids)
+    try:
+        yield
+    finally:
+        for campaign_id in ids:
+            _awaiting_record[campaign_id] -= 1
+            if _awaiting_record[campaign_id] <= 0:
+                del _awaiting_record[campaign_id]
+
+
+def _is_unrecorded(db: Session, item: ReportItem) -> bool:
+    """표시된 캠페인(awaiting_record)의 리포트인데 그 cliKey 행이 아직 없는가.
+
+    그 키의 행이 있으면 기록이 끝난 것이라 평소대로 처리한다 — 청크를 보내는 동안에도 앞 청크 리포트는 바로
+    반영된다. 짝 키 행(_find_message)은 기록으로 치지 않는다. 대체 SMS 트랜잭션이 커밋되기 전 -fb 리포트는 원래
+    키 행에 짝 키로 매칭되는데, 그 행에 쓰려면 같은 이벤트 루프에서 SMS 응답을 기다리는 그 트랜잭션의 쓰기
+    잠금을 busy timeout(5초) 동안 막혀 기다리다 실패한다 — 그동안 앱 전체가 멈춘다.
+    """
+    if not _awaiting_record:
+        return False
+    match = _CLI_KEY.fullmatch(item.cli_key or "")
+    if match is None or int(match.group(1)) not in _awaiting_record:
+        return False
+    recorded = db.execute(
+        select(Message.id).where(Message.cli_key == item.cli_key).limit(1)
+    ).first()
+    return recorded is None
+
+
+def split_unrecorded(
+    db: Session, items: list[ReportItem],
+) -> tuple[list[ReportItem], list[ReportItem]]:
+    """리포트를 (지금 반영할 것, msghub 재전송으로 다시 받을 것) 으로 나눈다.
+
+    행 기록 전 리포트(_is_unrecorded)가 있으면 웹훅은 나머지를 반영·커밋하고 400 으로 배치째 재전송을 받는다.
+    cliKey 리포트는 재전송돼도 같은 행을 찾아 DONE·대체 전 시도로 건너뛰므로 먼저 반영해도 된다 — 배치째
+    미루면 같은 배치의 다른 리포트(양방향 실패 답장의 대체 SMS 등)가 행 기록 때까지 늦는다. cliKey 없는
+    리포트는 같이 미룬다 — phone 보조매칭은 한 번 반영된 뒤 재전송되면 그새 생긴 같은 번호의 다른 미완료
+    메시지에 붙을 수 있다.
+    """
+    unrecorded = [_is_unrecorded(db, item) for item in items]
+    if not any(unrecorded):
+        return list(items), []
+    pairs = list(zip(items, unrecorded, strict=True))
+    ready = [item for item, late in pairs if item.cli_key and not late]
+    deferred = [item for item, late in pairs if late or not item.cli_key]
+    return ready, deferred
 
 
 def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Message]]:
@@ -32,7 +118,15 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
         fallback 목록은 양방향 CHAT(RPCSAXX001) 캠페인 — 대화방 답장
         (compose.dispatch_chat_reply) — 의 RCS 실패 메시지다. 단방향 RCS 는
         msghub 가 fbInfoLst 로 자동 대체하므로 해당 없다.
+
+    Raises:
+        ReportBeforeRecord: 행을 커밋하기 전일 수 있는 발송(awaiting_record)의 리포트가 섞였다. 아무것도
+            반영하지 않는다 — 웹훅은 split_unrecorded 로 나눠 행이 있을 리포트만 넘긴다.
     """
+    unrecorded = next((item for item in items if _is_unrecorded(db, item)), None)
+    if unrecorded is not None:
+        raise ReportBeforeRecord(unrecorded.cli_key)
+
     processed = 0
     campaign_ids: set[int] = set()
     failed_msgs: list[Message] = []
@@ -173,16 +267,23 @@ def _find_message(
     msg_key: str | None,
     phone: str | None = None,
 ) -> Message | None:
-    """cliKey → {cliKey}-fb → msgKey → (phone, status=REG/ING/PENDING) 순으로 Message를 찾는다.
+    """cliKey → 대체 발송 전후 짝 키 → msgKey → (cliKey 없는 리포트만) phone 순으로 Message를 찾는다.
 
     msghub v11 delivery report는 cliKey 외에도 phone 필드를 포함한다. cliKey
     없이 리포트가 도달하는 엣지 케이스(콘솔 설정 누락, 대량발송 일부 유실 등)
     에서 phone으로 최근 발송 중인 메시지를 찾아 보조 매칭한다.
 
+    cliKey 가 있는 리포트는 phone 으로 찾지 않는다. cliKey 는 메시지마다 고유해(compose._make_cli_key,
+    대체 발송은 -fb) 그 키로 못 찾은 리포트는 같은 번호의 다른 메시지가 아니라 기록하지 않은 메시지의
+    것이다 — 행 기록 전(웹훅이 재전송을 받는다, split_unrecorded), 같은 웹훅을 쓰는 다른 시스템의 발송, 롤백된
+    양방향 답장(compose.dispatch_chat_reply). phone 으로 붙이면 다른 메시지가 그 결과(msgKey·채널·과금)로
+    확정되고, 그 메시지의 제 리포트는 DONE 이라 버려졌다.
+
     {cliKey}-fb 는 양방향 실패 후 대체 SMS 를 보내며 cliKey 를 바꾼 행이다
     (routes.webhook._send_sms_fallback). 원래 키로 재전송된 실패 리포트를 그 행에
-    붙여야 _update_message 가 버린다. 못 찾으면 msgKey(대체 SMS 리포트가 msg_key 를
-    바꾼 뒤엔 불일치)도 빗나가 phone 매칭으로 같은 번호의 다른 미완료 메시지에 붙는다.
+    붙여야 _update_message 가 버린다. 반대로 -fb 리포트인데 행이 원래 키로 남았으면 대체 SMS 를
+    보낸 뒤 키를 바꾼 트랜잭션이 커밋되지 못한 것이다(웹훅 400) — SMS 는 나갔으므로 그 행의 결과다
+    (_update_message 가 키를 맞춘다).
     """
     if cli_key:
         msg = db.execute(
@@ -190,12 +291,12 @@ def _find_message(
         ).scalar_one_or_none()
         if msg:
             return msg
-        if not cli_key.endswith("-fb"):
-            msg = db.execute(
-                select(Message).where(Message.cli_key == f"{cli_key}-fb")
-            ).scalar_one_or_none()
-            if msg:
-                return msg
+        paired_key = cli_key.removesuffix("-fb") if cli_key.endswith("-fb") else f"{cli_key}-fb"
+        msg = db.execute(
+            select(Message).where(Message.cli_key == paired_key)
+        ).scalar_one_or_none()
+        if msg:
+            return msg
 
     if msg_key:
         msg = db.execute(
@@ -209,7 +310,7 @@ def _find_message(
     # 어느 캠페인의 결과인지 확신할 수 없다. limit(1)+order_by 로 "가장 최근 1건"을
     # 집으면 엉뚱한 캠페인에 결과가 귀속돼 과금·집계가 오염되므로, 모호하면 보류한다.
     # limit(2) 는 "정확히 1건 vs 2건+" 판별에 필요한 최소 조회량이다.
-    if phone:
+    if phone and not cli_key:
         candidates = db.execute(
             select(Message)
             .where(
@@ -259,6 +360,11 @@ def _update_message(msg: Message, item: ReportItem) -> bool:
             msg.id, item.cli_key, msg.cli_key,
         )
         return False
+
+    # 원래 키 행에 매칭된 -fb 리포트(_find_message) — 행을 그 키로 맞춘다. 안 맞추면 대체 SMS 가 실패일 때
+    # process_report 가 양방향 실패로 보고 같은 -fb cliKey 로 대체 SMS 를 또 요청한다.
+    if item.cli_key == f"{msg.cli_key}-fb":
+        msg.cli_key = item.cli_key
 
     success = item.result_code == SUCCESS_CODE
 

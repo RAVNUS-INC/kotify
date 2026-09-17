@@ -28,7 +28,7 @@ from app.msghub.schemas import (
     SendResponse,
 )
 from app.services import audit
-from app.services.report import _refresh_campaign_counters
+from app.services.report import _refresh_campaign_counters, awaiting_record
 from app.util.phone import normalize_phone, parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
 
@@ -496,18 +496,20 @@ async def dispatch_campaign(
     db.commit()
 
     # 4. 발송 — RCS 우선(+fallback) 또는 일반 직접(SMS/LMS/MMS).
-    if is_rcs:
-        failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
-            db, msghub_client, campaign, caller_number, content, subject,
-            recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
-            is_reserved, reserve_utc_iso, msghub_reserve_time,
-        )
-    else:
-        failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_direct_chunks(
-            db, msghub_client, campaign, caller_number, content, subject,
-            recipients, msg_type, mms_file_id,
-            is_reserved, reserve_utc_iso, msghub_reserve_time,
-        )
+    # 청크 응답을 받아 행을 기록하기 전에 온 리포트는 msghub 재전송으로 받는다 (report.awaiting_record).
+    with awaiting_record([campaign.id]):
+        if is_rcs:
+            failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
+                db, msghub_client, campaign, caller_number, content, subject,
+                recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
+                is_reserved, reserve_utc_iso, msghub_reserve_time,
+            )
+        else:
+            failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_direct_chunks(
+                db, msghub_client, campaign, caller_number, content, subject,
+                recipients, msg_type, mms_file_id,
+                is_reserved, reserve_utc_iso, msghub_reserve_time,
+            )
     chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
 
     # 5. Campaign state + counters 업데이트 — 수신자 수 기반 판정.
@@ -536,8 +538,8 @@ async def dispatch_campaign(
     # 요청 예외로 실패 기록한 청크도 msghub 가 실제로 접수했다면 리포트가 오고, 그 행에 매칭되면 state 는
     # 리포트 집계를 따른다. 뒤 청크를 보내는 사이 이미 처리된 앞 청크 리포트는 위 판정(발송 결과만 셈)이
     # 덮었으므로 다시 집계한다 — 뒤이어 올 리포트가 없으면 덮인 채로 남는다. 응답을 기다리는 동안(행을
-    # 기록하기 전) 온 리포트는 매칭할 행이 없어 버려지므로, 재조정이 그 행을 msghub 에 조회해 확정한다
-    # (services.reconcile).
+    # 기록하기 전) 온 리포트는 msghub 재전송으로 받고(4단계), 재전송마저 오지 않으면 재조정이 그 행을 msghub 에
+    # 조회해 확정한다 (services.reconcile).
     has_report = db.execute(
         select(Message.id).where(Message.campaign_id == campaign.id, Message.status == "DONE").limit(1)
     ).first()
@@ -614,52 +616,54 @@ async def dispatch_chat_reply(
     db.flush()  # id 할당 (커밋 안 함 — 발송 실패 시 rollback 으로 폐기)
 
     cli_key = _make_cli_key(campaign.id, 0, 0)
-    try:
-        resp = await msghub_client.send_rcs_chat(
-            description=content, phone=phone, cli_key=cli_key, reply_id=reply_id,
+    # 답장 행을 커밋하기 전에 온 리포트는 msghub 재전송으로 받는다 (report.awaiting_record).
+    with awaiting_record([campaign.id]):
+        try:
+            resp = await msghub_client.send_rcs_chat(
+                description=content, phone=phone, cli_key=cli_key, reply_id=reply_id,
+            )
+        except Exception:
+            db.rollback()  # 미커밋 Campaign 폐기 → 호출자가 단방향 fallback
+            raise
+
+        msghub_req = MsghubRequest(
+            campaign_id=campaign.id,
+            chunk_index=0,
+            response_code=resp.code,
+            response_message=resp.message,
+            error_body=None,
+            sent_at=now,
         )
-    except Exception:
-        db.rollback()  # 미커밋 Campaign 폐기 → 호출자가 단방향 fallback
-        raise
+        db.add(msghub_req)
+        db.flush()
 
-    msghub_req = MsghubRequest(
-        campaign_id=campaign.id,
-        chunk_index=0,
-        response_code=resp.code,
-        response_message=resp.message,
-        error_body=None,
-        sent_at=now,
-    )
-    db.add(msghub_req)
-    db.flush()
+        item = resp.items[0] if resp.items else None
+        code = item.code if item else resp.code
+        is_ok = code == SUCCESS_CODE
+        db.add(Message(
+            campaign_id=campaign.id,
+            msghub_request_id=msghub_req.id,
+            to_number=_norm_to_number(phone),
+            to_number_raw=phone,
+            cli_key=cli_key,
+            msg_key=item.msg_key if item else None,
+            status="REG" if is_ok else "FAILED",
+            result_code=code,
+            result_desc=item.message if item else resp.message,
+        ))
+        campaign.fail_count = 0 if is_ok else 1
+        campaign.pending_count = 1 if is_ok else 0
+        campaign.state = "DISPATCHED" if is_ok else "FAILED"
+        db.flush()
 
-    item = resp.items[0] if resp.items else None
-    code = item.code if item else resp.code
-    is_ok = code == SUCCESS_CODE
-    db.add(Message(
-        campaign_id=campaign.id,
-        msghub_request_id=msghub_req.id,
-        to_number=_norm_to_number(phone),
-        to_number_raw=phone,
-        cli_key=cli_key,
-        msg_key=item.msg_key if item else None,
-        status="REG" if is_ok else "FAILED",
-        result_code=code,
-        result_desc=item.message if item else resp.message,
-    ))
-    campaign.fail_count = 0 if is_ok else 1
-    campaign.pending_count = 1 if is_ok else 0
-    campaign.state = "DISPATCHED" if is_ok else "FAILED"
-    db.flush()
-
-    audit.log(
-        db,
-        actor_sub=created_by,
-        action=audit.SEND,
-        target=f"campaign:{campaign.id}",
-        detail={"total": 1, "channel": "chat", "reply_id": reply_id},
-    )
-    db.commit()
+        audit.log(
+            db,
+            actor_sub=created_by,
+            action=audit.SEND,
+            target=f"campaign:{campaign.id}",
+            detail={"total": 1, "channel": "chat", "reply_id": reply_id},
+        )
+        db.commit()
     return campaign
 
 

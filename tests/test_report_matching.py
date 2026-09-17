@@ -3,16 +3,18 @@
 cliKey/msgKey 없이 phone 만으로 도달한 delivery report 가, 동일 번호의 여러
 미완료 메시지 중 엉뚱한 캠페인에 귀속되지 않도록 "정확히 1건일 때만 매칭"
 정책을 검증한다. 대체 발송(-fb)으로 cliKey 가 바뀐 행에 대체 전 시도의 리포트가
-붙거나 적용되지 않는지도 검증한다.
+붙거나 적용되지 않는지도 검증한다. cliKey 가 있는데 그 행이 없는 리포트는 phone 으로
+찾지 않는지도 검증한다.
 """
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 
 from app.models import Campaign, Message, MsghubRequest
 from app.msghub.codes import SUCCESS_CODE
 from app.msghub.schemas import ReportItem
-from app.services.report import process_report
+from app.services.report import ReportBeforeRecord, awaiting_record, process_report
 
 
 def _make_campaign_message(db, *, phone, status, cli_key, msg_key=None, sub="test-sub-001"):
@@ -134,3 +136,87 @@ def test_report_without_fb_cli_key_does_not_settle_fallback_row(db_session, samp
 
     assert processed == 0
     assert _status_of(db_session, "c-h-0-fb") == "FB_PENDING"
+
+
+def _sms_report(*, cli_key, msg_key, phone, result_code=SUCCESS_CODE):
+    return ReportItem(
+        msg_key=msg_key, cli_key=cli_key, ch="SMS",
+        result_code=result_code, result_code_desc="결과", product_code="SMS", phone=phone,
+    )
+
+
+@pytest.mark.parametrize("result_code", [SUCCESS_CODE, "59999"])
+def test_fallback_report_settles_row_left_on_original_key(db_session, sample_user, result_code):
+    """대체 SMS 를 보낸 뒤 cliKey 를 -fb 로 바꾼 트랜잭션이 커밋되지 못하면(웹훅 400) 행은 원래 키로 남지만 SMS 는
+    나갔다. 그 -fb 리포트는 원래 키 행의 결과로 확정하고 행 키도 -fb 로 맞춘다 — 안 맞추면 대체 SMS 실패 리포트를
+    양방향 실패로 보고 같은 -fb 키로 대체 SMS 를 또 요청한다. 전엔 같은 번호 미완료가 하나일 때만 phone 보조매칭이
+    붙여 줬다."""
+    campaign, msg = _make_campaign_message(
+        db_session, phone="01044445555", status="REG", cli_key="c7-0-0", msg_key="mk-chat",
+    )
+    campaign.rcs_messagebase_id = "RPCSAXX001"  # 대화방 양방향 답장
+    db_session.commit()
+
+    processed, fallback = process_report(
+        db_session, [_sms_report(cli_key="c7-0-0-fb", msg_key="mk-sms", phone="01044445555", result_code=result_code)],
+    )
+
+    assert (processed, fallback) == (1, [])
+    assert (msg.cli_key, msg.status, msg.result_code, msg.channel, msg.msg_key) == (
+        "c7-0-0-fb", "DONE", result_code, "SMS", "mk-sms",
+    )
+
+
+# ── cliKey 가 있는데 그 행이 없는 리포트 ─────────────────────────────────────────
+
+
+def test_keyed_report_without_its_row_is_not_matched_by_phone(db_session, sample_user):
+    """cliKey 는 메시지마다 고유하다 — 그 키의 행이 없는 리포트는 같은 번호의 다른 메시지가 아니라 기록하지 않은
+    메시지(행 기록 전, 다른 시스템 발송, 롤백된 답장)의 것이다. 전엔 phone 으로 다른 캠페인의 미완료 메시지에 붙어
+    그 메시지가 남의 결과(msgKey·채널·과금)로 확정되고, 제 리포트는 DONE 이라 버려졌다."""
+    _, msg = _make_campaign_message(
+        db_session, phone="01012345678", status="REG", cli_key="c1-0-0", msg_key="mk-a",
+    )
+
+    unrecorded = process_report(
+        db_session, [_sms_report(cli_key="c999-0-0", msg_key="mk-other", phone="01012345678")],
+    )
+
+    assert unrecorded == (0, [])
+    assert (msg.status, msg.msg_key, msg.channel) == ("REG", "mk-a", None)
+
+    own = ReportItem(
+        msg_key="mk-a", cli_key="c1-0-0", ch="RCS",
+        result_code=SUCCESS_CODE, result_code_desc="성공", product_code="SMS", phone="01012345678",
+    )
+    assert process_report(db_session, [own]) == (1, [])
+    assert (msg.status, msg.msg_key, msg.channel, msg.cost) == ("DONE", "mk-a", "RCS", 17)
+
+
+def test_report_before_its_row_is_recorded_asks_for_redelivery(db_session, sample_user):
+    """발송 응답·커밋을 기다리는 캠페인(awaiting_record)의 리포트인데 그 cliKey 행이 아직 없으면 process_report 는
+    같은 배치의 다른 리포트까지 아무것도 반영하지 않고 ReportBeforeRecord 를 던진다 — 웹훅은 split_unrecorded 로 먼저
+    나눈다(test_sms_fallback). 이미 기록된 행의 리포트는 표시 중에도 반영하고, 표시가 끝난 뒤에도 행이 없는 리포트는
+    기록하지 않은 메시지의 것이라 버린다."""
+    campaign, recorded = _make_campaign_message(
+        db_session, phone="01012345678", status="REG", cli_key="c0-0-0",
+    )
+    recorded.cli_key = f"c{campaign.id}-0-0"  # 응답을 받아 기록한 앞 청크
+    db_session.commit()
+    waiting = _sms_report(cli_key=f"c{campaign.id}-1-0", msg_key="mk-1", phone="01012345678")
+    _, other = _make_campaign_message(db_session, phone="01055556666", status="REG", cli_key="c-o-0")
+    other_report = _sms_report(cli_key="c-o-0", msg_key="mk-o", phone="01055556666")
+
+    with awaiting_record([campaign.id]):
+        recorded_report = _sms_report(cli_key=recorded.cli_key, msg_key="mk-0", phone="01012345678")
+        assert process_report(db_session, [recorded_report]) == (1, [])
+
+        with awaiting_record([campaign.id]):
+            pass  # 겹친 표시 하나가 끝나도 나머지 표시는 남는다
+        with pytest.raises(ReportBeforeRecord) as asked:
+            process_report(db_session, [other_report, waiting])
+
+        assert asked.value.cli_key == waiting.cli_key
+        assert other.status == "REG"
+
+    assert process_report(db_session, [waiting]) == (0, [])

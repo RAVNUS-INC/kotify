@@ -2,7 +2,8 @@
 
 msghub가 발송 결과(리포트)와 고객 답장(MO)을 POST로 전달한다.
 - 200: 성공 처리
-- 400: 실패 → msghub가 10초 후 재시도
+- 400: 실패 → msghub가 10초 후 재시도. 발송 응답·커밋을 기다리느라 행이 아직 없는
+  리포트가 섞이면 나머지를 반영하고 400 으로 배치째 다시 받는다 (services.report.split_unrecorded)
 - 양방향 CHAT RCS 실패 시 SMS 수동 fallback 자동 발송
 
 ## 보안: URL 경로 토큰
@@ -40,7 +41,12 @@ from app.models import Campaign, Message, MoMessage
 from app.msghub.codes import SUCCESS_CODE
 from app.msghub.schemas import MoWebhookPayload, RecvInfo, SendResponse, WebhookReport
 from app.security.settings_store import SettingsStore
-from app.services.report import _refresh_campaign_counters, process_report
+from app.services.report import (
+    _refresh_campaign_counters,
+    awaiting_record,
+    process_report,
+    split_unrecorded,
+)
 from app.util.phone import mask_phone, normalize_phone
 
 log = logging.getLogger(__name__)
@@ -180,17 +186,27 @@ async def receive_report(
         return JSONResponse({"status": "no items"}, status_code=200)
 
     try:
-        processed, fallback_needed = process_report(db, report.items)
+        # 행 기록 전 리포트는 빼고 반영한 뒤 400 으로 배치째 재전송을 받는다 (report.split_unrecorded)
+        ready, deferred = split_unrecorded(db, report.items)
+        processed, fallback_needed = process_report(db, ready)
 
         # 양방향 CHAT RCS 실패 → SMS 자동 fallback
         # process_report 결과와 fallback을 단일 트랜잭션으로 커밋.
         # fallback 루프가 실패하면 rollback되어 msghub 재시도 시 멱등하게 재처리.
+        # 커밋 전엔 -fb 로 바꾼 행이 다른 요청에 안 보인다 — 그사이 온 대체 SMS 리포트는 재전송으로 받는다.
         fallback_sent = 0
-        if fallback_needed:
-            fallback_sent = await _send_sms_fallback(db, fallback_needed)
-            log.info("SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
+        with awaiting_record({m.campaign_id for m in fallback_needed}):
+            if fallback_needed:
+                fallback_sent = await _send_sms_fallback(db, fallback_needed)
+                log.info("SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
 
-        db.commit()
+            db.commit()
+        if deferred:
+            log.warning(
+                "행 기록 전 리포트 — 나머지 %d건 반영, %d건은 400 으로 msghub 재전송을 받는다: cliKey=%s",
+                processed, len(deferred), next(item.cli_key for item in deferred if item.cli_key),
+            )
+            return JSONResponse({"error": "report before record"}, status_code=400)
         log.info("웹훅 리포트 처리: %d/%d건", processed, report.rpt_cnt)
         return JSONResponse(
             {"status": "ok", "processed": processed, "fallback": fallback_sent},
