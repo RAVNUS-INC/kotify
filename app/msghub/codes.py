@@ -55,6 +55,14 @@ CHAT_SESSION_WINDOW_HOURS: int = 24
 CHAT_SESSION_MAX_UNITS: int = 10
 CHAT_SESSION_CAP_KRW: int = 80
 
+# 양방향 응답에 쓰는 고객 MO replyId 의 유효시간 — 과금 세션(위)과 별개 규칙이다.
+# 이통 공통 중계사 연동규격(/message replyId, /momsg): 중계사가 받은 replyId 는 24시간 유효.
+# 24h 경계에 딱 맞춰 보내면 msghub→이통사 전달 지연·서버 간 시각 차이로 만료된 replyId 가
+# 나갈 수 있어(리포트 단계 실패 → webhook 대체 발송) 여유를 빼고 판정한다.
+# 검증 근거: claudedocs/review/reply-id-verification.md
+REPLY_ID_VALID_HOURS: int = 24
+REPLY_ID_SAFETY_MARGIN_MINUTES: int = 30
+
 
 def chat_session_cost(unit_count_in_window: int) -> int:
     """24h 세션 내 RCS 양방향 발송 건수 → 실 청구액(원).

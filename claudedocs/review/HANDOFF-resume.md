@@ -30,6 +30,7 @@
 - ~~ruff `--fix`~~ → ✅ `e10c9f6`(safe 자동수정 106: UP045/I001/F401/UP041/UP006), `7aeab6f`(`.claude` 워크트리 lint 제외), `3840179`(B904 예외체이닝 5). **실소스 ruff 위반 0**(미커밋 threads.py 제외). pytest 271 유지.
 - ~~프론트 테스트 인프라 도입 (Vitest)~~ → ✅ `1e91337` (Vitest+RTL+jsdom, `pnpm test`). 발송 플로우 E2E(Playwright)는 별도 미도입.
 - ~~양방향 8원 전환~~ → **❌ 비가능(not viable)**. 공식 스펙(`doc.msghub.uplus.co.kr/guide/d/rcs`) 확인: 양방향 발송(`/msg/v1.1/bi/rcs`)은 `replyId`+`moRecvDt` 필수 = **MO(inbound) 응답 전용**. outbound 브로드캐스트는 응답할 MO 가 없어 불가 → 단방향 RCS SMS형 17원(C4 확정)이 유일 경로. 코드 변경 없음(compose.py 에 이미 문서화).
+  - ⚠️ **정정(2026-09-15)**: 현행 공식 스펙(2.3.2 §2 `POST /rcs/bi/v1.1`)의 필수 필드는 replyId·cliKey·messagebaseId·chatbotId·telco·phone·body·header 이고 **`moRecvDt` 는 요청 필드가 아니다**(MO 웹훅 페이로드 필드). 결론(MO 응답 전용)은 유효. 근거: `reply-id-verification.md`.
 
 ## 성공 패턴 (재현할 것)
 - 검증: `.venv/bin/pytest -q -p no:cacheprovider` / `(cd web && node_modules/.bin/tsc --noEmit)` / `next lint` / **`(cd web && pnpm test)`**(Vitest, 신규)
