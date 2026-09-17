@@ -29,6 +29,16 @@
     outline: none;
     box-shadow: 0 0 0 3px rgba(59, 0, 139, 0.12);
   }
+
+  /* 강제 색상 모드(Windows 고대비)는 위 box-shadow 를 none 으로 바꾸고 outline:none 은 그대로 둬 포커스 표시가 사라진다
+     → 버튼(outline-none 이 Highlight 로 칠해짐)과 같은 outline 링을 그린다.
+     tokens.css 가 이 레이어보다 앞에 들어오므로 같은 특이도의 .k-input 등 outline:none 도 이 규칙이 이긴다. */
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline: 2px solid Highlight;
+      outline-offset: 2px;
+    }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
