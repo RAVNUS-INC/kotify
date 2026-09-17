@@ -3,21 +3,30 @@
 예약 발송 직후 캠페인은 state=RESERVED, 메시지는 status=PENDING 으로 남는다
 (send_rcs resv_yn=Y → ReserveResponse → _create_messages_from_response 의 PENDING
 분기). 예약 시각이 도래해 msghub 가 실제 발송하고 배달 결과가 돌아오면, 캠페인은
-RESERVED 에서 벗어나 COMPLETED/PARTIAL_FAILED 로 전이돼야 한다 ("영구 RESERVED"
+RESERVED 에서 벗어나 COMPLETED/PARTIAL_FAILED/FAILED 로 전이돼야 한다 ("영구 RESERVED"
 방지).
 
 이 전이는 _refresh_campaign_counters(report.py) 의 전이 대상 state 목록에
 "RESERVED" 가 포함돼 있어 추가 코드 없이 동작한다. 또한 reconcile 는 캠페인
 state 가 아니라 "메시지 status + sent_at" 으로만 필터하므로 예약 캠페인의 PENDING
 도 자연히 대상이 된다. 본 테스트는 이 암묵적 보장을 웹훅·재조정 양쪽에서 고정한다.
+
+예약 요청이 예외라 RESERVE_FAILED 로 기록했어도 msghub 가 실제로 예약했다면 예약 시각에
+리포트가 온다 — 그때도 state 가 리포트를 따라야 한다.
 """
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import httpx
+import pytest
 
 from app.models import Campaign, Message, MsghubRequest
 from app.msghub.codes import SUCCESS_CODE
 from app.msghub.schemas import ReportItem
+from app.services.compose import dispatch_campaign
 from app.services.reconcile import reconcile_pending_messages
 from app.services.report import process_report
 
@@ -102,6 +111,75 @@ def test_reserved_partial_failure_via_webhook(db_session, sample_user):
     assert campaign.pending_count == 0
     assert campaign.ok_count == 1
     assert campaign.fail_count == 1
+
+
+def test_reserved_all_failed_via_webhook(db_session, sample_user):
+    """전건 실패면 RESERVED → FAILED — 성공이 0 인데 PARTIAL_FAILED("일부 실패")가 아니다."""
+    campaign, keys = _make_reserved(
+        db_session, sample_user.sub,
+        sent_at="2026-06-01T03:00:00+00:00", statuses=["PENDING", "PENDING"],
+    )
+
+    process_report(db_session, [
+        _done_report(keys[0], "01000000000", result_code="29002"),
+        _done_report(keys[1], "01000000001", result_code="29002"),
+    ])
+
+    assert campaign.state == "FAILED"
+    assert (campaign.pending_count, campaign.ok_count, campaign.fail_count) == (0, 0, 2)
+
+
+class _TimeoutRcsClient:
+    """msghub 는 예약을 접수했지만 응답을 못 받은 경우 — send_rcs 가 예외를 던진다."""
+
+    async def send_rcs(self, **kwargs):
+        raise httpx.ReadTimeout("응답 대기 시간 초과")
+
+
+@pytest.mark.asyncio
+async def test_reserve_failed_follows_reports_of_reservation_that_went_through(
+    db_session, sample_user, sample_caller,
+):
+    """RESERVE_FAILED 로 기록한 예약이 실제로 발송돼 리포트가 오면 state 가 그 결과를 따른다 —
+    "예약 실패 · 재시도 필요" 로 남으면 사용자가 다시 보내 중복 발송하게 된다."""
+    reserve_at = (datetime.now(ZoneInfo("Asia/Seoul")) + timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
+    recipients = ["01000000001", "01000000002"]
+    campaign = await dispatch_campaign(
+        db=db_session,
+        msghub_client=_TimeoutRcsClient(),
+        created_by=sample_user.sub,
+        caller_number=sample_caller.number,
+        content="예약 안내",
+        recipients=recipients,
+        message_type="SMS",
+        reserve_time_local=reserve_at,
+    )
+    assert (campaign.state, campaign.fail_count) == ("RESERVE_FAILED", 2)
+
+    process_report(db_session, [
+        _done_report(f"c{campaign.id}-0-0", recipients[0]),
+        _done_report(f"c{campaign.id}-0-1", recipients[1]),
+    ])
+
+    assert (campaign.state, campaign.ok_count, campaign.fail_count) == ("COMPLETED", 2, 0)
+    assert campaign.completed_at is not None
+
+
+def test_reserve_canceled_is_not_changed_by_reports(db_session, sample_user):
+    """취소한 예약은 메시지 결과가 실패로 확정돼도 RESERVE_CANCELED 로 남는다 ("발송 실패" 오표기 방지)."""
+    campaign, keys = _make_reserved(
+        db_session, sample_user.sub,
+        sent_at="2026-06-01T03:00:00+00:00", statuses=["PENDING", "PENDING"],
+    )
+    campaign.state = "RESERVE_CANCELED"
+    db_session.commit()
+
+    process_report(db_session, [
+        _done_report(keys[0], "01000000000", result_code="29002"),
+        _done_report(keys[1], "01000000001", result_code="29002"),
+    ])
+
+    assert (campaign.state, campaign.pending_count, campaign.completed_at) == ("RESERVE_CANCELED", 0, None)
 
 
 def test_reserved_completes_via_reconcile(db_session, sample_user):

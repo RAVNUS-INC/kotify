@@ -2,7 +2,8 @@
 
 msghub가 발송 결과(리포트)와 고객 답장(MO)을 POST로 전달한다.
 - 200: 성공 처리
-- 400: 실패 → msghub가 10초 후 재시도
+- 400: 실패 → msghub가 10초 후 재시도. 발송 응답·커밋을 기다리느라 행이 아직 없는
+  리포트가 섞이면 나머지를 반영하고 400 으로 배치째 다시 받는다 (services.report.split_unrecorded)
 - 양방향 CHAT RCS 실패 시 SMS 수동 fallback 자동 발송
 
 ## 보안: URL 경로 토큰
@@ -37,10 +38,16 @@ from starlette.background import BackgroundTask
 from app.config import settings
 from app.db import get_db
 from app.models import Campaign, Message, MoMessage
-from app.msghub.schemas import MoWebhookPayload, RecvInfo, WebhookReport
+from app.msghub.codes import SUCCESS_CODE
+from app.msghub.schemas import MoWebhookPayload, RecvInfo, SendResponse, WebhookReport
 from app.security.settings_store import SettingsStore
 from app.services import events
-from app.services.report import process_report
+from app.services.report import (
+    _refresh_campaign_counters,
+    awaiting_record,
+    process_report,
+    split_unrecorded,
+)
 from app.util.phone import mask_phone, normalize_phone
 
 log = logging.getLogger(__name__)
@@ -86,15 +93,18 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
 
     각 메시지의 cli_key를 {원본}-fb로 갱신하여 SMS 리포트 매칭에 사용.
 
+    process_report 가 FB_PENDING 으로 넘긴 행은 대체 SMS 가 접수됐을 때만 FB_PENDING 으로
+    남긴다. 접수되지 않은 건(클라이언트 없음, 요청 예외, 수신자 단위 거부)엔 리포트가 오지
+    않으므로 FAILED 로 확정한다 — 그대로 두면 영영 대기로 남는다.
+
     Returns:
-        fallback 발송 시도 건수.
+        fallback 접수 건수.
     """
     from app.main import get_msghub_client
 
     client = get_msghub_client()
     if client is None:
         log.error("SMS fallback 실패: msghub 클라이언트 미초기화")
-        return 0
 
     # 캠페인별로 그룹화 (caller_number, content 조회용)
     campaign_cache: dict[int, Campaign] = {}
@@ -105,7 +115,9 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
     sent = 0
     for msg in messages:
         campaign = campaign_cache.get(msg.campaign_id)
-        if campaign is None:
+        if client is None or campaign is None:
+            msg.status = "FAILED"
+            msg.result_desc = (msg.result_desc or "") + " (SMS fallback 실패)"
             continue
 
         fb_cli_key = f"{msg.cli_key}-fb"
@@ -114,18 +126,37 @@ async def _send_sms_fallback(db: Session, messages: list[Message]) -> int:
 
         try:
             recv = RecvInfo(cli_key=fb_cli_key, phone=msg.to_number)
-            await client.send_sms(
+            resp = await client.send_sms(
                 callback=campaign.caller_number,
                 msg=campaign.content,
                 recv_list=[recv],
             )
-            sent += 1
         except Exception:
             log.exception("SMS fallback 발송 실패: msg_id=%s, phone=%s", msg.id, mask_phone(msg.to_number))
             msg.status = "FAILED"
             msg.result_desc = (msg.result_desc or "") + " (SMS fallback 실패)"
+            continue
 
+        # 요청이 성공(최상위 10000)해도 수신자 단위로 거부될 수 있다(31101 수신번호 에러 등)
+        # — send_sms 는 최상위 코드만 검사한다. 판정은 dispatch_chat_reply 와 같다.
+        item = resp.items[0] if isinstance(resp, SendResponse) and resp.items else None
+        if item is not None and item.code != SUCCESS_CODE:
+            log.warning(
+                "SMS fallback 수신자 거부: msg_id=%s, phone=%s, code=%s",
+                msg.id, mask_phone(msg.to_number), item.code,
+            )
+            msg.status = "FAILED"
+            msg.result_code = item.code
+            msg.result_desc = f"{item.message} (SMS fallback 거부)"
+            continue
+
+        sent += 1
+
+    # process_report 는 이 행들을 FB_PENDING(대기)으로 집계했다 — 실패로 확정한 건을 다시
+    # 집계해야 캠페인이 발송 중(pending_count)으로 남지 않는다. autoflush=False 라 먼저 flush.
     db.flush()
+    for campaign_id in campaign_cache:
+        _refresh_campaign_counters(db, campaign_id)
     return sent
 
 
@@ -156,28 +187,39 @@ async def receive_report(
         return JSONResponse({"status": "no items"}, status_code=200)
 
     try:
-        processed, fallback_needed = process_report(db, report.items)
+        # 행 기록 전 리포트는 빼고 반영한 뒤 400 으로 배치째 재전송을 받는다 (report.split_unrecorded)
+        ready, deferred = split_unrecorded(db, report.items)
+        processed, fallback_needed = process_report(db, ready)
 
         # 양방향 CHAT RCS 실패 → SMS 자동 fallback
         # process_report 결과와 fallback을 단일 트랜잭션으로 커밋.
         # fallback 루프가 실패하면 rollback되어 msghub 재시도 시 멱등하게 재처리.
+        # 커밋 전엔 -fb 로 바꾼 행이 다른 요청에 안 보인다 — 그사이 온 대체 SMS 리포트는 재전송으로 받는다.
         fallback_sent = 0
-        if fallback_needed:
-            fallback_sent = await _send_sms_fallback(db, fallback_needed)
-            log.info("SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
+        with awaiting_record({m.campaign_id for m in fallback_needed}):
+            if fallback_needed:
+                fallback_sent = await _send_sms_fallback(db, fallback_needed)
+                log.info("SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
 
-        db.commit()
+            db.commit()
     except Exception:
         db.rollback()
         log.exception("웹훅 리포트 처리 실패")
         return JSONResponse({"error": "processing failed"}, status_code=400)
 
-    log.info("웹훅 리포트 처리: %d/%d건", processed, report.rpt_cnt)
     # 열린 대화방의 전달 상태(대기 → 전달/실패)와 채널 라벨을 새로고침 없이 반영한다.
     # 커밋이 끝나고 바뀐 행이 있을 때만. 대량 발송 리포트는 몰려오므로 창당 1회로 합쳐
     # 발행한다 — 이벤트마다 열린 탭이 목록·상세를 다시 불러온다(events.publish_throttled).
+    # 행 기록 전 리포트로 400 을 주는 배치도 나머지는 커밋됐다 — 재전송 때는 DONE 이라 건너뛰어 다시 알리지 않는다.
     if processed or fallback_sent:
         events.publish_throttled("thread.updated")
+    if deferred:
+        log.warning(
+            "행 기록 전 리포트 — 나머지 %d건 반영, %d건은 400 으로 msghub 재전송을 받는다: cliKey=%s",
+            processed, len(deferred), next(item.cli_key for item in deferred if item.cli_key),
+        )
+        return JSONResponse({"error": "report before record"}, status_code=400)
+    log.info("웹훅 리포트 처리: %d/%d건", processed, report.rpt_cnt)
     return JSONResponse(
         {"status": "ok", "processed": processed, "fallback": fallback_sent},
         status_code=200,

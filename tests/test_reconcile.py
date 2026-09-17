@@ -2,12 +2,16 @@
 
 reconcile_pending_messages 가 미완료 메시지를 msghub query_sent 로 조회해 상태를
 보정하는지, cutoff(최근 건 제외)·idempotency(DONE 제외)가 동작하는지 검증한다.
+양방향 실패 후 대체 SMS(-fb) 대기(FB_PENDING)의 확정과 조회 중 대체 발송 경합도 다룬다.
+청크 요청 예외로 실패 기록한 메시지(compose._record_failed_chunk)를 한 번 조회해 확정하는
+경로와, 그 조회가 미완료 조회를 밀어내지 않는지도 다룬다.
 """
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.models import Campaign, Message, MsghubRequest
@@ -15,18 +19,26 @@ from app.services.reconcile import _req_dt_kst, reconcile_pending_messages
 
 
 class _FakeClient:
-    """query_sent 만 흉내내는 테스트용 msghub 클라이언트 (덕 타이핑)."""
+    """query_sent 만 흉내내는 테스트용 msghub 클라이언트 (덕 타이핑).
 
-    def __init__(self, result: list[dict]):
+    during_query: 조회 응답을 기다리는 사이 다른 요청(웹훅)이 DB 를 바꾸는 경합 재현용.
+    """
+
+    def __init__(self, result: list[dict], during_query=None):
         self._result = result
+        self._during_query = during_query
         self.calls: list = []
 
     async def query_sent(self, cli_keys):
         self.calls.append(cli_keys)
+        if self._during_query:
+            self._during_query()
         return self._result
 
 
-def _make_pending(db, sub, sent_at, *, status="REG", cli_key="c1-0-0"):
+def _make_pending(
+    db, sub, sent_at, *, status="REG", cli_key="c1-0-0", msg_key=None, report_dt=None,
+):
     campaign = Campaign(
         created_by=sub, caller_number="0212345678", message_type="short",
         content="x", total_count=1, pending_count=1, state="DISPATCHED",
@@ -40,7 +52,7 @@ def _make_pending(db, sub, sent_at, *, status="REG", cli_key="c1-0-0"):
     msg = Message(
         campaign_id=campaign.id, msghub_request_id=req.id,
         to_number="01011112222", to_number_raw="01011112222",
-        cli_key=cli_key, status=status,
+        cli_key=cli_key, msg_key=msg_key, status=status, report_dt=report_dt,
     )
     db.add(msg)
     db.commit()
@@ -96,3 +108,211 @@ def test_reconcile_skips_done_messages(db_session, sample_user):
 
     assert n == 0
     assert client.calls == []  # DONE 은 조회 대상 아님
+
+
+def _status_of(db, cli_key):
+    return db.execute(select(Message.status).where(Message.cli_key == cli_key)).scalar_one()
+
+
+def test_reconcile_ignores_result_for_key_renamed_by_fallback(db_session, sample_user):
+    """조회하는 사이 웹훅이 양방향 실패로 대체 SMS 를 보내 cliKey 를 -fb 로 바꾸면, 원래 키의
+    조회 결과(양방향 실패)로 FB_PENDING 을 덮지 않는다 — 덮으면 대체 SMS 리포트가 버려진다."""
+    _, msg = _make_pending(
+        db_session, sample_user.sub, "2026-01-01T00:00:00+00:00",
+        cli_key="c-r-3", msg_key="mk-r-3",
+    )
+
+    def webhook_falls_back():
+        msg.cli_key, msg.status = "c-r-3-fb", "FB_PENDING"
+        db_session.commit()
+
+    client = _FakeClient([{
+        "cliKey": "c-r-3", "msgKey": "mk-r-3", "status": "DONE",
+        "resultCode": "51004", "ch": "RCS", "productCode": "CHAT",
+    }], during_query=webhook_falls_back)
+
+    n = asyncio.run(reconcile_pending_messages(db_session, client, older_than_minutes=10))
+
+    assert n == 0
+    assert _status_of(db_session, "c-r-3-fb") == "FB_PENDING"
+
+
+def test_reconcile_settles_fallback_pending_by_fb_key_on_sms_request_date(db_session, sample_user):
+    """대체 SMS 리포트 웹훅이 유실된 FB_PENDING 은 -fb cliKey 로 조회해 확정한다. reqDt 는 원래
+    발송일이 아니라 대체 SMS 를 보낸 날(양방향 실패 리포트 시각)이다."""
+    # 1일 23:50 KST 발송, 양방향 실패 리포트(→ 곧바로 대체 SMS)는 자정을 넘긴 2일 00:10 KST
+    _make_pending(
+        db_session, sample_user.sub, "2026-01-01T14:50:00+00:00",
+        status="FB_PENDING", cli_key="c-r-4-fb", report_dt="20260102001000",
+    )
+    client = _FakeClient([{
+        "cliKey": "c-r-4-fb", "status": "DONE", "resultCode": "10000",
+        "ch": "SMS", "productCode": "SMS",
+    }])
+
+    n = asyncio.run(reconcile_pending_messages(db_session, client, older_than_minutes=10))
+
+    assert client.calls == [[("c-r-4-fb", "2026-01-02")]]
+    assert n == 1
+    msg = db_session.execute(
+        select(Message).where(Message.cli_key == "c-r-4-fb")
+    ).scalar_one()
+    assert (msg.status, msg.channel, msg.cost) == ("DONE", "SMS", 9)
+
+
+def test_reconcile_keeps_fallback_pending_while_sms_in_flight(db_session, sample_user):
+    """-fb 대체 SMS 가 아직 처리 중(ING)이면 FB_PENDING 을 ING 로 덮지 않는다 (수신자 배지 fallback_sms)."""
+    _make_pending(
+        db_session, sample_user.sub, "2026-01-01T00:00:00+00:00",
+        status="FB_PENDING", cli_key="c-r-5-fb", report_dt="20260101091000",
+    )
+    client = _FakeClient([{"cliKey": "c-r-5-fb", "status": "ING"}])
+
+    n = asyncio.run(reconcile_pending_messages(db_session, client, older_than_minutes=10))
+
+    assert n == 0
+    assert _status_of(db_session, "c-r-5-fb") == "FB_PENDING"
+
+
+# ── 요청 예외로 실패 기록한 메시지 ──────────────────────────────────────────────
+
+
+def _ago(**delta) -> str:
+    return (datetime.now(UTC) - timedelta(**delta)).isoformat()
+
+
+def _make_request_failure(
+    db, sub, *, cli_keys, sent_at, result_code=None, response_code=None, error_body="응답 대기 시간 초과",
+):
+    """청크 요청이 예외라 실패로 기록한 캠페인 (compose._record_failed_chunk) — 요청엔 응답 코드 없이 오류만,
+    행은 FAILED·result_code 없음. result_code·response_code 를 주면 수신자 단위 거부 행이 된다."""
+    campaign = Campaign(
+        created_by=sub, caller_number="0212345678", message_type="short", content="x",
+        total_count=len(cli_keys), fail_count=len(cli_keys), pending_count=0,
+        state="FAILED", created_at=sent_at, completed_at=sent_at,
+    )
+    db.add(campaign)
+    db.flush()
+    req = MsghubRequest(
+        campaign_id=campaign.id, chunk_index=0, sent_at=sent_at,
+        response_code=response_code, response_message="fail", error_body=error_body,
+    )
+    db.add(req)
+    db.flush()
+    for i, cli_key in enumerate(cli_keys):
+        db.add(Message(
+            campaign_id=campaign.id, msghub_request_id=req.id,
+            to_number=f"0102222{i:04d}", to_number_raw=f"0102222{i:04d}",
+            cli_key=cli_key, status="FAILED", result_code=result_code, result_desc=error_body,
+        ))
+    db.commit()
+    return campaign
+
+
+def _message(db, cli_key):
+    return db.execute(select(Message).where(Message.cli_key == cli_key)).scalar_one()
+
+
+def test_reconcile_settles_request_failure_that_msghub_accepted(db_session, sample_user):
+    """청크 요청이 예외(응답 타임아웃)라 실패로 기록했어도 msghub 가 접수해 전달했으면 조회 결과로 확정한다 —
+    그 리포트는 행을 기록하기 전에 와서 버려졌을 수 있다. 캠페인 state 와 비용도 결과를 따른다."""
+    sent_at = _ago(hours=1)
+    campaign = _make_request_failure(
+        db_session, sample_user.sub, cli_keys=["c-x-0-0", "c-x-0-1"], sent_at=sent_at,
+    )
+    client = _FakeClient([
+        {"cliKey": "c-x-0-0", "status": "DONE", "resultCode": "10000", "ch": "RCS", "productCode": "SMS"},
+        {"cliKey": "c-x-0-1", "status": "DONE", "resultCode": "10000", "ch": "SMS", "productCode": "SMS"},
+    ])
+
+    n = asyncio.run(reconcile_pending_messages(db_session, client, older_than_minutes=10))
+
+    req_dt = _req_dt_kst(sent_at)
+    assert client.calls == [[("c-x-0-0", req_dt), ("c-x-0-1", req_dt)]]
+    assert n == 2
+    assert (campaign.state, campaign.ok_count, campaign.fail_count, campaign.total_cost) == (
+        "COMPLETED", 2, 0, 26,
+    )
+
+
+def test_reconcile_moves_request_failure_back_to_pending_while_msghub_processes_it(db_session, sample_user):
+    """조회 결과가 접수·처리 중(ING)이면 실패가 아니라 대기다 — 집계를 실패에서 대기로 옮기고, 그 뒤엔
+    미완료 행으로 조회돼 결과가 확정된다."""
+    campaign = _make_request_failure(db_session, sample_user.sub, cli_keys=["c-y-0-0"], sent_at=_ago(minutes=30))
+
+    asyncio.run(reconcile_pending_messages(db_session, _FakeClient([{"cliKey": "c-y-0-0", "status": "ING"}])))
+
+    assert _status_of(db_session, "c-y-0-0") == "ING"
+    assert (campaign.fail_count, campaign.pending_count) == (0, 1)
+
+    done = _FakeClient([{
+        "cliKey": "c-y-0-0", "status": "DONE", "resultCode": "10000", "ch": "RCS", "productCode": "SMS",
+    }])
+    asyncio.run(reconcile_pending_messages(db_session, done))
+
+    assert (campaign.state, campaign.ok_count, campaign.pending_count) == ("COMPLETED", 1, 0)
+
+
+@pytest.mark.parametrize("no_result", ["INVALID_KEY", "OVER_DATE"])
+def test_reconcile_queries_request_failure_without_result_only_once(db_session, sample_user, no_result):
+    """조회가 결과를 주지 않으면(INVALID_KEY 키 오류 — 접수되지 않은 요청, OVER_DATE 조회기간 초과) 실패로
+    남기고 그 상태를 result_code 에 남겨 다음 주기엔 다시 조회하지 않는다 — 조회 호출이 매 주기 쌓이지 않게."""
+    campaign = _make_request_failure(db_session, sample_user.sub, cli_keys=["c-z-0-0-fb"], sent_at=_ago(hours=2))
+    client = _FakeClient([{"cliKey": "c-z-0-0-fb", "status": no_result}])
+
+    asyncio.run(reconcile_pending_messages(db_session, client))
+    asyncio.run(reconcile_pending_messages(db_session, client))
+
+    assert len(client.calls) == 1
+    msg = _message(db_session, "c-z-0-0-fb")
+    assert (msg.status, msg.result_code, msg.result_desc) == ("FAILED", no_result, "응답 대기 시간 초과")
+    assert (campaign.state, campaign.fail_count) == ("FAILED", 1)
+
+
+@pytest.mark.parametrize("case", ["item_rejected", "past_query_window", "reservation_not_yet_run"])
+def test_reconcile_does_not_query_failures_without_expected_result(db_session, sample_user, case):
+    """조회하지 않는 실패 — 수신자 단위 거부(msghub 가 접수하지 않아 리포트가 없다), 조회 기간(24시간)이
+    지난 요청 예외, 예약 시각이 아직 오지 않은 예약 요청 예외(요청의 sent_at 은 예약 시각)."""
+    if case == "item_rejected":
+        _make_request_failure(
+            db_session, sample_user.sub, cli_keys=["c-n-0-0"], sent_at=_ago(hours=1),
+            result_code="31101", response_code="10000", error_body=None,
+        )
+    elif case == "past_query_window":
+        _make_request_failure(db_session, sample_user.sub, cli_keys=["c-n-0-0"], sent_at=_ago(hours=25))
+    else:
+        _make_request_failure(db_session, sample_user.sub, cli_keys=["c-n-0-0"], sent_at=_ago(hours=-3))
+    client = _FakeClient([])
+
+    n = asyncio.run(reconcile_pending_messages(db_session, client))
+
+    assert n == 0
+    assert client.calls == []
+
+
+def test_reconcile_queries_request_failures_apart_from_pending(db_session, sample_user):
+    """요청 예외 실패는 미완료 행의 1회 상한을 나눠 쓰지 않고 같은 조회 요청에 섞이지 않는다 — 실패 행이
+    미완료 확정을 밀어내거나, msghub 가 접수하지 않은 키 때문에 거부된 조회가 미완료 확정까지 막으면 안 된다."""
+    failed_keys = [f"c-f-0-{i}" for i in range(10)]
+    sent_at = _ago(hours=1)
+    _make_request_failure(db_session, sample_user.sub, cli_keys=failed_keys, sent_at=sent_at)  # id 가 앞선다
+    _make_pending(db_session, sample_user.sub, "2026-01-01T00:00:00+00:00", cli_key="c-p-0")
+    client = _FakeClient([])
+
+    asyncio.run(reconcile_pending_messages(db_session, client, max_messages=1))
+
+    assert client.calls == [
+        [("c-p-0", "2026-01-01")],
+        [(key, _req_dt_kst(sent_at)) for key in failed_keys],
+    ]
+
+
+def test_reconcile_leaves_pending_message_with_invalid_key_unmarked(db_session, sample_user):
+    """미완료 행의 INVALID_KEY 는 남기지 않는다 — 접수 응답을 받은 행이라 조회 발송일(reqDt)이 어긋났을 수 있다."""
+    _make_pending(db_session, sample_user.sub, "2026-01-01T00:00:00+00:00", cli_key="c-q-0")
+    client = _FakeClient([{"cliKey": "c-q-0", "status": "INVALID_KEY"}])
+
+    asyncio.run(reconcile_pending_messages(db_session, client))
+
+    msg = _message(db_session, "c-q-0")
+    assert (msg.status, msg.result_code) == ("REG", None)

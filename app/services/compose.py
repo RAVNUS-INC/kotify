@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ from app.msghub.schemas import (
     SendResponse,
 )
 from app.services import audit
+from app.services.report import _refresh_campaign_counters, awaiting_record
 from app.util.phone import normalize_phone, parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
 
@@ -341,7 +343,9 @@ async def _dispatch_rcs_chunks(
                 db.commit()
             except Exception as retry_exc:
                 db.rollback()
-                _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, str(retry_exc))
+                _record_failed_chunk(
+                    db, campaign.id, chunk_idx, chunk, sent_at, str(retry_exc), cli_key_suffix="-fb",
+                )
                 db.commit()
                 failed_chunks.append(chunk_idx)
                 failed_chunk_sizes.append(len(chunk))
@@ -381,7 +385,7 @@ async def _dispatch_rcs_chunks(
                 db.rollback()
                 _record_failed_chunk(
                     db, campaign.id, chunk_idx, chunk, sent_at,
-                    f"RCS: {exc} / 직접 발송: {retry_exc}",
+                    f"RCS: {exc} / 직접 발송: {retry_exc}", cli_key_suffix="-fb",
                 )
                 db.commit()
                 failed_chunks.append(chunk_idx)
@@ -515,20 +519,22 @@ async def dispatch_campaign(
     # 4. 발송 — RCS 우선(+fallback) 또는 일반 직접(SMS/LMS/MMS).
     # 청크를 보내는 동안은 진행 중으로 표시한다(취소 라우트가 기다리게). 5·6 단계엔 await 가
     # 없어 표시를 푼 뒤 마지막 커밋 전에 다른 요청이 끼어들지 않는다.
+    # 청크 응답을 받아 행을 기록하기 전에 온 리포트는 msghub 재전송으로 받는다 (report.awaiting_record).
     _dispatching.add(campaign.id)
     try:
-        if is_rcs:
-            failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
-                db, msghub_client, campaign, caller_number, content, subject,
-                recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
-                is_reserved, reserve_utc_iso, msghub_reserve_time,
-            )
-        else:
-            failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_direct_chunks(
-                db, msghub_client, campaign, caller_number, content, subject,
-                recipients, msg_type, mms_file_id,
-                is_reserved, reserve_utc_iso, msghub_reserve_time,
-            )
+        with awaiting_record([campaign.id]):
+            if is_rcs:
+                failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
+                    db, msghub_client, campaign, caller_number, content, subject,
+                    recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
+                    is_reserved, reserve_utc_iso, msghub_reserve_time,
+                )
+            else:
+                failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_direct_chunks(
+                    db, msghub_client, campaign, caller_number, content, subject,
+                    recipients, msg_type, mms_file_id,
+                    is_reserved, reserve_utc_iso, msghub_reserve_time,
+                )
     finally:
         _dispatching.discard(campaign.id)
     chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
@@ -549,8 +555,23 @@ async def dispatch_campaign(
 
     campaign.fail_count = failed_recipients
     campaign.pending_count = max(0, total_recipients - failed_recipients)
+    if campaign.pending_count == 0:
+        # 전건 실패로 결과가 정해진 시각. 뒤에 리포트로 state 가 바뀌어도 유지된다 — 알림센터의
+        # 정렬·읽음 기준이라 그때 처음 찍으면 읽은 알림이 다시 뜬다 (report._refresh_campaign_counters).
+        campaign.completed_at = _now_iso()
 
     db.flush()
+
+    # 요청 예외로 실패 기록한 청크도 msghub 가 실제로 접수했다면 리포트가 오고, 그 행에 매칭되면 state 는
+    # 리포트 집계를 따른다. 뒤 청크를 보내는 사이 이미 처리된 앞 청크 리포트는 위 판정(발송 결과만 셈)이
+    # 덮었으므로 다시 집계한다 — 뒤이어 올 리포트가 없으면 덮인 채로 남는다. 응답을 기다리는 동안(행을
+    # 기록하기 전) 온 리포트는 msghub 재전송으로 받고(4단계), 재전송마저 오지 않으면 재조정이 그 행을 msghub 에
+    # 조회해 확정한다 (services.reconcile).
+    has_report = db.execute(
+        select(Message.id).where(Message.campaign_id == campaign.id, Message.status == "DONE").limit(1)
+    ).first()
+    if has_report is not None:
+        _refresh_campaign_counters(db, campaign.id)
 
     # 6. 감사 로그
     audit.log(
@@ -572,6 +593,22 @@ async def dispatch_campaign(
     return campaign
 
 
+def _make_chat_reply_cli_key(campaign_id: int) -> str:
+    """양방향 답장 cliKey. 패턴: c{campaign_id}-0-0-{시도 토큰 hex 6자}
+
+    답장 캠페인은 커밋하지 않고 보낸 뒤 실패하면 롤백한다(dispatch_chat_reply). SQLite 는 롤백된 id 를 다음 캠페인에
+    다시 준다 — campaigns.id 에 AUTOINCREMENT 가 없고(alembic 0001), 있어도 sqlite_sequence 갱신이 함께 롤백된다.
+    요청 예외(응답 타임아웃)여도 msghub 는 접수했을 수 있어, 키가 id 로만 정해지면 그 id 를 받은 단방향 fallback
+    (chat.send_reply)이 같은 cliKey 를 보내 중복 키로 거부될 수 있고(10분 규칙은 claudedocs/msghub-migration-spec.md
+    에만 있다), 롤백된 답장의 리포트가 fallback 행을 확정했다. 토큰으로 시도마다 키를 달리해 그 리포트는 어느 행에도
+    붙지 않는다(report._find_message).
+
+    양방향 cliKey 는 최대 20자(공식 문서 2.3.2 §2 — 단방향·xMS 는 30자)라 캠페인 id 8자리까지 들어간다. 대체 SMS 는
+    -fb 를 붙인다(routes.webhook._send_sms_fallback).
+    """
+    return f"{_make_cli_key(campaign_id, 0, 0)}-{secrets.token_hex(3)}"
+
+
 async def dispatch_chat_reply(
     db: Session,
     msghub_client: MsghubClient,
@@ -585,7 +622,8 @@ async def dispatch_chat_reply(
 
     reply_id 는 고객 MO 의 응답 템플릿 ID(MoMessage.reply_id). 양방향은 단건이라
     청크가 없다. 발송 실패 시 미커밋 Campaign 을 rollback 으로 폐기하고 예외를 다시
-    던지므로, 호출자(chat.send_reply)가 단방향 fallback 을 결정할 수 있다.
+    던지므로, 호출자(chat.send_reply)가 단방향 fallback 을 결정할 수 있다. 폐기한 id 는
+    다음 캠페인이 다시 받으므로 cliKey 는 시도마다 다르다(_make_chat_reply_cli_key).
 
     주의: 양방향 응답 data 에는 phone 이 없어(cliKey/msgKey/replyId 만) Message 는
     아는 phone 으로 직접 만든다 — _create_messages_from_response(item.phone 의존) 미사용.
@@ -621,53 +659,55 @@ async def dispatch_chat_reply(
     db.add(campaign)
     db.flush()  # id 할당 (커밋 안 함 — 발송 실패 시 rollback 으로 폐기)
 
-    cli_key = _make_cli_key(campaign.id, 0, 0)
-    try:
-        resp = await msghub_client.send_rcs_chat(
-            description=content, phone=phone, cli_key=cli_key, reply_id=reply_id,
+    cli_key = _make_chat_reply_cli_key(campaign.id)
+    # 답장 행을 커밋하기 전에 온 리포트는 msghub 재전송으로 받는다 (report.awaiting_record).
+    with awaiting_record([campaign.id]):
+        try:
+            resp = await msghub_client.send_rcs_chat(
+                description=content, phone=phone, cli_key=cli_key, reply_id=reply_id,
+            )
+        except Exception:
+            db.rollback()  # 미커밋 Campaign 폐기 → 호출자가 단방향 fallback
+            raise
+
+        msghub_req = MsghubRequest(
+            campaign_id=campaign.id,
+            chunk_index=0,
+            response_code=resp.code,
+            response_message=resp.message,
+            error_body=None,
+            sent_at=now,
         )
-    except Exception:
-        db.rollback()  # 미커밋 Campaign 폐기 → 호출자가 단방향 fallback
-        raise
+        db.add(msghub_req)
+        db.flush()
 
-    msghub_req = MsghubRequest(
-        campaign_id=campaign.id,
-        chunk_index=0,
-        response_code=resp.code,
-        response_message=resp.message,
-        error_body=None,
-        sent_at=now,
-    )
-    db.add(msghub_req)
-    db.flush()
+        item = resp.items[0] if resp.items else None
+        code = item.code if item else resp.code
+        is_ok = code == SUCCESS_CODE
+        db.add(Message(
+            campaign_id=campaign.id,
+            msghub_request_id=msghub_req.id,
+            to_number=_norm_to_number(phone),
+            to_number_raw=phone,
+            cli_key=cli_key,
+            msg_key=item.msg_key if item else None,
+            status="REG" if is_ok else "FAILED",
+            result_code=code,
+            result_desc=item.message if item else resp.message,
+        ))
+        campaign.fail_count = 0 if is_ok else 1
+        campaign.pending_count = 1 if is_ok else 0
+        campaign.state = "DISPATCHED" if is_ok else "FAILED"
+        db.flush()
 
-    item = resp.items[0] if resp.items else None
-    code = item.code if item else resp.code
-    is_ok = code == SUCCESS_CODE
-    db.add(Message(
-        campaign_id=campaign.id,
-        msghub_request_id=msghub_req.id,
-        to_number=_norm_to_number(phone),
-        to_number_raw=phone,
-        cli_key=cli_key,
-        msg_key=item.msg_key if item else None,
-        status="REG" if is_ok else "FAILED",
-        result_code=code,
-        result_desc=item.message if item else resp.message,
-    ))
-    campaign.fail_count = 0 if is_ok else 1
-    campaign.pending_count = 1 if is_ok else 0
-    campaign.state = "DISPATCHED" if is_ok else "FAILED"
-    db.flush()
-
-    audit.log(
-        db,
-        actor_sub=created_by,
-        action=audit.SEND,
-        target=f"campaign:{campaign.id}",
-        detail={"total": 1, "channel": "chat", "reply_id": reply_id},
-    )
-    db.commit()
+        audit.log(
+            db,
+            actor_sub=created_by,
+            action=audit.SEND,
+            target=f"campaign:{campaign.id}",
+            detail={"total": 1, "channel": "chat", "reply_id": reply_id},
+        )
+        db.commit()
     return campaign
 
 
@@ -878,8 +918,15 @@ def _record_failed_chunk(
     chunk: list[str],
     sent_at: str,
     error_body: str,
+    cli_key_suffix: str = "",
 ) -> None:
-    """실패 청크의 MsghubRequest + Message 레코드를 기록한다."""
+    """실패 청크의 MsghubRequest + Message 레코드를 기록한다.
+
+    cliKey 는 실패한 요청에 쓴 키와 같아야 한다 — 직접 재발송(_send_chunk_direct)이면 -fb.
+    요청 예외여도 msghub 가 실제로 접수했으면 리포트가 그 키로 오는데, 키가 다르면 FAILED 행은
+    phone 보조매칭 대상도 아니라 리포트가 어디에도 붙지 않는다. 재조정(services.reconcile)도 이
+    키로 조회한다 — 응답 코드 없는 요청(response_code NULL)과 result_code 없는 FAILED 행이 그 대상이다.
+    """
     msghub_req = MsghubRequest(
         campaign_id=campaign_id,
         chunk_index=chunk_idx,
@@ -897,7 +944,7 @@ def _record_failed_chunk(
             msghub_request_id=msghub_req.id,
             to_number=_norm_to_number(to_num),
             to_number_raw=to_num,
-            cli_key=_make_cli_key(campaign_id, chunk_idx, i),
+            cli_key=f"{_make_cli_key(campaign_id, chunk_idx, i)}{cli_key_suffix}",
             msg_key=None,
             status="FAILED",
             result_code=None,
