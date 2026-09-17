@@ -39,6 +39,8 @@ from app.models import Setting, User
 from app.security.csrf import verify_csrf
 from app.security.settings_store import SettingsStore
 from app.services import audit
+from app.services.chat import _ts_rank, _ts_shape
+from app.util.time import parse_mixed_ts
 
 # 조직 설정은 admin 전용
 router = APIRouter(
@@ -269,42 +271,28 @@ def list_webhooks(db: Session = Depends(get_db)) -> dict:
     configured = bool(token and public_url)
 
     # 마지막 수신 시각 — 진단용만 사용 (카운트는 노출 안 함).
-    report_last = db.execute(
-        select(func.max(Message.report_dt)).where(Message.report_dt.isnot(None))
-    ).scalar_one_or_none()
+    # report_dt 는 msghub 원본(오프셋 없는 KST)과 우리가 기록한 UTC ISO(rptDt 가 빈 리포트·대체 SMS
+    # 요청 시각)가 섞여 문자열 max 로는 늦은 값을 놓친다 — 시각 모양별 최댓값만 뽑아 실제 시각으로
+    # 고른다. 알려진 모양이면 몇 행이고, 목록에 없는 모양은 대화방 목록처럼 문자열마다 후보가 된다.
+    report_last = max(
+        db.execute(
+            select(func.max(Message.report_dt))
+            .where(Message.report_dt.isnot(None))
+            .group_by(_ts_shape(Message.report_dt))
+        ).scalars(),
+        key=_ts_rank,
+        default=None,
+    )
+    # received_at 은 항상 우리가 기록한 UTC ISO 라 문자열 max 가 곧 최신이다.
     mo_last = db.execute(select(func.max(MoMessage.received_at))).scalar_one_or_none()
 
     now_utc = datetime.now(UTC)
     day_ago_utc = now_utc - timedelta(hours=24)
 
-    def _parse_any(raw: str | None) -> datetime | None:
-        """ISO 8601 우선, 실패 시 msghub 원본 'yyyyMMddHHmmss' 포맷 시도.
-
-        report_dt 는 msghub 원본 문자열(예: "20260422043000") 이거나
-        우리가 기록한 ISO 둘 중 하나. lexicographic 비교는 포맷이 섞이면
-        잘못된 순서가 나오므로 datetime 으로 정규화해 비교.
-        """
-        if not raw:
-            return None
-        try:
-            dt = datetime.fromisoformat(raw)
-        except (ValueError, TypeError):
-            # msghub 원본 — 14자리 숫자. KST 로 간주 (msghub 규약).
-            digits = "".join(c for c in raw if c.isdigit())
-            if len(digits) == 14:
-                try:
-                    naive = datetime.strptime(digits, "%Y%m%d%H%M%S")
-                    dt = naive.replace(tzinfo=KST)
-                except ValueError:
-                    return None
-            else:
-                return None
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt
-
+    # 파싱은 공용 parse_mixed_ts — 오프셋 없는 msghub 값을 KST 로 읽는다. UTC 로 읽으면 실제보다
+    # 9시간 늦은 시각이 되어 표시가 틀리고 24시간 stale 판정도 9시간 늦어진다.
     def _fmt(raw: str | None) -> str | None:
-        dt = _parse_any(raw)
+        dt = parse_mixed_ts(raw)
         if dt is None:
             return None
         return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M")
@@ -314,7 +302,7 @@ def list_webhooks(db: Session = Depends(get_db)) -> dict:
             return "not_configured"
         if not raw:
             return "never_received"
-        dt = _parse_any(raw)
+        dt = parse_mixed_ts(raw)
         if dt is None:
             # 기록은 있는데 파싱 실패 — "수신된 적 있음" 으로 보수적 해석.
             return "ok"
