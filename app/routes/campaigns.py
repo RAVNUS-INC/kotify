@@ -12,12 +12,13 @@ import csv
 import io
 import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -29,12 +30,17 @@ from app.auth.deps import (
     user_has_role,
 )
 from app.db import get_db
-from app.models import Attachment, Campaign, Message, User
+from app.models import Attachment, Campaign, Message, MsghubRequest, User
 from app.msghub.codes import SUCCESS_CODE
+from app.msghub.schemas import MsghubBadRequest, MsghubError
 from app.security.csrf import verify_csrf
 from app.services import audit
 from app.services.image import ImageProcessingError, preprocess_mms_image
+from app.services.report import _refresh_campaign_counters
 from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
+
+if TYPE_CHECKING:
+    from app.msghub.client import MsghubClient
 
 # MMS 원본 업로드 상한 (전처리 전). 프론트가 초과분을 차단해도 서버가
 # 최종 방어선. 10 MiB.
@@ -63,6 +69,7 @@ _STATUS_MAP = {
 
 # Message/result 상태 → RecipientStatus 매핑
 # web/types/campaign.ts: 'queued' | 'delivered' | 'read' | 'replied' | 'failed' | 'fallback_sms'
+#   | 'cancelled'
 _RECIPIENT_STATUS = {
     "REG": "queued",
     "ING": "queued",
@@ -70,6 +77,7 @@ _RECIPIENT_STATUS = {
     "FB_PENDING": "fallback_sms",
     "DONE": "delivered",  # SUCCESS_CODE 인지는 별도 분기
     "FAILED": "failed",
+    "CANCELED": "cancelled",  # 예약 취소 — 발송되지 않음 (cancel_campaign)
 }
 
 
@@ -395,6 +403,33 @@ async def create_campaign(
 
 # ── POST /campaigns/{id}/cancel — 예약 발송 취소 ─────────────────────────────
 
+# 발송되지 않는 행 — 취소 확정(CANCELED)과 요청 단계 실패(FAILED). 이것만 남으면 전체 취소다.
+_NOT_SENT_STATUSES = ("CANCELED", "FAILED")
+
+# 예약 취소를 처리하고 있는 캠페인 id — 단일 uvicorn 워커 전제(compose._dispatching 과 같음).
+_cancelling: set[int] = set()
+
+
+def _partial_cancel_message(
+    total: int, canceled: int, live: int, *, rejected: bool, failed: bool
+) -> str:
+    """일부 청크만 취소됐을 때의 안내 — 취소되지 않은 수신자는 예정대로 발송될 수 있다."""
+    if rejected and failed:
+        reason = "취소가 거부됐거나(이미 발송이 시작됐을 수 있음) 오류로 취소하지 못해"
+    elif rejected:
+        reason = "취소가 거부되어(이미 발송이 시작됐을 수 있음)"
+    elif failed:
+        reason = "오류로 취소하지 못해"
+    else:
+        reason = "취소할 수 없는 상태라"
+    message = (
+        f"{total}명 중 {canceled}명의 예약을 취소했습니다. "
+        f"{live}명은 {reason} 예정대로 발송될 수 있습니다."
+    )
+    if failed:
+        message += " 다시 시도하면 남은 예약만 취소합니다."
+    return message
+
 
 @router.post(
     "/campaigns/{cid}/cancel",
@@ -410,6 +445,15 @@ async def cancel_campaign(
 
     권한: sender/admin/owner. viewer/operator 는 403.
     상태: RESERVED 만 허용. 이미 실행/완료/이미취소는 400.
+    청크: msghub 는 예약 요청(수신자 10명 청크)마다 webReqId 를 따로 주고 취소도 그 단위라,
+      대기(PENDING) 행이 남은 청크마다 취소를 요청한다. 받아들여진 청크의 PENDING 행만
+      CANCELED 로 바꾸고, 거부·실패한 청크는 PENDING 그대로 둔다(발송 여부는 리포트가 확정, H6).
+    결과: 발송될 수 있는 행이 남지 않으면 RESERVE_CANCELED. 일부만 취소되면 RESERVED 를
+      유지하고 200 으로 요약을 알린다 — 다시 누르면 남은 청크만 요청한다. 하나도 취소하지
+      못하면 거부 409 / 오류 502.
+    레거시: 청크별 webReqId(alembic 0018) 이전의 여러 청크 예약은 마지막 청크 ID 만 남아
+      전체를 취소할 수 없어 409 로 msghub 콘솔 취소를 안내한다.
+    동시성: 예약 접수(청크 발송)나 다른 취소가 진행 중인 캠페인은 409 로 기다리게 한다.
     """
     try:
         campaign_id = int(cid)
@@ -439,7 +483,43 @@ async def cancel_campaign(
             }},
             status_code=400,
         )
-    if not campaign.web_req_id:
+
+    from app.services.compose import is_dispatching
+
+    if is_dispatching(campaign.id):
+        # 캠페인은 첫 청크 전에 RESERVED 로 보인다. 접수 도중에 취소하면 이미 접수된 청크만 보고
+        # 전체 취소로 마무리해, 뒤이어 접수되는 청크가 예약 시각에 발송된다.
+        return JSONResponse(
+            {"error": {
+                "code": "dispatch_in_progress",
+                "message": "예약 접수가 아직 진행 중입니다. 잠시 후 다시 취소해 주세요.",
+            }},
+            status_code=409,
+        )
+
+    has_chunk_ids = db.execute(
+        select(MsghubRequest.id)
+        .where(
+            MsghubRequest.campaign_id == campaign.id,
+            MsghubRequest.web_req_id.is_not(None),
+        )
+        .limit(1)
+    ).first() is not None
+    if not has_chunk_ids:
+        if campaign.web_req_id:
+            # 0018 이전 발송 — 청크마다 캠페인 값을 덮어써 마지막 청크 ID 만 남았다(10명 이하
+            # 단일 청크는 0018 이 청크로 옮겨 여기 오지 않는다). 그 청크만 취소하고 캠페인을
+            # 취소로 보이게 하면 앞 청크가 예약 시각에 발송되므로 앱에서는 취소하지 않는다.
+            return JSONResponse(
+                {"error": {
+                    "code": "legacy_reservation",
+                    "message": (
+                        "이전 버전에서 예약한 11명 이상 캠페인은 앱에서 전체 취소할 수 "
+                        "없습니다. msghub 웹 콘솔에서 취소해 주세요."
+                    ),
+                }},
+                status_code=409,
+            )
         return JSONResponse(
             {"error": {"code": "no_reservation_id", "message": "예약 ID 가 없습니다"}},
             status_code=400,
@@ -447,7 +527,6 @@ async def cancel_campaign(
 
     # msghub client 는 app.main 의 싱글톤 — 순환 import 방지 위해 함수 내부 import.
     from app.main import get_msghub_client
-    from app.msghub.schemas import MsghubBadRequest, MsghubError
 
     msghub_client = get_msghub_client()
     if msghub_client is None:
@@ -459,43 +538,134 @@ async def cancel_campaign(
             status_code=503,
         )
 
-    try:
-        await msghub_client.cancel_reservation(
-            campaign.web_req_id, reason="사용자 취소"
-        )
-        campaign.state = "RESERVE_CANCELED"
-        msg = "예약이 취소되었습니다"
-    except MsghubBadRequest:
-        # msghub 가 취소를 거부 — 이미 발송됐거나 이미 취소된 상태일 수 있어 단정 불가.
-        # 로컬을 RESERVE_CANCELED 로 바꾸면 발송된 캠페인을 "취소됨"으로 오표기하므로
-        # (H6) 상태를 유지하고 거부를 알린다. 발송 여부는 이후 리포트로 확정한다.
-        db.rollback()
+    if campaign.id in _cancelling:
+        # 청크가 많으면 오래 걸려 프록시 시간 제한을 넘기면 브라우저엔 오류로 보이고 다시 누르게
+        # 된다. 두 취소가 같은 청크를 번갈아 요청하면 상대가 취소한 청크를 거부로 받아 "발송될 수
+        # 있습니다" 로 잘못 안내하므로 먼저 시작한 취소에 맡긴다.
         return JSONResponse(
             {"error": {
-                "code": "cancel_rejected",
+                "code": "cancel_in_progress",
+                "message": "예약 취소를 처리하고 있습니다. 잠시 후 새로고침해 확인해 주세요.",
+            }},
+            status_code=409,
+        )
+    _cancelling.add(campaign.id)
+    try:
+        return await _cancel_reservation_chunks(db, msghub_client, campaign, user)
+    finally:
+        _cancelling.discard(campaign.id)
+
+
+async def _cancel_reservation_chunks(
+    db: Session, msghub_client: MsghubClient, campaign: Campaign, user: User
+) -> dict | JSONResponse:
+    """대기 행이 남은 청크마다 예약을 취소하고 결과를 캠페인 상태·응답으로 정리한다."""
+    # 대기 행이 남은 청크만 — 앞선 시도에서 취소됐거나 발송이 시작된 청크는 다시 요청하지 않는다.
+    targets = db.execute(
+        select(MsghubRequest.id, MsghubRequest.web_req_id)
+        .join(Message, Message.msghub_request_id == MsghubRequest.id)
+        .where(
+            MsghubRequest.campaign_id == campaign.id,
+            MsghubRequest.web_req_id.is_not(None),
+            Message.status == "PENDING",
+        )
+        .group_by(MsghubRequest.id, MsghubRequest.web_req_id, MsghubRequest.chunk_index)
+        .order_by(MsghubRequest.chunk_index)
+    ).all()
+
+    cancelled: list[str] = []
+    rejected: list[str] = []
+    error: Exception | None = None
+    for request_id, web_req_id in targets:
+        try:
+            await msghub_client.cancel_reservation(web_req_id, reason="사용자 취소")
+        except MsghubBadRequest:
+            # 이 청크만 거부 — 이미 발송이 시작됐거나 취소된 상태일 수 있어 단정할 수 없다.
+            rejected.append(web_req_id)
+            continue
+        except Exception as exc:
+            # 인증·CPS·서버·네트워크 오류는 뒤 청크에서도 되풀이되기 쉬워 멈춘다. 남은 청크는
+            # 다시 시도할 때 요청한다.
+            import logging
+            logging.getLogger(__name__).warning(
+                "예약 취소 요청 실패: campaign=%s webReqId=%s", campaign.id, web_req_id,
+                exc_info=True,
+            )
+            error = exc
+            break
+        # 받아들여진 청크의 대기 행만 취소로. 곧바로 커밋해 뒤에서 멈추거나 죽어도 msghub 가
+        # 이미 취소한 청크가 대기로 남아 다시 요청되지 않게 한다.
+        db.execute(
+            update(Message)
+            .where(Message.msghub_request_id == request_id, Message.status == "PENDING")
+            .values(status="CANCELED")
+        )
+        db.commit()
+        cancelled.append(web_req_id)
+
+    canceled_rows, live_rows = db.execute(
+        select(
+            func.coalesce(func.sum(case((Message.status == "CANCELED", 1), else_=0)), 0),
+            func.coalesce(
+                func.sum(case((Message.status.not_in(_NOT_SENT_STATUSES), 1), else_=0)), 0
+            ),
+        ).where(Message.campaign_id == campaign.id)
+    ).one()
+
+    if canceled_rows and not live_rows:
+        # 발송될 수 있는 행이 없다. 앞선 시도가 마지막 청크까지 커밋하고 상태를 바꾸기 전에
+        # 멈췄던 캠페인도 여기서 마무리된다.
+        campaign.state = "RESERVE_CANCELED"
+        msg = "예약이 취소되었습니다"
+    elif not cancelled:
+        # 이번 요청에서 바뀐 것이 없다.
+        if error is not None:
+            reason = str(error) if isinstance(error, MsghubError) else "msghub 통신 오류"
+            return JSONResponse(
+                {"error": {"code": "cancel_failed", "message": f"예약 취소 실패: {reason}"}},
+                status_code=502,
+            )
+        if rejected:
+            # 로컬을 RESERVE_CANCELED 로 바꾸면 발송된 캠페인을 "취소됨"으로 오표기하므로
+            # (H6) 상태를 유지하고 거부를 알린다. 발송 여부는 이후 리포트로 확정한다.
+            return JSONResponse(
+                {"error": {
+                    "code": "cancel_rejected",
+                    "message": (
+                        "예약 취소가 거부되었습니다. 이미 발송되었거나 취소된 상태일 수 "
+                        "있으니 발송 결과를 확인해 주세요."
+                    ),
+                }},
+                status_code=409,
+            )
+        return JSONResponse(
+            {"error": {
+                "code": "nothing_to_cancel",
                 "message": (
-                    "예약 취소가 거부되었습니다. 이미 발송되었거나 취소된 상태일 수 "
+                    "취소할 수 있는 예약이 남아 있지 않습니다. 이미 발송이 시작됐을 수 "
                     "있으니 발송 결과를 확인해 주세요."
                 ),
             }},
             status_code=409,
         )
-    except MsghubError as exc:
-        db.rollback()
-        return JSONResponse(
-            {"error": {
-                "code": "cancel_failed",
-                "message": f"예약 취소 실패: {exc}",
-            }},
-            status_code=502,
+    else:
+        # 일부만 취소 — 나머지는 예정대로 발송될 수 있어 RESERVED 를 유지한다.
+        msg = _partial_cancel_message(
+            campaign.total_count, canceled_rows, live_rows,
+            rejected=bool(rejected), failed=error is not None,
         )
 
+    _refresh_campaign_counters(db, campaign.id)
     audit.log(
         db,
         actor_sub=user.sub,
         action="CANCEL_RESERVE",
         target=f"campaign:{campaign.id}",
-        detail={"web_req_id": campaign.web_req_id},
+        detail={
+            "cancelled": cancelled,
+            "rejected": rejected,
+            "error": str(error) if error is not None else None,
+        },
     )
     db.commit()
     return {

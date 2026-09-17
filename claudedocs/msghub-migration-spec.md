@@ -768,10 +768,13 @@ Host: api.msghub.uplus.co.kr
 | ch | 채널 |
 | callback | 발신번호 |
 | senderCnt | 발송 건수 |
-| status | 상태 (`SEND_WAIT`, `COMPLETED`) |
+| status | 상태 (`SEND_WAIT` 대기, `ING` 처리중, `FAIL` 실패, `COMPLETED` 완료 — 취소 상태값은 없음) |
 | resvSenderYn | 예약 여부 |
 | delYn | 삭제 여부 |
+| resvCnclReason | 취소 사유 |
 | reqDt | 요청일시 |
+
+요청 파라미터(기간·페이징·webReqId 필터)와 단건 조회 API 는 문서에 없다 (2026-09-15, 공식 문서 `/rest-api/02메시지발송/0207resvmsg/`).
 
 ### 9.4 예약 취소
 
@@ -789,12 +792,18 @@ Host: api.msghub.uplus.co.kr
 }
 ```
 
+- `webReqId` 는 문자열 **1건**만 받는다(목록·일괄 취소 없음). 응답은 `{code, message}` 뿐.
+- 이미 발송이 시작된 예약은 취소할 수 없다. 이미 발송·이미 취소·없는 ID 를 구분하는 결과코드는
+  문서에 없어, 거부는 "발송 여부 불명"으로 다룬다(`routes/campaigns.py::cancel_campaign`).
+
 ### 9.5 주의사항
 
 - 예약 최대 범위: 현재 시점 + **30일**
 - 타임존: 서버 KST 기준 (별도 타임존 파라미터 없음)
 - 예약 응답은 일반 발송과 구조가 다름 (`webReqId` 반환, 개별 `msgKey` 없음)
-- 취소 시 `webReqId`가 필수이므로 DB에 반드시 저장
+- `webReqId` 는 **발송 요청마다** 발급된다. 수신자 10명 청크로 나눠 보내면 청크마다 다르므로
+  청크별로 저장하고(`msghub_requests.web_req_id`) 취소도 청크마다 한다. 캠페인에 하나만 저장하면
+  마지막 청크만 취소된다(alembic 0018 이전 버그).
 
 ---
 
@@ -1229,6 +1238,7 @@ class MsghubRequest(Base):
     response_message: str     # "성공" 등
     error_body: str | None    # 에러 시 원문
     sent_at: datetime         # 발송 시각
+    web_req_id: str | None    # 예약발송 시 이 요청(청크)의 msghub webReqId
 ```
 
 ### 13.3 Message 모델
@@ -1262,7 +1272,7 @@ class Campaign(Base):
     # 기존 필드 유지 + 변경/추가:
     message_type: str         # "short" / "long" / "image" (채널 중립)
     rcs_message_base_id: str | None  # 사용한 messagebaseId
-    web_req_id: str | None    # 예약발송 시 msghub webReqId
+    web_req_id: str | None    # 레거시 — 청크별 MsghubRequest.web_req_id 로 대체 (§9.5)
     total_cost: int = 0       # 총 비용 (성공 건만, 원)
     rcs_count: int = 0        # RCS 채널 성공 건수
     fallback_count: int = 0   # SMS/LMS/MMS fallback 건수

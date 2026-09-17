@@ -93,7 +93,8 @@ class Campaign(Base):
     reserve_time: Mapped[str | None] = mapped_column(Text, nullable=True)
     # msghub RCS 관련
     rcs_messagebase_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 예약발송 시 msghub webReqId (취소/조회용)
+    # 레거시 — 예전 발송은 청크마다 이 값을 덮어써 마지막 청크의 webReqId 만 남았다.
+    # 이제 청크별로 MsghubRequest.web_req_id 에 저장하고 여기엔 쓰지 않는다(0018).
     web_req_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 비용 집계
     total_cost: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -136,6 +137,9 @@ class MsghubRequest(Base):
     response_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[str] = mapped_column(Text, nullable=False)
+    # 예약 발송 응답의 webReqId — msghub 는 요청(청크)마다 따로 발급하고 취소도 이
+    # 단위라, 청크마다 저장해야 캠페인 전체를 취소할 수 있다. 즉시 발송·실패 청크는 NULL.
+    web_req_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     campaign: Mapped[Campaign] = relationship("Campaign", back_populates="msghub_requests")
     messages: Mapped[list[Message]] = relationship(
@@ -163,7 +167,7 @@ class Message(Base):
     to_number_raw: Mapped[str] = mapped_column(Text, nullable=False)
     cli_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     msg_key: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # PENDING | REG | ING | DONE | FAILED
+    # PENDING | REG | ING | FB_PENDING | DONE | FAILED | CANCELED(예약 취소, 발송 안 됨)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="PENDING")
     result_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_desc: Mapped[str | None] = mapped_column(Text, nullable=True)

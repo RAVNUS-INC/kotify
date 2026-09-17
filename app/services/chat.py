@@ -42,7 +42,7 @@ class ChatMessage:
     body: str
     timestamp: str                    # ISO 문자열 (정렬 및 표시용)
     status: str | None = None         # OUT 전용
-    delivery: str | None = None       # OUT 전용: pending/sent/failed, 알 수 없으면 None
+    delivery: str | None = None       # OUT 전용: pending/sent/failed/cancelled, 모르면 None
     channel: str | None = None        # OUT 전용: RCS/SMS/LMS/MMS
     cost: int | None = None           # OUT 전용: 원
     telco: str | None = None          # IN 전용
@@ -107,7 +107,7 @@ _AWAITING_REPORT_STATUSES = frozenset({"PENDING", "REG", "ING", "FB_PENDING"})
 def delivery_status(
     status: str | None, result_code: str | None, cli_key: str | None
 ) -> str | None:
-    """발신(OUT) 메시지의 전달 상태 — "pending" | "sent" | "failed", 알 수 없으면 None.
+    """발신(OUT) 메시지의 전달 상태 — "pending" | "sent" | "failed" | "cancelled", 모르면 None.
 
     result_code 만으로는 판정할 수 없다. 접수(REG) 행에는 접수 응답의 성공 코드(10000)가,
     FB_PENDING 행에는 실패한 RCS 리포트 코드가 남아 있어 코드만 보면 각각 전달·실패로
@@ -116,12 +116,16 @@ def delivery_status(
     - PENDING·REG·ING·FB_PENDING: 리포트 대기(대체 발송 중 포함) → pending
     - DONE: 성공 코드면 sent, 아니면(코드 없음 포함) failed
     - FAILED: 요청 단계 실패(청크·item 거부, 대체 발송 요청 실패) → failed
+    - CANCELED: 예약 취소로 발송되지 않음 → cancelled. 취소 라우트(routes.campaigns.
+      cancel_campaign)가 대기 행을 바꾸고, 기존 행은 alembic 0017 이 옮겨 cliKey 없는 NCP
+      시절 행도 올 수 있다.
     - NCP 시절 행: 결과 컬럼이 alembic 0007 에서 삭제돼 알 수 없음 → None. COMPLETED·
       UNKNOWN 등은 그 외 상태로 걸러지고, 그때도 쓰던 PENDING 은 cliKey 없음으로 가린다
       — msghub 이후 PENDING 행은 항상 cliKey 가 있고(compose), 없는 행은 재조정도
       안 돼 영영 대기로 남는다.
 
-    실패 기준은 캠페인 집계(report._refresh_campaign_counters)와 같다.
+    실패 기준은 캠페인 집계(report._refresh_campaign_counters)와 같다. 취소는 실패로
+    세지 않는다.
     """
     if status == "PENDING" and not cli_key:
         return None
@@ -131,6 +135,8 @@ def delivery_status(
         return "sent" if result_code == SUCCESS_CODE else "failed"
     if status == "FAILED":
         return "failed"
+    if status == "CANCELED":
+        return "cancelled"
     return None
 
 
