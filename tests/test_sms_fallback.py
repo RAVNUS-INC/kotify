@@ -396,6 +396,34 @@ def test_sms_report_before_fallback_commit_is_redelivered_not_lost(file_db, monk
     assert _message(check, other.id).status == "REG"
 
 
+def test_sms_report_before_reconcile_fallback_commit_is_redelivered_without_lock_wait(file_db, monkeypatch):
+    """재조정이 양방향 실패를 먼저 확정해 대체 SMS 를 보내는 동안(커밋 전) 그 SMS 리포트가 오면, 웹훅은 원래 키 행에
+    짝 키로 매칭해 쓰려다 재조정 트랜잭션의 쓰기 잠금에 busy timeout(5초) 동안 막혀 — 그동안 이벤트 루프 전체가
+    멈춘다 — 400 processing failed 가 됐다. 웹훅 대체 발송처럼 행 기록 전 리포트로 바로 400 재전송을 받는다."""
+    reconcile_db, webhook = file_db(), file_db()
+    campaign, cli_key = _make_chat_reply(reconcile_db)
+    responses = []
+
+    async def report_meanwhile(recv_list):
+        request = _report_request(*[_sms_success(r.cli_key) for r in recv_list])
+        responses.append(await receive_report("wtok", request, webhook))
+
+    client = _SmsClientReportingFirst(report_meanwhile)
+    client.sent[cli_key] = {**_chat_failure(cli_key), "status": "DONE"}
+    monkeypatch.setattr("app.main.get_msghub_client", lambda: client)
+
+    asyncio.run(reconcile_pending_messages(reconcile_db, client, older_than_minutes=10))
+
+    assert [(r.status_code, json.loads(r.body)) for r in responses] == [(400, {"error": "report before record"})]
+    assert client.cli_keys == [f"{cli_key}-fb"]
+    assert _post_report(webhook, _sms_success(f"{cli_key}-fb")).status_code == 200  # msghub 재전송
+
+    check = file_db()
+    msg = _message(check, campaign.id)
+    assert (msg.status, msg.cli_key, msg.channel, msg.cost) == ("DONE", f"{cli_key}-fb", "SMS", 9)
+    assert check.get(Campaign, campaign.id).state == "COMPLETED"
+
+
 class _ChatClientReportingFirst(_SmsClient):
     """msghub 가 양방향 답장을 접수하고 요청 응답보다 그 리포트를 먼저 보낸다."""
 

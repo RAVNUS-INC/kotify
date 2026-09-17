@@ -23,6 +23,7 @@ from app.routes.webhook import receive_mo, receive_report
 from app.security.settings_store import SettingsStore
 from app.services import events
 from app.services.reconcile import reconcile_pending_messages
+from app.services.report import awaiting_record
 
 
 def _setup_token(db):
@@ -424,6 +425,30 @@ def test_report_without_changes_does_not_publish(
 
     assert resp.status_code == 200
     assert calls == ["commit"]
+
+
+def test_report_batch_asking_redelivery_still_publishes_applied_reports(
+    db_session, sample_user, monkeypatch
+):
+    """행 기록 전 리포트가 섞여 400 으로 재전송을 받는 배치도 먼저 반영·커밋한 리포트는 알린다 — 재전송 때 그
+    리포트는 이미 DONE 이라 건너뛰어, 여기서 알리지 않으면 열린 대화방이 대기로 남는다."""
+    _setup_token(db_session)
+    _reply(db_session, sample_user.sub)
+    sending = Campaign(  # 청크 응답을 기다리는 중 — 행 기록 전
+        created_by=sample_user.sub, caller_number="0212345678", message_type="short", content="안내",
+        total_count=1, pending_count=1, state="DISPATCHING", created_at="2026-09-01T00:00:00+00:00",
+    )
+    db_session.add(sending)
+    db_session.commit()
+    calls = _record_commits_and_publishes(db_session, monkeypatch)
+    [applied] = _report_body()["rptLst"]
+    body = {"rptCnt": 2, "rptLst": [applied, {**applied, "cliKey": f"c{sending.id}-0-0", "msgKey": "mk-2"}]}
+
+    with awaiting_record([sending.id]):
+        resp = asyncio.run(receive_report("wtok", _json_request(body), db_session))
+
+    assert (resp.status_code, json.loads(resp.body)) == (400, {"error": "report before record"})
+    assert calls == ["commit", "thread.updated"]
 
 
 def test_report_processing_failure_does_not_publish(db_session, sample_user, monkeypatch):
