@@ -10,9 +10,6 @@ api-contract.md §S17 — web/types/search.ts SearchResult shape.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from zoneinfo import ZoneInfo
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -22,12 +19,12 @@ from app.db import get_db
 from app.models import AuditLog, Campaign, Contact, Message, MoMessage, User
 from app.routes.audit_api import _escape_like
 from app.routes.contacts import _contact_to_dict
+from app.services.chat import _ts_rank
+from app.util.time import fmt_kst_dt, fmt_kst_full
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
 )
-
-KST = ZoneInfo("Asia/Seoul")
 
 # 섹션당 반환 상한. total 은 별도로 계산해 배지에 표시.
 _SECTION_LIMIT = 10
@@ -36,30 +33,8 @@ _SCAN_LIMIT = 500
 
 
 # ── 포맷 헬퍼 ────────────────────────────────────────────────────────────────
-
-
-def _fmt_kst_dt(iso_utc: str | None) -> str:
-    if not iso_utc:
-        return ""
-    try:
-        dt = datetime.fromisoformat(iso_utc)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M")
-    except (ValueError, TypeError):
-        return ""
-
-
-def _fmt_kst_full(iso_utc: str | None) -> str:
-    if not iso_utc:
-        return ""
-    try:
-        dt = datetime.fromisoformat(iso_utc)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
-    except (ValueError, TypeError):
-        return ""
+# 시각 표시는 app.util.time 공용 포매터 — 대화방 발송 시각은 msghub 원본(오프셋 없는 KST)이라
+# 오프셋 없는 값을 UTC 로 읽으면 9시간 늦게 보인다.
 
 
 def _campaign_label(subject: str | None, content: str | None, cid: int) -> str:
@@ -112,7 +87,7 @@ def _search_campaigns(db: Session, pat_like: str) -> tuple[list[dict], int]:
             "id": str(c.id),
             "name": _campaign_label(c.subject, c.content, c.id),
             "status": (c.state or "").lower(),
-            "createdAt": _fmt_kst_dt(c.created_at),
+            "createdAt": fmt_kst_dt(c.created_at),
         }
         for c in rows
     ]
@@ -148,7 +123,7 @@ def _search_audit(db: Session, pat_like: str) -> tuple[list[dict], int]:
     out = [
         {
             "id": f"a-{log.id}",
-            "time": _fmt_kst_full(log.created_at),
+            "time": fmt_kst_full(log.created_at),
             "actor": name or ("시스템" if log.actor_sub is None else "(탈퇴)"),
             "action": log.action,
             "target": log.target or "-",
@@ -166,6 +141,8 @@ def _search_threads(db: Session, pat_like: str) -> tuple[list[dict], int]:
     매치된 메시지가 속한 (caller, phone) 을 뽑아 최신순 정렬.
     """
     # 1) MT 매치: subject 또는 content 둘 다 확인 (campaigns 섹션과 동일 기준).
+    # 발송 시각은 대화방 목록과 같은 coalesce(complete_time, report_dt) — 발송 결과 조회로
+    # report_dt 만 채워진 행도 시각이 있다.
     mt_rows = db.execute(
         select(
             Campaign.caller_number,
@@ -173,7 +150,7 @@ def _search_threads(db: Session, pat_like: str) -> tuple[list[dict], int]:
             Message.id,
             Campaign.subject,
             Campaign.content,
-            Message.complete_time,
+            func.coalesce(Message.complete_time, Message.report_dt),
         )
         .join(Message, Message.campaign_id == Campaign.id)
         .where(
@@ -187,13 +164,15 @@ def _search_threads(db: Session, pat_like: str) -> tuple[list[dict], int]:
     ).all()
 
     # 2) MO 매치: mo_messages.mo_msg 매치. mo_callback=caller, mo_number=phone.
+    # 회신 시각도 대화방 목록·상세와 같은 coalesce(mo_recv_dt, received_at) — 웹훅이 늦게
+    # 도착해도(msghub 재전송·재시작) 고객이 실제로 보낸 시각으로 발송과 비교한다.
     mo_rows = db.execute(
         select(
             MoMessage.mo_callback,
             MoMessage.mo_number,
             MoMessage.id,
             MoMessage.mo_msg,
-            MoMessage.received_at,
+            func.coalesce(MoMessage.mo_recv_dt, MoMessage.received_at),
         )
         .where(MoMessage.mo_msg.ilike(pat_like, escape="\\"))
         .order_by(MoMessage.id.desc())
@@ -202,12 +181,14 @@ def _search_threads(db: Session, pat_like: str) -> tuple[list[dict], int]:
 
     # MT 와 MO 양쪽을 (caller, phone) 로 dedup. ts_iso 비교해 **더 최신만** 보관.
     # (이전 구현은 MT 먼저 삽입 후 MO 덮어쓰기를 거부 — MO 가 최신이면 snippet 이
-    # 구 MT 로 고정되는 버그.)
+    # 구 MT 로 고정되는 버그.) ts_iso 는 msghub 원본(오프셋 없는 KST)과 UTC ISO 가 섞여
+    # 문자열 대소로는 9시간까지 어긋난다 — 파싱한 실제 시각(_ts_rank)으로 비교한다.
     combined: dict[tuple[str, str], dict] = {}
 
     def _upsert(key, entry):
+        entry["rank"] = _ts_rank(entry["ts_iso"])
         existing = combined.get(key)
-        if existing is None or (entry["ts_iso"] or "") > (existing["ts_iso"] or ""):
+        if existing is None or entry["rank"] > existing["rank"]:
             combined[key] = entry
 
     for caller, phone, _mid, subj, content, ts in mt_rows:
@@ -233,11 +214,12 @@ def _search_threads(db: Session, pat_like: str) -> tuple[list[dict], int]:
             "campaign_name": None,
         })
 
-    # 최근 ts 기준 정렬. ts_iso 는 MT 의 complete_time (UTC ISO) 또는 MO 의
-    # received_at (UTC ISO) — 둘 다 '+00:00' 접미 이라 lexicographic OK.
+    # 최근 시각순 정렬. ts_iso 는 MT 의 coalesce(complete_time, report_dt) 또는 MO 의
+    # coalesce(mo_recv_dt, received_at) — 각각 msghub 원본(오프셋 없는 KST)이거나 우리가
+    # 기록한 UTC ISO 라, 문자열 순서가 아니라 _upsert 에서 파싱한 실제 시각으로 정렬한다.
     ordered = sorted(
         combined.values(),
-        key=lambda r: r.get("ts_iso", ""),
+        key=lambda r: r["rank"],
         reverse=True,
     )
     total = len(ordered)
@@ -248,7 +230,7 @@ def _search_threads(db: Session, pat_like: str) -> tuple[list[dict], int]:
             "name": r["phone"],  # 연락처 이름 미연결 — 번호로 표시
             "phone": r["phone"],
             "snippet": r["snippet"],
-            "time": _fmt_kst_dt(r.get("ts_iso") or None),
+            "time": fmt_kst_dt(r.get("ts_iso") or None),
             **({"campaignName": r["campaign_name"]} if r.get("campaign_name") else {}),
         }
         for r in ordered
