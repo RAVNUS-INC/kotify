@@ -91,7 +91,7 @@ def outbound_channel(
     건은 비어 있어, 예전엔 무조건 SMS 로 표시되어 RCS 로 보낸 답장도 SMS 처럼 보였다.
 
     cliKey 가 "-fb" 인 건은 RCS 요청이 실패해 직접 SMS/LMS/MMS 로 대체 발송된 것이다
-    (compose._send_chunk_direct, webhook._send_sms_fallback). 그 리포트가 오기 전(DONE
+    (compose._send_chunk_direct, report.send_sms_fallback). 그 리포트가 오기 전(DONE
     아님)엔 캠페인이 RCS 여도 대체 발송 채널로 표시한다.
     """
     direct = _DIRECT_CHANNEL.get(message_type or "", "SMS")
@@ -102,8 +102,8 @@ def outbound_channel(
     return "RCS" if rcs_messagebase_id else direct
 
 
-# 리포트(최종 결과)를 기다리는 상태. FB_PENDING 은 양방향 리포트 실패 후 webhook 이
-# 일반 SMS 로 대체 발송해 그 리포트를 기다리는 중이다(routes.webhook._send_sms_fallback).
+# 리포트(최종 결과)를 기다리는 상태. FB_PENDING 은 양방향 리포트 실패 후 웹훅·재조정이
+# 일반 SMS 로 대체 발송해 그 리포트를 기다리는 중이다(report.send_sms_fallback).
 _AWAITING_REPORT_STATUSES = frozenset({"PENDING", "REG", "ING", "FB_PENDING"})
 
 
@@ -663,8 +663,8 @@ async def send_reply(
 
     - "rcs": 24h 세션 안의 고객 MO reply_id 가 있으면 RCS 양방향(CHAT, 8원)으로
       응답하고, 없거나 양방향 요청이 즉시 실패하면 단방향 RCS(dispatch_campaign,
-      17원)로 fallback 한다. 양방향이 접수된 뒤 리포트에서 실패하면 webhook 이 일반
-      SMS 로 대체 발송한다(routes.webhook._send_sms_fallback) — 어느 경우든 답장은 전달된다.
+      17원)로 fallback 한다. 양방향이 접수된 뒤 리포트(웹훅·재조정)에서 실패하면 일반
+      SMS 로 대체 발송한다(report.send_sms_fallback) — 어느 경우든 답장은 전달된다.
     - "sms"(일반): RCS 를 쓰지 않고 직접 SMS(9원)로 보낸다.
     """
     if send_channel not in SEND_CHANNELS:

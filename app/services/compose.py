@@ -604,7 +604,7 @@ def _make_chat_reply_cli_key(campaign_id: int) -> str:
     붙지 않는다(report._find_message).
 
     양방향 cliKey 는 최대 20자(공식 문서 2.3.2 §2 — 단방향·xMS 는 30자)라 캠페인 id 8자리까지 들어간다. 대체 SMS 는
-    -fb 를 붙인다(routes.webhook._send_sms_fallback).
+    -fb 를 붙인다(report.send_sms_fallback).
     """
     return f"{_make_cli_key(campaign_id, 0, 0)}-{secrets.token_hex(3)}"
 
