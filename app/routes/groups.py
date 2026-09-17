@@ -34,10 +34,10 @@ from app.routes.contacts import (
     _batch_group_ids,
     _batch_last_campaign_labels,
     _contact_to_dict,
-    _fmt_kst_dt,
 )
 from app.security.csrf import verify_csrf
 from app.services import audit
+from app.services.chat import _ts_rank, _ts_shape
 from app.services.groups import (
     add_members as svc_add_members,
 )
@@ -59,6 +59,7 @@ from app.services.groups import (
 from app.services.groups import (
     update_group as svc_update_group,
 )
+from app.util.time import fmt_kst_dt
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -103,7 +104,9 @@ def _batch_last_campaign_times(
     """group_id → 최근 캠페인 발송 시각(KST 'YYYY-MM-DD HH:MM').
 
     그룹 멤버의 phone 으로 발송된 메시지 중 최근 complete_time 을 기준.
-    1쿼리 GROUP BY.
+    1쿼리 GROUP BY — complete_time 은 msghub 원본(오프셋 없는 KST)과 rptDt 가 비었을 때의
+    UTC ISO 가 섞여 문자열 max 로는 늦은 값을 놓친다. 그룹·시각 모양별 최댓값만 후보로
+    뽑고(그룹당 보통 1~2행) 실제 시각(_ts_rank)으로 고른다.
 
     ⚠ 의미적 근사: "이 그룹을 통해 발송된 캠페인" 이 아니라 "이 그룹에
     *현재* 속한 phone 중 하나로 도달한 메시지 중 가장 최근" 을 반환한다.
@@ -114,7 +117,7 @@ def _batch_last_campaign_times(
     """
     if not group_ids:
         return {}
-    # max(Message.complete_time) per group_id — JOIN 경로:
+    # max(Message.complete_time) per (group_id, 시각 모양) — JOIN 경로:
     # ContactGroupMember → Contact → Message(by phone) 또는 (by contact_id 없음).
     # Message 는 contact_id 직접 연결 없어 phone 으로 매칭.
     # NOTE: Message.to_number 가 정규화 표기(01011112222)여야 Contact.phone
@@ -131,13 +134,19 @@ def _batch_last_campaign_times(
             ContactGroupMember.group_id.in_(group_ids),
             Message.complete_time.isnot(None),
         )
-        .group_by(ContactGroupMember.group_id)
+        .group_by(ContactGroupMember.group_id, _ts_shape(Message.complete_time))
     ).all()
-    result: dict[int, str] = {}
+    latest: dict[int, tuple[tuple[int, float], str]] = {}  # group_id → (시각 비교 키, 원문)
     for r in rows:
-        formatted = _fmt_kst_dt(r.last_ct)
+        rank = _ts_rank(r.last_ct)
+        if r.group_id not in latest or rank > latest[r.group_id][0]:
+            latest[r.group_id] = (rank, r.last_ct)
+    result: dict[int, str] = {}
+    for group_id, (_, last_ct) in latest.items():
+        # 공용 포매터 — 오프셋 없는 msghub 값을 KST 로 읽는다(UTC 로 읽으면 9시간 늦게 보임).
+        formatted = fmt_kst_dt(last_ct)
         if formatted:
-            result[r.group_id] = formatted
+            result[group_id] = formatted
     return result
 
 
