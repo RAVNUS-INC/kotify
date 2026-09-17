@@ -27,7 +27,8 @@ export function GroupCard({ group }: GroupCardProps) {
       href={href}
       className={cn(
         'group flex flex-col gap-3 rounded-lg border border-line bg-surface p-4',
-        'transition-all duration-fast ease-out hover:border-brand/40 hover:shadow-sm',
+        // 전환 속성을 all 로 두면 포커스 외곽선까지 전환돼 키보드 포커스 때 진한 외곽선이 비쳤다가 사라진다.
+        'transition-[border-color,box-shadow] duration-fast ease-out hover:border-brand/40 hover:shadow-sm',
         'focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(59,0,139,0.12)]',
       )}
       aria-label={`${group.name} 그룹 (${group.memberCount}명)`}
