@@ -11,6 +11,8 @@ cliKey 를 {원본}-fb 로 바꿔 SMS 를 보낸다. 행의 결과는 그 -fb SM
   state 는 실패로 남아 대시보드·알림에 "일부 실패 · 1/1 성공" 으로 보이던 문제.
 - 요청 응답보다 리포트가 먼저 와(대체 SMS·양방향 답장 트랜잭션 커밋 전) 그 리포트가 200 으로
   버려지던 문제 — 대체 SMS 리포트는 같은 번호에 미완료 메시지가 또 있을 때, 양방향 답장 리포트는 늘.
+- 타임아웃으로 롤백한 양방향 답장의 캠페인 id 를 단방향 fallback 이 다시 받아, msghub 가 접수했던 그
+  양방향 요청의 리포트가 같은 cliKey 인 fallback 행을 확정하던 문제.
 """
 from __future__ import annotations
 
@@ -25,12 +27,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base, create_db_engine
-from app.models import Caller, Campaign, Message, MsghubRequest, User
+from app.models import Caller, Campaign, Message, MoMessage, MsghubRequest, User
 from app.msghub.codes import SUCCESS_CODE
 from app.msghub.schemas import SendResponse, SendResultItem
 from app.routes.notifications import list_notifications, mark_all_read
 from app.routes.webhook import receive_report
 from app.security.settings_store import SettingsStore
+from app.services.chat import send_reply
 from app.services.compose import dispatch_chat_reply
 from app.services.report import awaiting_record
 
@@ -373,9 +376,10 @@ def test_chat_reply_report_before_commit_is_redelivered_and_falls_back(file_db, 
     버려졌고, 답장은 리포트 대기로 남아 대체 SMS 도 나가지 않았다. 이제 400 으로 재전송을 받고, 커밋 뒤 재전송된
     실패 리포트로 대체 SMS 를 보낸다."""
     webhook = file_db()
-    responses = []
+    responses, sent_keys = [], []
 
     async def report_meanwhile(cli_key):
+        sent_keys.append(cli_key)
         responses.append(await receive_report("wtok", _report_request(_chat_failure(cli_key)), webhook))
 
     client = _ChatClientReportingFirst(report_meanwhile)
@@ -385,7 +389,7 @@ def test_chat_reply_report_before_commit_is_redelivered_and_falls_back(file_db, 
         db=file_db(), msghub_client=client, created_by="test-sub-001", caller_number="0212345678",
         content="답장입니다", phone=_PHONE, reply_id="rid-1",
     ))
-    cli_key = f"c{campaign.id}-0-0"
+    [cli_key] = sent_keys
 
     assert [(r.status_code, json.loads(r.body)) for r in responses] == [(400, {"error": "report before record"})]
     assert _post_report(webhook, _chat_failure(cli_key)).status_code == 200  # msghub 재전송
@@ -393,3 +397,75 @@ def test_chat_reply_report_before_commit_is_redelivered_and_falls_back(file_db, 
     assert client.cli_keys == [f"{cli_key}-fb"]
     msg = _message(file_db(), campaign.id)
     assert (msg.status, msg.cli_key) == ("FB_PENDING", f"{cli_key}-fb")
+
+
+class _ChatClientTimingOut(_SmsClient):
+    """msghub 가 양방향 답장을 접수해 리포트까지 보냈는데(during_send) 요청 응답은 타임아웃으로 못 받는다. 단방향 RCS 는
+    접수한다 — 같은 cliKey 중복 거부는 흉내내지 않는다(test_send_reply 가 다룬다)."""
+
+    def __init__(self, during_send):
+        super().__init__()
+        self.during_send = during_send
+        self.chat_keys: list[str] = []
+        self.rcs_keys: list[str] = []
+
+    async def send_rcs_chat(self, *, description, phone, cli_key, reply_id=""):
+        self.chat_keys.append(cli_key)
+        await self.during_send(cli_key)
+        raise httpx.ReadTimeout("응답 대기 시간 초과")
+
+    async def send_rcs(self, *, recv_list, **kw):
+        self.rcs_keys += [r.cli_key for r in recv_list]
+        return SendResponse(code=SUCCESS_CODE, message="OK", items=[
+            SendResultItem(cli_key=r.cli_key, msg_key="mk-oneway", phone=r.phone, code=SUCCESS_CODE, message="성공")
+            for r in recv_list
+        ])
+
+
+def _chat_delivered(cli_key):
+    return {**_chat_failure(cli_key), "resultCode": SUCCESS_CODE, "resultCodeDesc": "성공"}
+
+
+@pytest.mark.parametrize("chat_report", [_chat_failure, _chat_delivered], ids=["failed", "delivered"])
+def test_timed_out_chat_reply_report_does_not_settle_oneway_fallback(file_db, monkeypatch, chat_report):
+    """양방향 답장 요청이 타임아웃이면 send_reply 가 답장 캠페인을 롤백하고 단방향 RCS 로 fallback 하는데, SQLite 가 롤백된
+    캠페인 id 를 fallback 캠페인에 다시 준다. msghub 가 그 양방향 요청을 접수했었다면 요청 중에 온 리포트(400)의 재전송이
+    같은 cliKey 인 단방향 행을 양방향 결과로 확정했다 — 실패면 전달된 답장이 실패로, 성공이면 채널·과금이 양방향(CHAT)으로
+    남고, 단방향 자신의 리포트는 DONE 이라 버려졌다. 롤백된 답장의 리포트는 기록하지 않은 메시지의 것이라 버린다."""
+    webhook, db = file_db(), file_db()
+    now = datetime.now(UTC).isoformat()
+    db.add(MoMessage(
+        mo_key="mo-1", mo_number=_PHONE, mo_callback="0212345678", mo_type="message", mo_msg="문의드려요",
+        reply_id="rid-1", mo_recv_dt=now, raw_payload="{}", received_at=now,
+    ))
+    db.commit()
+    responses = []
+
+    async def report_meanwhile(cli_key):
+        responses.append(await receive_report("wtok", _report_request(chat_report(cli_key)), webhook))
+
+    client = _ChatClientTimingOut(report_meanwhile)
+    monkeypatch.setattr("app.main.get_msghub_client", lambda: client)
+
+    campaign = asyncio.run(send_reply(
+        db, client, db.get(User, "test-sub-001"), "0212345678", _PHONE, "답장입니다",
+    ))
+
+    [chat_key], [oneway_key] = client.chat_keys, client.rcs_keys
+    assert [(r.status_code, json.loads(r.body)) for r in responses] == [(400, {"error": "report before record"})]
+    assert _post_report(webhook, chat_report(chat_key)).status_code == 200  # msghub 재전송
+
+    msg = _message(file_db(), campaign.id)
+    assert (msg.cli_key, msg.status, msg.channel) == (oneway_key, "REG", None)
+    assert file_db().get(Campaign, campaign.id).state == "DISPATCHED"
+    assert client.cli_keys == []  # 대체 SMS 도 없다
+
+    oneway_delivered = {
+        "msgKey": "mk-oneway", "cliKey": oneway_key, "ch": "RCS", "resultCode": SUCCESS_CODE,
+        "resultCodeDesc": "성공", "productCode": "SMS", "phone": _PHONE, "rptDt": "20260915100009",
+    }
+    assert _post_report(webhook, oneway_delivered).status_code == 200
+
+    msg = _message(file_db(), campaign.id)
+    assert (msg.status, msg.channel, msg.product_code, msg.cost) == ("DONE", "RCS", "SMS", 17)
+    assert file_db().get(Campaign, campaign.id).state == "COMPLETED"

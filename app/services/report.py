@@ -26,8 +26,8 @@ log = logging.getLogger(__name__)
 # 메시지 행이 아직 안 보일 수 있는 캠페인 id → 겹친 표시 수 (awaiting_record).
 _awaiting_record: Counter[int] = Counter()
 
-# compose._make_cli_key 의 c{캠페인}-{청크}-{순번}, 대체 발송은 -fb.
-_CLI_KEY = re.compile(r"c(\d+)-\d+-\d+(?:-fb)?")
+# compose._make_cli_key 의 c{캠페인}-{청크}-{순번}, 양방향 답장은 시도 토큰(compose._make_chat_reply_cli_key), 대체 발송은 -fb.
+_CLI_KEY = re.compile(r"c(\d+)-\d+-\d+(?:-[0-9a-f]{6})?(?:-fb)?")
 
 
 class ReportBeforeRecord(Exception):
@@ -50,7 +50,8 @@ def awaiting_record(campaign_ids: Iterable[int]) -> Iterator[None]:
     10초, 리포트 보관 72시간).
 
     재전송 요청은 그 cliKey 행이 커밋되거나 블록이 끝나면(발송 포기·롤백 포함) 멈춘다 — 캠페인의 청크 발송 전체,
-    답장 발송, 대체 SMS 트랜잭션보다 길어지지 않는다. 그 뒤에도 행이 없는 리포트는 기록하지 않은 메시지의 것이라
+    답장 발송, 대체 SMS 트랜잭션보다 길어지지 않는다. 롤백한 답장의 리포트는 그 id 를 다시 받은 단방향 fallback
+    (chat.send_reply)을 보내는 동안까지 이어진다. 그 뒤에도 행이 없는 리포트는 기록하지 않은 메시지의 것이라
     버린다(_find_message).
 
     단일 uvicorn 워커 전제(deploy/kotify.service --workers 1, services.events 와 같음)라 프로세스 메모리로
@@ -274,7 +275,8 @@ def _find_message(
     에서 phone으로 최근 발송 중인 메시지를 찾아 보조 매칭한다.
 
     cliKey 가 있는 리포트는 phone 으로 찾지 않는다. cliKey 는 메시지마다 고유해(compose._make_cli_key,
-    대체 발송은 -fb) 그 키로 못 찾은 리포트는 같은 번호의 다른 메시지가 아니라 기록하지 않은 메시지의
+    대체 발송은 -fb, 양방향 답장은 롤백된 캠페인 id 를 다음 캠페인이 다시 받아 시도마다 토큰을 붙인다 —
+    compose._make_chat_reply_cli_key) 그 키로 못 찾은 리포트는 같은 번호의 다른 메시지가 아니라 기록하지 않은 메시지의
     것이다 — 행 기록 전(웹훅이 재전송을 받는다, split_unrecorded), 같은 웹훅을 쓰는 다른 시스템의 발송, 롤백된
     양방향 답장(compose.dispatch_chat_reply). phone 으로 붙이면 다른 메시지가 그 결과(msgKey·채널·과금)로
     확정되고, 그 메시지의 제 리포트는 DONE 이라 버려졌다.

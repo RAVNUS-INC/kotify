@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -566,6 +567,22 @@ async def dispatch_campaign(
     return campaign
 
 
+def _make_chat_reply_cli_key(campaign_id: int) -> str:
+    """양방향 답장 cliKey. 패턴: c{campaign_id}-0-0-{시도 토큰 hex 6자}
+
+    답장 캠페인은 커밋하지 않고 보낸 뒤 실패하면 롤백한다(dispatch_chat_reply). SQLite 는 롤백된 id 를 다음 캠페인에
+    다시 준다 — campaigns.id 에 AUTOINCREMENT 가 없고(alembic 0001), 있어도 sqlite_sequence 갱신이 함께 롤백된다.
+    요청 예외(응답 타임아웃)여도 msghub 는 접수했을 수 있어, 키가 id 로만 정해지면 그 id 를 받은 단방향 fallback
+    (chat.send_reply)이 같은 cliKey 를 보내 중복 키로 거부될 수 있고(10분 규칙은 claudedocs/msghub-migration-spec.md
+    에만 있다), 롤백된 답장의 리포트가 fallback 행을 확정했다. 토큰으로 시도마다 키를 달리해 그 리포트는 어느 행에도
+    붙지 않는다(report._find_message).
+
+    양방향 cliKey 는 최대 20자(공식 문서 2.3.2 §2 — 단방향·xMS 는 30자)라 캠페인 id 8자리까지 들어간다. 대체 SMS 는
+    -fb 를 붙인다(routes.webhook._send_sms_fallback).
+    """
+    return f"{_make_cli_key(campaign_id, 0, 0)}-{secrets.token_hex(3)}"
+
+
 async def dispatch_chat_reply(
     db: Session,
     msghub_client: MsghubClient,
@@ -579,7 +596,8 @@ async def dispatch_chat_reply(
 
     reply_id 는 고객 MO 의 응답 템플릿 ID(MoMessage.reply_id). 양방향은 단건이라
     청크가 없다. 발송 실패 시 미커밋 Campaign 을 rollback 으로 폐기하고 예외를 다시
-    던지므로, 호출자(chat.send_reply)가 단방향 fallback 을 결정할 수 있다.
+    던지므로, 호출자(chat.send_reply)가 단방향 fallback 을 결정할 수 있다. 폐기한 id 는
+    다음 캠페인이 다시 받으므로 cliKey 는 시도마다 다르다(_make_chat_reply_cli_key).
 
     주의: 양방향 응답 data 에는 phone 이 없어(cliKey/msgKey/replyId 만) Message 는
     아는 phone 으로 직접 만든다 — _create_messages_from_response(item.phone 의존) 미사용.
@@ -615,7 +633,7 @@ async def dispatch_chat_reply(
     db.add(campaign)
     db.flush()  # id 할당 (커밋 안 함 — 발송 실패 시 rollback 으로 폐기)
 
-    cli_key = _make_cli_key(campaign.id, 0, 0)
+    cli_key = _make_chat_reply_cli_key(campaign.id)
     # 답장 행을 커밋하기 전에 온 리포트는 msghub 재전송으로 받는다 (report.awaiting_record).
     with awaiting_record([campaign.id]):
         try:

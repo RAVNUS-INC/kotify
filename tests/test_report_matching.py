@@ -8,13 +8,21 @@ cliKey/msgKey 없이 phone 만으로 도달한 delivery report 가, 동일 번�
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 from sqlalchemy import select
 
 from app.models import Campaign, Message, MsghubRequest
 from app.msghub.codes import SUCCESS_CODE
 from app.msghub.schemas import ReportItem
-from app.services.report import ReportBeforeRecord, awaiting_record, process_report
+from app.services.compose import _make_chat_reply_cli_key
+from app.services.report import (
+    ReportBeforeRecord,
+    awaiting_record,
+    process_report,
+    split_unrecorded,
+)
 
 
 def _make_campaign_message(db, *, phone, status, cli_key, msg_key=None, sub="test-sub-001"):
@@ -220,3 +228,17 @@ def test_report_before_its_row_is_recorded_asks_for_redelivery(db_session, sampl
         assert other.status == "REG"
 
     assert process_report(db_session, [waiting]) == (0, [])
+
+
+def test_chat_reply_attempt_key_is_recognized_as_its_campaign(db_session):
+    """양방향 답장 cliKey 는 시도마다 토큰이 붙는다(compose._make_chat_reply_cli_key) — 행 기록 전 표시(awaiting_record)가 그
+    키와 대체 SMS(-fb) 키를 제 캠페인 것으로 알아봐야 답장 요청 중·대체 SMS 커밋 전 리포트를 재전송으로 받는다. 양방향
+    cliKey 는 최대 20자(공식 문서)라 캠페인 id 8자리까지 들어가야 하고, 운영에서 받아 준 문자(영소문자·숫자·-)만 쓴다."""
+    key = _make_chat_reply_cli_key(12345678)
+    assert re.fullmatch(r"c12345678-0-0-[0-9a-f]{6}", key) and len(key) <= 20
+    assert _make_chat_reply_cli_key(12345678) != key  # 롤백된 id 를 다시 받은 다음 시도와 겹치지 않는다
+
+    reports = [_sms_report(cli_key=k, msg_key="mk", phone="01012345678") for k in (key, f"{key}-fb")]
+    with awaiting_record([12345678]):
+        assert split_unrecorded(db_session, reports) == ([], reports)
+    assert split_unrecorded(db_session, reports) == (reports, [])

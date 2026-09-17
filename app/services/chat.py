@@ -507,7 +507,9 @@ async def send_reply(
                 caller,
                 exc_info=True,
             )
-            # fall through to 단방향
+            # fall through to 단방향. 요청 예외(응답 타임아웃)여도 msghub 는 양방향을 접수했을 수 있다 — 그러면
+            # 고객은 fallback 과 함께 두 번 받는다. 롤백한 캠페인 id 를 fallback 캠페인이 다시 받지만 cliKey 는
+            # 겹치지 않아 그 양방향 리포트는 어느 행에도 붙지 않는다(compose._make_chat_reply_cli_key).
 
     # rcs: reply_id 없음(세션 밖) 또는 양방향 실패 → 단방향 RCS(17원).
     # sms: 일반 직접 발송(9원).
