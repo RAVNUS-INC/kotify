@@ -2,11 +2,12 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { PageHeader } from '@/components/shell';
 import {
+  ChatLiveRefresh,
   ThreadRecipientCard,
   ThreadView,
 } from '@/components/chat';
 import { Button, Icon } from '@/components/ui';
-import { fetchThread } from '@/lib/chat';
+import { fetchThread, getPendingDeliveryIds } from '@/lib/chat';
 import { ApiError } from '@/lib/api';
 import { formatPhone } from '@/lib/phone';
 
@@ -28,6 +29,11 @@ export default async function ThreadDetailPage({ params }: PageProps) {
 
   return (
     <div className="k-page">
+      {/* SSE 구독 — 고객 회신, 전달 대기 메시지 결과를 새로고침 없이 갱신(UI 없음). */}
+      <ChatLiveRefresh
+        threadId={thread.id}
+        pendingDeliveryIds={getPendingDeliveryIds(thread)}
+      />
       <PageHeader
         title={thread.name}
         sub={`${formatPhone(thread.phone)} · ${thread.messages.length}개 메시지`}

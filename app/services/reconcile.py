@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Message, MsghubRequest
+from app.services import events
 from app.services.report import process_sent_query
 
 if TYPE_CHECKING:
@@ -76,18 +77,23 @@ async def reconcile_pending_messages(
         return 0
 
     total = 0
-    for i in range(0, len(rows), _QUERY_BATCH):
-        batch = rows[i : i + _QUERY_BATCH]
-        cli_keys = [(r.cli_key, _req_dt_kst(r.sent_at)) for r in batch]
-        try:
-            raw_items = await client.query_sent(cli_keys)
-        except Exception:
-            log.exception("query_sent 실패 — 이 배치 skip (다음 주기 재시도)")
-            continue
-        processed = process_sent_query(db, raw_items)
-        db.commit()
-        total += processed
-
-    if total:
-        log.info("웹훅 재조정: 미완료 %d건 상태 보정", total)
+    try:
+        for i in range(0, len(rows), _QUERY_BATCH):
+            batch = rows[i : i + _QUERY_BATCH]
+            cli_keys = [(r.cli_key, _req_dt_kst(r.sent_at)) for r in batch]
+            try:
+                raw_items = await client.query_sent(cli_keys)
+            except Exception:
+                log.exception("query_sent 실패 — 이 배치 skip (다음 주기 재시도)")
+                continue
+            processed = process_sent_query(db, raw_items)
+            db.commit()
+            total += processed
+    finally:
+        if total:
+            log.info("웹훅 재조정: 미완료 %d건 상태 보정", total)
+            # 커밋된 배치 뒤 — 리포트 웹훅과 같은 이벤트·창으로 열린 대화방의 대기 라벨을
+            # 갱신한다. 뒤 배치가 예외(DB 잠김 등)로 끊겨도 앞서 커밋된 확정분은 알린다 — 이미
+            # DONE 이라 다음 주기엔 잡히지 않는다. REG→ING 같은 대기 안 이동은 total 에 안 잡힌다.
+            events.publish_throttled("thread.updated")
     return total

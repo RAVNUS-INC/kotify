@@ -169,13 +169,18 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
             kind = "kakao"
 
     id_suffix = f"{m.direction.lower()}-{m.mo_id or m.msg_id or 'x'}"
-    return {
+    row: dict = {
         "id": f"m-{id_suffix}",
         "side": side,
         "kind": kind,
         "text": m.body or "",
         "time": fmt_kst_hhmm(m.timestamp),
     }
+    # 발신 전달 상태(services.chat.delivery_status) — 수신(IN)엔 없고, 알 수 없는 과거
+    # 발송(None)도 생략해 대기·실패로 단정하지 않는다.
+    if m.delivery:
+        row["status"] = m.delivery
+    return row
 
 
 def _campaign_label(subject: str | None, content: str | None, cid: int) -> str:
@@ -475,9 +480,11 @@ def api_mark_read(
 async def chat_stream() -> StreamingResponse:
     """SSE — 대화방 실시간 갱신 이벤트 스트림.
 
-    고객 회신(MO) 수신 시 webhook 이 events.publish("message.new") 를 호출하면
-    여기 연결된 브라우저로 즉시 전달되고, 프론트(useChatStream)가 router.refresh()
-    로 화면을 갱신한다. 이벤트가 없으면 25초마다 ping 을 보내 연결을 유지한다
+    고객 회신(MO)을 저장하면 webhook 이 "message.new" 를, 발송 결과 리포트·재조정이 발신
+    전달 상태를 바꾸면 "thread.updated" 를 events.publish_throttled 로(이벤트마다 창당 1회)
+    발행한다. 이벤트는 여기 연결된 브라우저로 전달되고, 프론트(useChatStream)가
+    router.refresh() 로 화면을 갱신한다 — thread.updated 는 전달 대기 메시지가 보이는
+    대화방에서만. 이벤트가 없으면 25초마다 ping 을 보내 연결을 유지한다
     (프록시 idle timeout 방지).
 
     전제: uvicorn --workers 1 (app/services/events.py 주석 참고).

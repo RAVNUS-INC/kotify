@@ -27,6 +27,19 @@ export async function fetchThread(id: string): Promise<ChatThreadDetail> {
 }
 
 /**
+ * 결과 리포트를 기다리는(전달 대기) 발신 메시지 id. 대화방 실시간 갱신(ChatLiveRefresh)이
+ * 전달 상태 이벤트에 새로고침할지 가르는 기준 — 대기 메시지가 없으면 바뀔 게 없다.
+ */
+export function getPendingDeliveryIds(
+  thread: ChatThreadDetail | null | undefined,
+): string[] {
+  if (!thread) return [];
+  return thread.messages
+    .filter((m) => m.side === 'us' && m.status === 'pending')
+    .map((m) => m.id);
+}
+
+/**
  * Client-side fetch. Next rewrite(/api/* → FastAPI)를 경유하므로 상대 경로.
  */
 export async function sendMessageClient(

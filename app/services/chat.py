@@ -42,6 +42,7 @@ class ChatMessage:
     body: str
     timestamp: str                    # ISO 문자열 (정렬 및 표시용)
     status: str | None = None         # OUT 전용
+    delivery: str | None = None       # OUT 전용: pending/sent/failed, 알 수 없으면 None
     channel: str | None = None        # OUT 전용: RCS/SMS/LMS/MMS
     cost: int | None = None           # OUT 전용: 원
     telco: str | None = None          # IN 전용
@@ -96,6 +97,41 @@ def outbound_channel(
     if report_channel:
         return report_channel
     return "RCS" if rcs_messagebase_id else direct
+
+
+# 리포트(최종 결과)를 기다리는 상태. FB_PENDING 은 양방향 리포트 실패 후 webhook 이
+# 일반 SMS 로 대체 발송해 그 리포트를 기다리는 중이다(routes.webhook._send_sms_fallback).
+_AWAITING_REPORT_STATUSES = frozenset({"PENDING", "REG", "ING", "FB_PENDING"})
+
+
+def delivery_status(
+    status: str | None, result_code: str | None, cli_key: str | None
+) -> str | None:
+    """발신(OUT) 메시지의 전달 상태 — "pending" | "sent" | "failed", 알 수 없으면 None.
+
+    result_code 만으로는 판정할 수 없다. 접수(REG) 행에는 접수 응답의 성공 코드(10000)가,
+    FB_PENDING 행에는 실패한 RCS 리포트 코드가 남아 있어 코드만 보면 각각 전달·실패로
+    오판한다. 리포트 수신(DONE)일 때만 코드로 성공을 가린다.
+
+    - PENDING·REG·ING·FB_PENDING: 리포트 대기(대체 발송 중 포함) → pending
+    - DONE: 성공 코드면 sent, 아니면(코드 없음 포함) failed
+    - FAILED: 요청 단계 실패(청크·item 거부, 대체 발송 요청 실패) → failed
+    - NCP 시절 행: 결과 컬럼이 alembic 0007 에서 삭제돼 알 수 없음 → None. COMPLETED·
+      UNKNOWN 등은 그 외 상태로 걸러지고, 그때도 쓰던 PENDING 은 cliKey 없음으로 가린다
+      — msghub 이후 PENDING 행은 항상 cliKey 가 있고(compose), 없는 행은 재조정도
+      안 돼 영영 대기로 남는다.
+
+    실패 기준은 캠페인 집계(report._refresh_campaign_counters)와 같다.
+    """
+    if status == "PENDING" and not cli_key:
+        return None
+    if status in _AWAITING_REPORT_STATUSES:
+        return "pending"
+    if status == "DONE":
+        return "sent" if result_code == SUCCESS_CODE else "failed"
+    if status == "FAILED":
+        return "failed"
+    return None
 
 
 def _coalesce_ts(*values: str | None) -> str:
@@ -297,6 +333,7 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
                 body=campaign.content or "",
                 timestamp=ts,
                 status=msg.status,
+                delivery=delivery_status(msg.status, msg.result_code, msg.cli_key),
                 channel=outbound_channel(
                     msg.channel,
                     campaign.rcs_messagebase_id,

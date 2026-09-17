@@ -8,9 +8,6 @@ import { ThreadView } from './ThreadView';
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
-vi.mock('./useChatStream', () => ({
-  useChatStream: () => {},
-}));
 vi.mock('@/lib/chat', () => ({
   markReadClient: vi.fn().mockResolvedValue(undefined),
   sendMessageClient: vi.fn(),
@@ -48,5 +45,51 @@ describe('ThreadView 대화방 전환', () => {
 
     expect(screen.getByRole('textbox', { name: '메시지 입력' })).toHaveValue('');
     expect(screen.getByRole('radio', { name: '일반 SMS' })).toBeChecked();
+  });
+});
+
+describe('ThreadView 실시간 갱신', () => {
+  it('SSE 를 따로 구독하지 않는다 — 페이지의 ChatLiveRefresh 하나가 탭당 새로고침을 1회로 맡는다', () => {
+    const EventSourceSpy = vi.fn();
+    vi.stubGlobal('EventSource', EventSourceSpy);
+    try {
+      render(<ThreadView thread={thread('0212345678:01011112222')} />);
+      expect(EventSourceSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('ThreadView 발신 전달 상태', () => {
+  it('API 메시지의 status 를 말풍선에 넘겨 실패한 답장을 구분한다', () => {
+    render(
+      <ThreadView
+        thread={{
+          ...thread('0212345678:01011112222'),
+          messages: [
+            {
+              id: 'm-out-1',
+              side: 'us',
+              kind: 'rcs',
+              text: '전달된 답장',
+              time: '01:30',
+              status: 'sent',
+            },
+            {
+              id: 'm-out-2',
+              side: 'us',
+              kind: 'rcs',
+              text: '실패한 답장',
+              time: '01:38',
+              status: 'failed',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('01:30 / RCS')).toBeInTheDocument();
+    expect(screen.getByText('01:38 / RCS · 실패')).toBeInTheDocument();
   });
 });
