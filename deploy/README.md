@@ -192,12 +192,20 @@ systemctl restart kotify kotify-web
 # 결과 확인:
 tail -n 50 /var/log/kotify/update.log
 
+# CT 콘솔에서 root로 수동 업데이트 (소스와 패키지의 서비스 계정 읽기 권한 유지)
+(umask 022; bash /opt/kotify/deploy/kotify-update.sh apply)
+
 # 백업 수동 실행
 sudo -u kotify /opt/kotify/deploy/kotify-backup.sh
 
 # DB 직접 조회
 sqlite3 /var/lib/kotify/sms.db ".tables"
 ```
+
+별도 DB 스냅샷은 백업 파일 자체에 `0600` 권한을 적용한다. 백업용 `umask 077`을
+업데이트 프로세스까지 전달하면 checkout·패키지 설치 결과가 root 전용이 되어
+`kotify` 계정의 마이그레이션이 `PermissionError`로 실패할 수 있다. 이 경우 롤백 상태를
+확인하고 위 수동 업데이트 명령의 일반 설치 권한으로 재설치한다.
 
 ### CT SSH 재로딩 실패
 
