@@ -1,5 +1,11 @@
 # kotify 코드 리뷰 — 종합 리포트
 
+## 2026-09-18 — 비용·Message Hub·회신 알림 운영 반영
+
+- 기능 커밋 `b70a2dc4dad1c2f157ffd9f22c29a99c32d2dde3`를 [PR #12](https://github.com/RAVNUS-INC/kotify/pull/12)로 병합했다. `main` 병합 커밋은 `572b3d1dec0bfd159c4ecef969edcde27211da81`이며, 로컬 pre-push 검증에서 백엔드 전체 테스트와 Ruff·TypeScript·ESLint·Vitest가 통과했다.
+- 운영 배포에서 Alembic `0019 → 0023`과 Next.js 18/18 페이지 빌드가 성공했다. API·웹 프록시 HTTP 200과 버전 `572b3d1`, 두 서비스 active/오류 0, DB `quick_check=ok`, warning 이상 로그 0건을 확인했다.
+- 실제 Telegram 테스트 알림이 로그인 사용자에게 도착해 Kotify → n8n → Telegram 경로를 확인했다. 실제 고객 MO를 만들지는 않았으므로 최근 실제 발신 담당자 선택과 outbox 재시도의 운영 종단 검증은 자동 회귀 테스트와 구분해 남긴다.
+
 ## 2026-09-18 — main 병합·운영 배포 완료
 
 - 기능 커밋 `7ea9630418968b37c6978a8c1862cfdd435c387c`를 게시한 뒤 사용자 승인으로 [PR #11](https://github.com/RAVNUS-INC/kotify/pull/11)을 07:50:47 UTC에 main에 병합했다. 병합 커밋은 `d599d84de11e7cbd9de52aa3d36317d12677b67c`이며 기능의 커밋·푸시·운영 배포를 완료했다.

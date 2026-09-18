@@ -1,5 +1,13 @@
 # Handoff — 현재 상황 요약
 
+## 2026-09-18 — 비용·Message Hub·회신 알림 main 병합·운영 배포 및 Telegram 수신 검증
+
+- 기능 커밋 `b70a2dc4dad1c2f157ffd9f22c29a99c32d2dde3`를 게시하고 [PR #12](https://github.com/RAVNUS-INC/kotify/pull/12)를 08:55:18 UTC에 `main`으로 병합했다. 병합 커밋은 `572b3d1dec0bfd159c4ecef969edcde27211da81`이다. pre-push 훅에서 백엔드 전체 테스트, Ruff, TypeScript, ESLint, 프런트엔드 Vitest가 통과했고 별도 Next.js 프로덕션 빌드도 18/18 페이지에 성공했다.
+- 기존 업데이트 worker로 08:57:05 UTC에 운영 배포를 시작해 08:58:13 UTC에 빌드를 마쳤고, post-restart가 08:58:45 UTC에 새 버전의 정상 기동을 확인했다. worker의 pre-migrate 백업 뒤 운영 스키마를 `0019 → 0020 → 0021 → 0022 → 0023`으로 올렸다.
+- 운영 API와 웹 프록시는 모두 HTTP 200, `status=ok`, `version=572b3d1`을 반환했다. `kotify`와 `kotify-web`은 active이며 `NRestarts=0`, `ExecMainStatus=0`이다. DB `PRAGMA quick_check`는 `ok`, 배포 이후 warning 이상 journal은 0건이고 알림 outbox 적체도 없었다.
+- 운영 설정의 `Telegram 알림 테스트`는 n8n 접수 성공을 반환했고, 18:00 KST에 로그인 사용자 Telegram의 `레이븐어스 알림봇`으로 새 테스트 회신 알림이 실제 도착했다. 이는 운영 Kotify → n8n → Telegram과 로그인 사용자 라우팅을 확인한 결과다.
+- 실제 고객 MO는 이번 검증에서 새로 만들지 않았다. 따라서 outbox 저장·재시도와 최근 실제 발신 담당자 선택의 운영 종단 검증은 남아 있으며, 현재는 자동 회귀 테스트와 빈 outbox·무경고 상태를 확인했다.
+
 ## 2026-09-18 — RCS CHAT 24시간 세션 비용 상한 반영
 
 - 원인: 성공한 양방향 `(RCS, CHAT)` 리포트마다 `Message.cost=8`원을 저장해 동일
