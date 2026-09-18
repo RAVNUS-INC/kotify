@@ -1,5 +1,16 @@
 # Handoff — 현재 상황 요약
 
+## 2026-09-18 — main 병합·운영 배포 완료
+
+- 기능 커밋 `7ea9630418968b37c6978a8c1862cfdd435c387c`를 게시한 뒤 사용자 승인으로 [PR #11](https://github.com/RAVNUS-INC/kotify/pull/11)을 07:50:47 UTC에 main에 병합했다. 병합 커밋은 `d599d84de11e7cbd9de52aa3d36317d12677b67c`이며 기능의 커밋·푸시·운영 배포를 완료했다.
+- 최종 두 영역 코드 리뷰에서 P1·P2 차단 사항이 없었고, pre-push 훅에서 백엔드 **667개**·프런트엔드 **154개** 테스트와 Ruff·TypeScript·ESLint를 다시 통과했다. GitHub Actions는 기존에 비활성화되어 있어 CI 실행으로 표현하지 않는다.
+- 기존 업데이트 worker로 07:52:13 UTC에 배포를 시작해 07:53:24 UTC에 완료했다. 운영 스키마 `0018 → 0019` 마이그레이션과 Next.js 프로덕션 빌드 **18/18 페이지**가 성공했다. 서버 내 별도 SQLite 백업과 worker의 pre-migrate 백업은 `0600` 권한으로 보존했으며 DB를 외부로 전송하지 않았다.
+- 운영 확인: API·웹 서비스 모두 active/running이며 07:53:36 UTC 정상 기동과 post-restart 로그를 확인했다. 두 서비스의 `NRestarts=0`, `ExecMainStatus=0`이고 운영 추적 파일 변경은 없었다. 내부 API·웹 프록시·외부 HTTPS 헬스체크 모두 **HTTP 200**, `status=ok`, `version=d599d84`였다.
+- DB는 revision `0019`, `quick_check=ok`이며 기존 `thread_reads`·MO·메시지·캠페인 행이 모두 보존됐다. 잘못된 읽음 커서는 0건이다. 운영 OpenAPI에서 읽음 JSON body와 `lastReadMessageId` 필수 조건, 목록 `q/unread/limit/offset`, 답장 사전 검증 `validate-reply` 경로를 확인했다.
+- 기존에 열어 둔 대화방 탭은 새로고침해 새 클라이언트를 로드해야 한다. 실제 메시지 발송과 로그인 후 브라우저 E2E는 수행하지 않았다. SQLite 외부 발송 대기 중 쓰기 잠금과 최초 발송 화면의 UTF-8 예상 길이/서버 EUC-KR 불일치는 별도 후속 개선으로 남긴다.
+
+아래 수정·검증 기록은 기능 구현 단계의 기록이며, 최신 게시·운영 상태는 위 내용을 따른다.
+
 ## 2026-09-18 — 대화방 리뷰 추가 5건 수정·통합 검증 완료
 
 - 목표·범위: 사용자 승인에 따라 직전 대화방 리뷰의 미해결 5건을 수정했다. 기존 답장 바이트 안내·발신자 표시와 최근 커밋 리뷰 4건 수정은 유지한다. 작업 브랜치는 `codex/review-recent-commits-20260918`이며 커밋·푸시·배포는 아직 하지 않았다.
