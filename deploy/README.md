@@ -258,6 +258,31 @@ Keycloak은 기본적으로 역할을 Access Token에 추가하며 ID Token 포�
 설정한다([공식 역할 매핑 문서](https://www.keycloak.org/docs/latest/server_admin/#_role_mappings)).
 필드가 없다는 사실만으로 매퍼 누락을 단정하지 말고 클라이언트 scope·역할 할당도 함께 확인한다.
 
+#### 그룹에서 상속한 클라이언트 역할을 ID 토큰에 포함하기
+
+2026-09-18 운영 진단에서 사용자에게 그룹 상속 `sender`가 있지만 공용 `client roles`
+매퍼의 **Add to ID token**이 꺼져 있어 ID 토큰의 `resource_access`가 누락된 사례를 확인했다.
+Kotify 클라이언트의 **Client scopes → 전용 scope → Mappers → Configure a new mapper**에
+다음 전용 매퍼를 추가한다. 기존 그룹·역할 할당과 공용 `roles` scope는 유지한다.
+
+| 항목 | 값 (`kotify`가 실제 client ID인 예시) |
+|---|---|
+| Mapper type | `User Client Role` |
+| Name | `kotify-client-roles-id-token` |
+| Client ID | `kotify` 선택 |
+| Client Role prefix | 비움 |
+| Multivalued / Claim JSON Type | On / String |
+| Token Claim Name | `resource_access.kotify.roles` |
+| Add to ID token | On |
+| Access / lightweight access / userinfo / introspection | Off (기존 공용 매퍼 설정 유지) |
+
+저장 후 `/api/auth/login`으로 새 인증을 시작한다. Keycloak SSO로 화면이 자동 통과돼도
+새 콜백이 실행돼야 한다. 감사 이벤트에서 `azp_client.roles.known_roles`와 `parsed_roles`에
+`sender`가 있고 `viewer_fallback_used=false`인지 확인한다. 첫 관리자 계정이면 최종 역할에
+`admin`이 추가될 수 있다. 기존 앱 세션의 단순 새로고침은 새 토큰 검증을 대신하지 않는다.
+2026-09-18 해당 전용 매퍼 저장 후 실제 재로그인에서 `sender` 클레임, 파싱 결과, 최종 DB 역할과
+`viewer_fallback_used=false`를 확인했다. 최초 관리자 정책 대상 계정의 최종 역할은 `admin`·`sender`였다.
+
 DB의 `users.roles`는 현재 저장값이고, `last_login_at`은 일반 인증 요청에서도 갱신된다.
 실제 로그인 시각은 `LOGIN` 감사 이벤트로 확인한다. 기존 세션 요청도 DB 역할을 다시 저장할
 수 있어 현재 DB 값만으로 특정 로그인에서 받은 토큰 내용을 확정할 수 없다. 불일치 경고는
