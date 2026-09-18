@@ -113,6 +113,8 @@ class MsghubClient:
         brand_id: str = "",
         chatbot_id: str = "",
     ) -> None:
+        if env not in _HOSTS:
+            raise ValueError("msghub 환경은 'production' 또는 'qa'여야 합니다")
         hosts = _HOSTS[env]
         self._api_base = hosts["api"]
         self._send_base = hosts["send"]
@@ -135,6 +137,18 @@ class MsghubClient:
     async def test_auth(self) -> bool:
         """인증 테스트. AuthError 시 raise."""
         return await self._token_mgr.test_auth()
+
+    async def health_check(self) -> bool:
+        """공식 세션 health check. 1분 이하 주기로 호출해야 세션 알람이 동작한다."""
+        headers = await self._auth_headers()
+        resp = await self._http.put(
+            f"{self._api_base}/client/v1/healthCheck",
+            headers={"Authorization": headers["Authorization"]},
+            timeout=_TIMEOUT,
+        )
+        data = _parse_json(resp)
+        _raise_for_response(data, resp.status_code)
+        return True
 
     def update_rcs_config(self, brand_id: str, chatbot_id: str) -> None:
         """RCS 설정 업데이트 (런타임)."""

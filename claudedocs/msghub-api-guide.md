@@ -114,7 +114,7 @@ Authorization: Bearer {refreshToken}
 ## 3. SMS 발송 API
 
 ```
-POST /msg/v1/sms
+POST /xms/sms/v1
 Authorization: Bearer {token}
 Content-Type: application/json
 ```
@@ -188,7 +188,7 @@ Content-Type: application/json
 LMS와 MMS는 **동일 엔드포인트**를 사용한다. 파일 첨부 유무로 구분.
 
 ```
-POST /msg/v1/mms
+POST /xms/mms/v1
 Authorization: Bearer {token}
 Content-Type: application/json
 ```
@@ -249,13 +249,13 @@ Content-Type: application/json
 ### 방식 A: 사전등록 파일 ID
 
 1. 이미지 사전등록 API로 업로드 → `fileId` 수신
-2. `POST /msg/v1/mms`의 `fileIdLst`에 해당 ID 포함
+2. `POST /xms/mms/v1`의 `fileIdLst`에 해당 ID 포함
 3. **반복 사용에 적합** (같은 이미지 여러 번 발송)
 
 ### 방식 B: multipart 직접 첨부
 
 ```
-POST /msg/v1/mms
+POST /xms/mms/file/v1
 Authorization: Bearer {token}
 Content-Type: multipart/form-data
 ```
@@ -266,7 +266,7 @@ Content-Type: multipart/form-data
 | `parts` | File | N | 첨부 이미지 파일 |
 
 ```bash
-curl -X POST "https://api.msghub.uplus.co.kr/msg/v1/mms" \
+curl -X POST "https://api.msghub.uplus.co.kr/xms/mms/file/v1" \
   -H "Authorization: Bearer eyJhbG..." \
   -H "Content-Type: multipart/form-data" \
   -F 'reqMsg={"callback":"0212341234","title":"MMS","msg":"본문","recvInfoLst":[{"cliKey":"k1","phone":"01012345678"}],"fbInfoLst":[]}' \

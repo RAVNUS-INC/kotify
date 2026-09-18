@@ -155,14 +155,42 @@ async def receive_report(
     )
 
 
-def _active_caller_digits(db: Session) -> set[str]:
-    """활성 발신번호의 숫자만 추출한 집합 (MO callback 위변조 검증용)."""
+def _callback_aliases(value: str | None) -> tuple[str, ...]:
+    """발신번호·RCS chatbotId를 비교할 정규화 별칭 집합."""
+    raw = (value or "").strip().casefold()
+    if not raw:
+        return ()
+    digits = "".join(c for c in raw if c.isdigit())
+    if not digits or digits == raw:
+        return (raw,)
+    return (raw, digits)
+
+
+def _active_caller_callbacks(db: Session) -> dict[str, str]:
+    """활성 발신번호와 chatbotId 별칭을 대표 발신번호에 매핑한다."""
     from app.models import Caller
 
     rows = db.execute(
-        select(Caller.number).where(Caller.active == 1)
-    ).scalars().all()
-    return {"".join(c for c in n if c.isdigit()) for n in rows}
+        select(Caller.number, Caller.rcs_chatbot_id).where(Caller.active == 1)
+    ).all()
+    aliases: dict[str, str] = {}
+    for number, chatbot_id in rows:
+        canonical = "".join(c for c in number if c.isdigit())
+        if not canonical:
+            continue
+        for value in (number, chatbot_id):
+            for alias in _callback_aliases(value):
+                aliases[alias] = canonical
+    return aliases
+
+
+def _resolve_callback(value: str | None, aliases: dict[str, str]) -> str | None:
+    """공급자 callback 값을 등록된 대표 발신번호로 변환한다."""
+    for alias in _callback_aliases(value):
+        canonical = aliases.get(alias)
+        if canonical:
+            return canonical
+    return None
 
 
 def _synth_mo_key(
@@ -229,7 +257,8 @@ async def receive_mo(
     duplicates = 0
     rejected = 0
     saved_mos: list[MoMessage] = []  # n8n 알림 대상 (신규 저장분만)
-    active_callbacks = _active_caller_digits(db)
+    delivery_ids: list[int] = []
+    active_callbacks = _active_caller_callbacks(db)
 
     try:
         for item in payload.items:
@@ -240,23 +269,45 @@ async def receive_mo(
                 c for c in item.number if c.isdigit()
             )
 
-            # moCallback(우리 발신번호)도 숫자만으로 통일. 대화방 그룹핑 키가
-            # (caller, phone)=(mo_callback, mo_number) 인데, campaigns.caller_number
-            # 는 숫자만 저장되므로 mo_callback 이 하이픈/국제표기로 남으면 같은 고객이
-            # 발송방·회신방으로 쪼개진다. cb_digits 를 저장값에도 반영해 정합성 유지.
-            if item.callback:
-                item.callback = "".join(c for c in item.callback if c.isdigit())
+            # SMS/MMS MO의 공식 필드 의미는 moNumber=우리 수신번호,
+            # moCallback=고객 발신번호다. RCS MO는 phone=고객, chatbotId=우리
+            # 채널이므로 두 형식을 분리한다. 구버전/테스트 payload의 반대
+            # 표기도 활성 Caller를 기준으로 안전하게 호환한다.
+            provider_number = "".join(c for c in item.number if c.isdigit())
+            provider_callback_raw = item.callback
+            provider_callback = "".join(c for c in provider_callback_raw if c.isdigit())
+            number_canonical = _resolve_callback(provider_number, active_callbacks)
+            callback_canonical = _resolve_callback(provider_callback_raw, active_callbacks)
+            if item.is_rcs:
+                customer_number = provider_number
+                our_callback = callback_canonical or provider_callback or provider_callback_raw.strip()
+                callback_registered = callback_canonical is not None
+            elif number_canonical:
+                customer_number, our_callback = provider_callback, number_canonical
+                callback_registered = True
+            elif callback_canonical:
+                # 이전 내부 payload 호환: moNumber=고객, moCallback=대표번호.
+                customer_number, our_callback = provider_number, callback_canonical
+                callback_registered = True
+            elif provider_number.startswith("010") and not provider_callback.startswith("010"):
+                # 활성 Caller 정보가 없는 구형 내부 payload 호환.
+                customer_number, our_callback = provider_number, provider_callback
+                callback_registered = not active_callbacks
+            else:
+                customer_number, our_callback = provider_callback or provider_number, provider_number
+                callback_registered = not active_callbacks
 
-            # 위변조 방지 — callback 이 우리 활성 발신번호가 아니면 거부(토큰 유출 대비
-            # defense-in-depth). 발신번호 미등록 환경에서는 검증 불가하므로 통과시킨다.
-            if active_callbacks and item.callback:
-                cb_digits = item.callback  # 이미 숫자만
-                if cb_digits not in active_callbacks:
-                    log.warning(
-                        "MO moCallback 미등록 — 거부(위변조 의심): %s", item.callback
-                    )
-                    rejected += 1
-                    continue
+            # 위변조 방지 — 공식 MO 수신번호(our_callback)가 활성 발신번호인지
+            # 확인한다. 발신번호 미등록 환경에서는 검증 불가하므로 통과시킨다.
+            if active_callbacks and not callback_registered:
+                log.warning(
+                    "MO 수신번호 미등록 — 거부(위변조 의심): %s", our_callback
+                )
+                rejected += 1
+                continue
+
+            item.number = customer_number
+            item.callback = our_callback
 
             # 유실 방지 — moKey 누락 시 페이로드 기반 대체 멱등키로 저장(영구 유실 방지).
             mo_key = item.mo_key or _synth_mo_key(
@@ -296,6 +347,18 @@ async def receive_mo(
             saved_mos.append(mo)
             saved += 1
 
+        # MO와 알림 outbox를 한 트랜잭션에 넣는다. n8n HTTP 장애는 이후
+        # 재시도하지만, 큐 기록 자체가 실패하면 msghub에 400을 보내 MO부터
+        # 다시 받는다. 이로써 저장된 회신만 있고 알림 요청은 없는 상태를 막는다.
+        if saved_mos:
+            db.flush()
+            from app.services.notify import enqueue_n8n_delivery, prepare_n8n_delivery
+
+            n8n_url, n8n_payloads = prepare_n8n_delivery(db, saved_mos)
+            if n8n_url and n8n_payloads:
+                delivery_ids = enqueue_n8n_delivery(
+                    db, saved_mos, n8n_url, n8n_payloads
+                )
         db.commit()
     except Exception:
         db.rollback()
@@ -323,21 +386,13 @@ async def receive_mo(
         except Exception:  # noqa: BLE001
             log.debug("SSE 이벤트 발행 실패(무시)", exc_info=True)
 
-    # 아웃바운드 알림 (n8n → 하이웍스 등). MO 저장이 끝난 뒤에만 처리한다.
-    # 전송은 응답 반환 후 BackgroundTask 에서 수행 → msghub success 응답이
-    # n8n 지연/장애에 묶이지 않는다(인바운드 처리량 보호). 페이로드는 DB 세션이
-    # 살아있는 지금 준비하고(설정 읽기), HTTP 전송만 백그라운드로 미룬다.
-    # (재전송된 동일 MO 는 위에서 mo_key 중복으로 saved_mos 에 없으므로 재알림 없음)
+    # outbox HTTP 전송은 응답 반환 후 수행한다. 네트워크 장애면 FAILED로 남고
+    # 주기 작업이 재시도한다. 같은 MO는 UNIQUE(mo_id)라 중복 알림 행이 생기지 않는다.
     background: BackgroundTask | None = None
-    if saved_mos:
-        try:
-            from app.services.notify import deliver_n8n, prepare_n8n_delivery
+    if delivery_ids:
+        from app.services.notify import process_n8n_outbox
 
-            n8n_url, n8n_payloads = prepare_n8n_delivery(db, saved_mos)
-            if n8n_url and n8n_payloads:
-                background = BackgroundTask(deliver_n8n, n8n_url, n8n_payloads)
-        except Exception:  # noqa: BLE001
-            log.exception("n8n 알림 준비 중 예외 — 무시하고 success 반환")
+        background = BackgroundTask(process_n8n_outbox, db)
 
     return JSONResponse(
         {"code": "10000", "message": "success"},

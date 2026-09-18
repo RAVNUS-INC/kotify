@@ -282,6 +282,7 @@ class MoItem:
     postback_id: str | None = None
     postback_data: str | None = None
     mo_recv_dt: str = ""
+    is_rcs: bool = False
 
     @staticmethod
     def from_dict(d: dict) -> MoItem:
@@ -300,6 +301,7 @@ class MoItem:
                 postback_id=d.get("postbackId"),
                 postback_data=d.get("postbackData"),
                 mo_recv_dt=d.get("moRecvDt", ""),
+                is_rcs=True,
             )
         # SMS/MMS MO (§5.2)
         content_lst = d.get("contentInfoLst")
@@ -315,6 +317,7 @@ class MoItem:
             content_info=content_lst if isinstance(content_lst, list) else None,
             product_code=d.get("productCode", ""),
             mo_recv_dt=d.get("moRecvDt", ""),
+            is_rcs=False,
         )
 
 

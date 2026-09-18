@@ -70,7 +70,22 @@ describe('ComposeForm 전송 방식 기본값', () => {
     vi.mocked(apiSend).mockImplementation(
       async (url) =>
         new Response(
-          JSON.stringify(url === '/api/campaigns' ? { data: { id: 'c1' } } : { data: {} }),
+          JSON.stringify(
+            url === '/api/campaigns'
+              ? { data: { id: 'c1' } }
+              : {
+                  data: {
+                    byteLength: 9,
+                    maxBytes: 2000,
+                    valid: true,
+                    error: null,
+                    recipientCount: 1,
+                    channel: 'SMS',
+                    costMin: 17,
+                    costMax: 17,
+                  },
+                },
+          ),
         ),
     );
   });
@@ -105,6 +120,7 @@ describe('ComposeForm 전송 방식 기본값', () => {
 
     await user.type(screen.getByRole('textbox', { name: /수신자/ }), '01012345678{Enter}');
     await user.type(screen.getByRole('textbox', { name: /메시지/ }), '안내 문자');
+    await waitFor(() => expect(screen.getByText(/예상 1건/)).toBeInTheDocument());
     await user.click(screen.getByRole('checkbox', { name: /발송됨을 확인/ }));
     await user.click(screen.getByRole('button', { name: '발송' }));
 

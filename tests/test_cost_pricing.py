@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+import pytest
+
 from app.msghub.codes import calculate_cost, estimate_cost
 
 # ── calculate_cost: 실청구 단가 (리포트 기반) ────────────────────────────────
@@ -17,6 +19,8 @@ from app.msghub.codes import calculate_cost, estimate_cost
 def test_rcs_short_oneway_costs_17():
     """단방향 RCS 단문 성공 = (RCS,SMS) = 17원 (U+ 공식 18.7원 VAT포함)."""
     assert calculate_cost("RCS", "SMS", True) == 17
+    assert calculate_cost("RCS", "RSMS", True) == 17
+    assert calculate_cost("RCS", "RSMS", False) == 0
 
 
 def test_sms_fallback_costs_9():
@@ -29,6 +33,20 @@ def test_rcs_image_template_costs_40():
 
 def test_mms_costs_85():
     assert calculate_cost("MMS", "MMS", True) == 85
+
+
+@pytest.mark.parametrize("channel", ["SMS", "LMS", "MMS"])
+def test_lms_uses_billing_product_for_text_transport(channel):
+    """LMS 결과의 ch는 MMS/SMS일 수 있으나 과금 상품은 장문(27원)이다."""
+    assert calculate_cost(channel, "LMS", True) == 27
+    assert calculate_cost(channel, "LMS", False) == 0
+
+
+@pytest.mark.parametrize("channel,product", [
+    ("UNKNOWN", "LMS"), ("SMS", "CHAT"), ("MMS", "ITMPL"), ("SMS", "RSMS"), ("RCS", "RLMS"),
+])
+def test_unknown_transport_product_pair_is_not_guessed(channel, product):
+    assert calculate_cost(channel, product, True) == 0
 
 
 def test_failed_or_unknown_costs_0():

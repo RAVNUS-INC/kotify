@@ -282,6 +282,8 @@ class Attachment(Base):
         Integer, ForeignKey("campaigns.id"), nullable=True
     )
     msghub_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 채널별 등록 파일. 기존 msghub_file_id는 MMS 파일 ID로 유지한다.
+    msghub_rcs_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     stored_filename: Mapped[str] = mapped_column(Text, nullable=False)
     content_blob: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -293,7 +295,8 @@ class Attachment(Base):
     )
     uploaded_at: Mapped[str] = mapped_column(Text, nullable=False)
     file_expires_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # mms 또는 rcs
+    rcs_file_expires_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # mms 또는 mms+rcs
     channel: Mapped[str | None] = mapped_column(Text, nullable=True, default="mms")
 
     campaign: Mapped[Campaign | None] = relationship(
@@ -344,6 +347,32 @@ class MoMessage(Base):
     __table_args__ = (
         Index("idx_mo_messages_mo_number", "mo_number"),
         Index("idx_mo_messages_received_at", "received_at"),
+    )
+
+
+class NotificationDelivery(Base):
+    """고객 회신 알림의 내구성 있는 n8n 전송 대기열."""
+
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("mo_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    # PENDING | SENDING | DELIVERED | FAILED
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="PENDING")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[str] = mapped_column(Text, nullable=False)
+    locked_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    delivered_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("mo_id", name="uq_notification_deliveries_mo_id"),
+        Index("idx_notification_deliveries_due", "status", "next_attempt_at"),
     )
 
 

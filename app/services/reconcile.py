@@ -109,6 +109,7 @@ async def reconcile_pending_messages(
             Message.cli_key.is_not(None),
             MsghubRequest.sent_at < cutoff,
         )
+        .order_by(MsghubRequest.sent_at.asc(), Message.id.asc())
         .limit(max_messages)
     ).all()
     settled = await _query_and_apply(db, client, pending)

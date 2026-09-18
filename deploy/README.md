@@ -129,7 +129,7 @@ cat /var/lib/kotify/master.key
 1. `https://sms.example.com/send/new` 접속
 2. 본인 번호 1개 입력
 3. 짧은 텍스트 입력 (예: "테스트 발송입니다.")
-4. 미리보기 → 예상 비용 / 채널(RCS 양방향 → SMS fallback) 확인
+4. 미리보기 → 예상 비용 / 채널(RCS 단방향 SMS형 17원 → SMS fallback 9원, VAT 별도 앱 추정값) 확인
 5. 발송
 6. 본인 휴대폰에서 RCS 또는 SMS 수신 확인 (RCS 미지원 단말이면 SMS fallback 경로)
 7. `/campaigns/{id}`에서 상태 `COMPLETED` + 채널별 결과 확인
@@ -222,7 +222,7 @@ sqlite3 /var/lib/kotify/sms.db ".tables"
   `{ "lastReadMessageId": 42 }` JSON을 요구하며 구 프런트엔드의 본문 없는 요청은 HTTP 422다.
   배포 후 기존에 열어 둔 대화방 탭도 새로고침해 새 클라이언트를 로드한다. API의 페이지
   metadata와 상세 `lastInboundMessageId` 역시 새 프런트엔드와 함께 적용한다.
-- 기존 서비스·헬스체크 확인에 더해 Alembic revision이 `0019`인지, 대화 조회 응답에
+- 기존 서비스·헬스체크 확인에 더해 읽음 스키마 `0019` 이상이 적용되었는지, 대화 조회 응답에
   `lastInboundMessageId`와 목록 metadata가 있는지 확인한다. 읽음은 사용자별이 아닌 고객 번호별
   팀 공유 상태이며 읽음 요청은 화면에서 실제 관측한 수신 ID만 전송한다.
 - 배포 실패 시 기존 worker의 이전 코드·pre-migrate DB 백업 동시 복원 절차를 따른다.
@@ -232,6 +232,74 @@ sqlite3 /var/lib/kotify/sms.db ".tables"
 
 현재 MO 삭제 경로가 없다는 전제로 수신 ID를 읽음 경계에 사용한다. 향후 MO 삭제·보관을
 도입할 때에는 SQLite ID 재사용 방지 순번도 함께 설계해야 한다.
+
+### 비용 계산·기록 보정 0020·0022 및 채널별 첨부 0021 배포·호환
+
+이 변경은 서버 기준 비용 미리보기와 성공 리포트의 단가 누락 수정, 데이터 마이그레이션
+`0020_report_product_cost.py`, `0021_channel_attachment_ids.py`,
+`0022_chat_session_cost_cap.py`를 포함한다. 아래는 배포 절차이며 이 작업에서 운영 DB를
+수정하거나 실제 발송·운영 배포를 수행했다는 기록이 아니다.
+
+- 기존 업데이트 worker의 pre-migrate DB 백업을 확보한 뒤 `alembic upgrade head`를 적용한다.
+  `0020`은 `0019` 다음 revision이며 스키마를 변경하지 않는다. `0021`은 `attachments`에
+  RCS 파일 ID와 RCS 만료 시각을 추가한다. 기존 행은 두 값이 `NULL`이므로 일반 MMS에는
+  계속 쓸 수 있지만 RCS 이미지 발송에는 이미지를 다시 업로드해야 한다. `0022`는 스키마를
+  바꾸지 않고 기존 성공 CHAT 비용과 관련 캠페인 합계를 세션 상한에 맞게 보정한다.
+- 과거 메시지 중 `status=DONE`, `result_code=10000`, `cost=0`이며
+  `(channel, product_code)`가 `(RCS, RSMS)`인 행은 17원,
+  `(SMS, LMS)` 또는 `(MMS, LMS)`인 행은 27원으로 보정한다. 해당 캠페인의 `total_cost`만
+  전체 메시지 비용 합계로 재계산한다. 실패·미확정·다른 상품·이미 0원 이외 비용이 기록된
+  메시지는 그대로 보존하며 공급자에게 재발송하거나 리포트를 다시 요청하지 않는다.
+- `0022`는 동일 `(caller_number, to_number)` 쌍의 성공 `RCS/CHAT`을 발송 시각순으로
+  묶어 첫 성공부터 24시간 안의 첫 10건만 8원, 이후를 0원으로 보정한다. 24시간 경계의
+  다음 성공부터 새 세션을 시작한다. 실패 CHAT·대체 SMS·다른 상품은 바꾸지 않는다.
+- 백엔드와 Next.js를 같은 릴리스로 빌드·재시작하고 기존 발송 화면도 새로고침한다.
+  새 화면은 `POST /api/campaigns/preview`에 의존한다. 구 백엔드와 섞이면 견적을 확인할 수
+  없어 발송 버튼이 비활성 상태로 남는다.
+- 배포 후 Alembic revision `0023`(현재 head), `attachments.msghub_rcs_file_id`와
+  `attachments.rcs_file_expires_at`, 두 서비스의 상태·헬스체크를 확인한다. 발송 화면에서
+  수신자 1명 기준 RCS 단문 9~17원, 일반 SMS 9원, 장문 27원, 이미지 85원과 VAT 별도 표시를
+  확인한다. `가` 45자/46자 경계는 90/92바이트이고, 미지원 문자나 2000바이트 초과 본문은
+  발송이 차단되어야 한다. 견적 조회만으로 공급자 발송이 일어나지 않는다.
+- 단가 누락 보정 대상의 0원 행이 남지 않았는지 확인하고, 테스트 데이터 또는 실제 대화에서
+  한 세션의 성공 CHAT 11건 이상이 있다면 첫 10건 합계 80원·11번째 이후 0원 및 각 캠페인
+  합계를 확인한다. 이 금액은 VAT 별도 앱 추정값이며 공급자 확정 청구서와 별도로 대조한다.
+- `0020`·`0022` 재실행은 같은 결과를 내며, downgrade도 보정된 비용을 보존한다.
+  이전 데이터까지 복원해야 하는 롤백은 기존 worker의 코드·pre-migrate DB 백업 복원 절차를
+  따른다. 백업 이후 새 발송·회신 데이터의 복원 범위를 함께 확인하고, 비용을 일괄 0원으로
+  되돌리는 SQL은 사용하지 않는다.
+- 설정의 msghub 환경은 `production` 또는 `qa`만 허용한다. 기존 DB에 `staging`이나
+  `sandbox`가 있으면 배포 전에 올바른 값으로 고친다. 기동 후 로그에서 60초 주기의
+  `/client/v1/healthCheck` 인증·네트워크 오류가 반복되지 않는지 확인한다.
+
+### 회신 Telegram 알림 outbox 0023 배포·확인
+
+회신 알림 안정화에는 `0022_chat_session_cost_cap.py` 다음 revision인
+`0023_notification_delivery_outbox.py`가 포함된다. 이 작업에서 운영 마이그레이션이나
+실제 Telegram 발송은 수행하지 않았다.
+
+- 기존 업데이트 worker의 pre-migrate 백업 후 `alembic upgrade head`를 적용한다.
+  `notification_deliveries` 테이블과 상태·다음 시도 시각 인덱스가 생성된다. MO와 알림 행은
+  같은 트랜잭션에 저장되고 MO 하나당 알림 행 하나만 허용된다.
+- n8n 응답은 2xx만 성공이다. 3xx·4xx·5xx와 연결 오류는 실패로 기록한다. 일시 오류는 한 처리
+  안에서 최대 3회 시도하며, 실패 행은 지수 간격으로 다시 예약된다. 앱의 60초 주기 작업이
+  재시도하고 5분 넘게 `SENDING`에 남은 행도 복구한다.
+- 알림 대상은 같은 고객에게 실제 발송된 마지막 담당자다. 실패·취소·발송 전 예약은 제외하고
+  공급자 완료 시각 또는 요청 시각으로 순서를 정한다. RCS `chatbotId`가 대표번호와 다르면
+  활성 발신번호의 `rcs_chatbot_id`에 등록된 별칭을 대표번호로 변환한다.
+- 배포 후 `/settings`의 **n8n 테스트**를 누르면 로그인한 사용자 정보를 `lastSender`로 넣어
+  실제 Telegram 라우팅을 요청한다. HTTP 2xx는 n8n 웹훅 접수 성공이므로, 화면 메시지와 함께
+  n8n 실행 기록 및 해당 사용자의 Telegram 수신도 확인한다. n8n/사내 주소록에 로그인 이메일의
+  계정명과 Telegram chat ID가 연결되어 있어야 한다.
+- 큐 상태는 페이로드를 출력하지 않고 다음처럼 집계한다.
+
+  ```bash
+  sqlite3 /var/lib/kotify/sms.db \
+    "SELECT status, COUNT(*) FROM notification_deliveries GROUP BY status;"
+  ```
+
+  정상 처리 후 새 행은 `DELIVERED`여야 한다. `FAILED`가 계속 쌓이면
+  `/var/log/kotify/stderr.log`의 `n8n 알림 outbox 실패`와 n8n 실행 기록을 함께 확인한다.
 
 ### CT SSH 재로딩 실패
 

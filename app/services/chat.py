@@ -22,7 +22,6 @@ from app.msghub.codes import (
     REPLY_ID_SAFETY_MARGIN_MINUTES,
     REPLY_ID_VALID_HOURS,
     SUCCESS_CODE,
-    chat_session_cost,
 )
 from app.services.compose import (
     dispatch_campaign,
@@ -49,7 +48,7 @@ class ChatMessage:
     channel: str | None = None        # OUT 전용: RCS/SMS/LMS/MMS
     cost: int | None = None           # OUT 전용: 원
     telco: str | None = None          # IN 전용
-    product_code: str | None = None   # IN 전용 (MORCS/SMSMO 등)
+    product_code: str | None = None   # OUT: 과금 상품, IN: MORCS/SMSMO 등
     mo_id: int | None = None
     campaign_id: int | None = None
     msg_id: int | None = None
@@ -515,6 +514,7 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
                     msg.status,
                 ),
                 cost=msg.cost,
+                product_code=msg.product_code,
                 campaign_id=campaign.id,
                 msg_id=msg.id,
                 sender_name=sender_display_name(author),
@@ -548,7 +548,7 @@ def chat_session_summary(messages: list[ChatMessage]) -> dict:
     """대화방의 최근 24h 세션 과금 요약.
 
     RCS 양방향(CHAT)은 (챗봇, 고객) 쌍의 24시간 세션당 최대 80원(10건) 상한.
-    Message.cost는 건당 8원으로 저장되지만 실 청구는 세션 단위로 capped된다.
+    Message.cost에는 세션 상한을 배분한 금액(첫 10건 8원, 이후 0원)이 저장된다.
 
     Returns:
         {
@@ -565,8 +565,14 @@ def chat_session_summary(messages: list[ChatMessage]) -> dict:
 
     out_count = 0
     raw_total = 0
+    billed_total = 0
     for m in messages:
-        if m.direction != "OUT":
+        if (
+            m.direction != "OUT"
+            or m.delivery != "sent"
+            or m.channel != "RCS"
+            or m.product_code != "CHAT"
+        ):
             continue
         try:
             ts = datetime.fromisoformat(m.timestamp)
@@ -576,14 +582,14 @@ def chat_session_summary(messages: list[ChatMessage]) -> dict:
             ts = ts.replace(tzinfo=UTC)
         if ts >= window_start:
             out_count += 1
-            raw_total += m.cost or 0
+            raw_total += 8
+            billed_total += m.cost or 0
 
-    billed = chat_session_cost(out_count)
     return {
         "recent_out_count": out_count,
-        "session_billed": billed,
+        "session_billed": billed_total,
         "session_raw": raw_total,
-        "capped": out_count >= CHAT_SESSION_MAX_UNITS,
+        "capped": billed_total < raw_total,
         "cap_krw": CHAT_SESSION_CAP_KRW,
         "max_units": CHAT_SESSION_MAX_UNITS,
         "window_hours": CHAT_SESSION_WINDOW_HOURS,

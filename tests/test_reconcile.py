@@ -306,7 +306,12 @@ def test_reconcile_queries_request_failure_without_result_only_once(db_session, 
 
     assert len(client.calls) == 1
     msg = _message(db_session, "c-z-0-0-fb")
-    assert (msg.status, msg.result_code, msg.result_desc) == ("FAILED", no_result, "응답 대기 시간 초과")
+    expected_desc = (
+        "리포트 조회 가능 기간을 초과했습니다."
+        if no_result == "OVER_DATE"
+        else "공급자에서 cliKey를 찾을 수 없습니다."
+    )
+    assert (msg.status, msg.result_code, msg.result_desc) == ("FAILED", no_result, expected_desc)
     assert (campaign.state, campaign.fail_count) == ("FAILED", 1)
 
 
@@ -348,15 +353,18 @@ def test_reconcile_queries_request_failures_apart_from_pending(db_session, sampl
     ]
 
 
-def test_reconcile_leaves_pending_message_with_invalid_key_unmarked(db_session, sample_user):
-    """미완료 행의 INVALID_KEY 는 남기지 않는다 — 접수 응답을 받은 행이라 조회 발송일(reqDt)이 어긋났을 수 있다."""
-    _make_pending(db_session, sample_user.sub, "2026-01-01T00:00:00+00:00", cli_key="c-q-0")
+def test_reconcile_closes_pending_message_with_invalid_key(db_session, sample_user):
+    """미완료 행의 INVALID_KEY도 종료해 재조정 큐를 점유하지 않는다."""
+    campaign, _ = _make_pending(
+        db_session, sample_user.sub, "2026-01-01T00:00:00+00:00", cli_key="c-q-0"
+    )
     client = _FakeClient([{"cliKey": "c-q-0", "status": "INVALID_KEY"}])
 
-    asyncio.run(reconcile_pending_messages(db_session, client))
+    assert asyncio.run(reconcile_pending_messages(db_session, client)) == 1
 
     msg = _message(db_session, "c-q-0")
-    assert (msg.status, msg.result_code) == ("REG", None)
+    assert (msg.status, msg.result_code) == ("FAILED", "INVALID_KEY")
+    assert (campaign.state, campaign.fail_count, campaign.pending_count) == ("FAILED", 1, 0)
 
 
 # ── 양방향 답장(CHAT) 실패를 재조정이 먼저 확정 ─────────────────────────────────────

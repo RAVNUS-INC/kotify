@@ -72,7 +72,7 @@ export async function testSetupKeycloak(keycloakIssuer: string): Promise<{
 export async function testSetupMsghub(input: {
   msghubApiKey: string;
   msghubApiPwd: string;
-  msghubEnv?: string;
+  msghubEnv?: 'production' | 'qa';
 }): Promise<{ ok: true; env: string }> {
   const res = await apiSend('/api/setup/test-msghub', {
     method: 'POST',
@@ -93,7 +93,7 @@ export type CompleteSetupInput = {
   keycloakClientSecret: string;
   msghubApiKey: string;
   msghubApiPwd: string;
-  msghubEnv?: string;
+  msghubEnv?: 'production' | 'qa';
   msghubBrandId?: string;
   msghubChatbotId?: string;
   appPublicUrl?: string;
