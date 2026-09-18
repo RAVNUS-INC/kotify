@@ -1,4 +1,4 @@
-export type Role = 'owner' | 'admin' | 'operator' | 'viewer';
+export type Role = 'owner' | 'admin' | 'operator' | 'sender' | 'viewer';
 
 export type Org = {
   name: string;

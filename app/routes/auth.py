@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from urllib.parse import urlencode
 
@@ -9,7 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.auth.oidc import get_oauth_client, parse_user_from_claims
+from app.auth.oidc import diagnose_role_claims, get_oauth_client, parse_user_from_claims
 from app.db import get_db
 from app.models import User
 from app.security.csrf import get_csrf_token, verify_csrf
@@ -115,13 +116,19 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     except Exception:
         return RedirectResponse("/auth/login?error=callback_failed", status_code=303)
 
-    # ID 토큰에서 사용자 정보 추출
-    claims = token.get("userinfo") or token.get("id_token") or {}
+    # Authlib가 검증한 ID 토큰 클레임만 사용한다. 원문 JWT는 파싱하지 않는다.
+    claims = token.get("userinfo")
+    claims_source = "authlib_verified_id_token"
+    if not claims and token.get("id_token"):
+        return RedirectResponse("/auth/login?error=invalid_claims", status_code=303)
     if not claims:
         try:
             claims = await keycloak.userinfo(token=token)
+            claims_source = "userinfo_endpoint"
         except Exception:
             claims = {}
+    if not isinstance(claims, Mapping):
+        return RedirectResponse("/auth/login?error=invalid_claims", status_code=303)
 
     user_info = parse_user_from_claims(claims)
     sub = user_info["sub"]
@@ -139,9 +146,14 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     store = SettingsStore(db)
     first_admin_email = store.get("setup.first_admin_email", "")
     pending_first_admin = store.get("setup.pending_first_admin", "false") == "true"
+    role_diagnostics = diagnose_role_claims(claims, store.get("keycloak.client_id"))
+    role_diagnostics["claims_source"] = claims_source
+    role_diagnostics["parsed_roles"] = list(user_info["roles"])
+    role_diagnostics["first_admin_policy"] = "none"
 
     roles = list(user_info["roles"])
     if first_admin_email and user_info["email"] == first_admin_email:
+        role_diagnostics["first_admin_policy"] = "email_anchor"
         # 영구 admin anchor — 매 로그인마다 admin 보장
         if "admin" not in roles:
             roles = ["admin"] + roles
@@ -161,6 +173,7 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
                 },
             )
     elif pending_first_admin:
+        role_diagnostics["first_admin_policy"] = "pending_first_login"
         # first_admin_email 미설정 + 첫 로그인 → 하위 호환 admin 승격
         if "admin" not in roles:
             roles = ["admin"] + roles
@@ -170,6 +183,7 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     now = _now_iso()
     # #21: 매 로그인마다 Keycloak 역할로 덮어쓰기 (역할 회수 가능)
     roles_json = json.dumps(sorted(set(roles)), ensure_ascii=False)
+    role_diagnostics["final_roles"] = sorted(set(roles))
 
     # users 테이블 upsert.
     # display_name 은 format_display_name() 결과 (성+이름/CN/email 우선순위).
@@ -206,7 +220,7 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
         db,
         actor_sub=sub,
         action=audit.LOGIN,
-        detail={"email": user_info["email"]},
+        detail={"email": user_info["email"], "role_diagnostics": role_diagnostics},
         ip=ip,
     )
     db.commit()
@@ -222,6 +236,7 @@ async def callback(request: Request, db: Session = Depends(get_db)) -> RedirectR
     request.session["user_name"] = user_info["name"]
     request.session["user_display"] = user_info.get("display_name") or user_info["name"]
     request.session["user_roles"] = sorted(set(roles))  # list 직접 저장
+    request.session["role_diagnostics_v1"] = True
     # I8: id_token 저장 — logout 시 end_session id_token_hint로 사용
     id_token = token.get("id_token")
     if id_token:

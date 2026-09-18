@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -13,11 +14,14 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.auth.oidc import role_diagnostic_summary
 from app.db import get_db
 from app.models import User
 
 if TYPE_CHECKING:
     pass
+
+_auth_log = logging.getLogger("uvicorn.error")
 
 
 def _now_iso() -> str:
@@ -92,6 +96,23 @@ def get_current_user(
         )
         db.add(user)
     else:
+        existing_roles = parse_user_roles(user)
+        # 기존 세션이 새 로그인 결과를 덮는지 관찰한다. 권한 동작은 변경하지 않는다.
+        roles_differ = existing_roles != roles
+        if isinstance(existing_roles, list) and isinstance(roles, list) and all(
+            isinstance(role, str) for role in existing_roles + roles
+        ):
+            roles_differ = set(existing_roles) != set(roles)
+        if roles_differ:
+            _auth_log.warning(
+                "auth_session_role_mismatch %s",
+                json.dumps({
+                    "db_roles": role_diagnostic_summary(existing_roles),
+                    "session_roles": role_diagnostic_summary(roles),
+                    "session_has_role_diagnostics": request.session.get("role_diagnostics_v1")
+                    is True,
+                }, sort_keys=True),
+            )
         user.email = email
         user.name = name
         user.display_name = display_name

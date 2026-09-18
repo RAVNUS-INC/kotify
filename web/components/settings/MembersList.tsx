@@ -10,6 +10,7 @@ const ROLE_LABEL: Record<Member['role'], { label: string; kind: 'brand' | 'neutr
   owner: { label: 'Owner', kind: 'brand' },
   admin: { label: 'Admin', kind: 'brand' },
   operator: { label: 'Operator', kind: 'neutral' },
+  sender: { label: 'Sender', kind: 'neutral' },
   viewer: { label: 'Viewer', kind: 'neutral' },
 };
 
