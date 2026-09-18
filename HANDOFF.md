@@ -18,7 +18,8 @@
 - Keycloak 대조: 테스트 계정에는 그룹에서 상속한 해당 클라이언트의 `sender`가 실제 존재한다. 연결된 공용 `roles` scope의 `client roles` 매퍼는 Access Token 포함만 켜져 있고 ID Token 포함은 꺼져 있었다. Kotify 전용 scope에는 매퍼가 없었다.
 - Keycloak 수정: 사용자 승인 후 Kotify 전용 `kotify-client-roles-id-token` 매퍼를 생성했다. 해당 클라이언트 역할만 `resource_access.kotify.roles`의 다중 문자열 값으로 ID 토큰에 넣고, 다른 토큰 출력 옵션은 끈 상태로 저장·재조회했다. 기존 그룹·역할 할당과 공용 scope는 변경하지 않았다.
 - 운영 재검증 완료: 05:40 UTC 새 로그인에서 검증된 ID 토큰의 해당 클라이언트 역할 배열에 `sender`, 파서 결과에 `sender`, 최종 역할과 현재 DB 값에 `admin`·`sender`가 확인됐고 `viewer_fallback_used=false`였다. 그룹 역할이 ID 토큰에서 누락되는 문제를 해결했다. 실제 문자 발송은 수행하지 않았다.
-- 남은 사용자 조치: 기존 `viewer` 세션을 사용하는 다른 계정은 `/api/auth/login`으로 재인증해야 한다. 최초 신고 계정의 수정 후 실제 로그인은 아직 검증하지 않았으며, 테스트 계정으로 그룹 역할 전달 경로를 검증했다. 상세 설정·조회 절차는 `deploy/README.md`를 따른다.
+- 최초 신고 계정 검증 완료: 05:41 UTC 실제 로그인에서도 ID 토큰의 해당 클라이언트 역할, 파싱 결과, 최종 역할과 현재 DB 값 모두 `sender`로 확인했다. 최초 관리자 보정은 적용되지 않았고 `viewer_fallback_used=false`였다. 두 계정의 그룹 상속 역할 전달과 적용을 운영에서 검증해 이번 문제를 해결했다.
+- 운영 참고: 다른 기존 `viewer` 세션은 `/api/auth/login`으로 재인증하면 새 역할 매핑을 받는다. 상세 설정·조회 절차는 `deploy/README.md`를 따른다.
 
 ---
 
