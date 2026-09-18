@@ -7,6 +7,11 @@
 > 요금제: 후불
 > RCS 브랜드: 등록 완료
 
+> **현재 구현 안내 (2026-09-18):** 아래는 초기 설계 기록이다. 단문 공지는 단방향 RCS
+> 17원 / SMS fallback 9원, 이미지는 `RPMSMMX001` RCS MMS / MMS fallback 모두 85원이며
+> VAT 별도 앱 추정값이다. 아래의 양방향 8원·이미지 40원 및 절감 가정은 현재 공지 발송에
+> 적용하지 않는다. 현재 비용·검증·API 계약은 [`SPEC.md`](./SPEC.md)의 §7·§8을 따른다.
+
 ---
 
 ## 목차
@@ -143,9 +148,9 @@ msghub는 모든 수신자에 `cliKey`(클라이언트 고유키)를 필수로 �
 |-----|--------|-----------|--------|
 | RCS 단방향 | POST | `/rcs/v1.1` | **api-send** |
 | RCS 양방향 | POST | `/rcs/bi/v1.1` | **api-send** |
-| SMS | POST | `/msg/v1/sms` | api |
-| LMS/MMS (JSON) | POST | `/msg/v1/mms` | api |
-| LMS/MMS (multipart) | POST | `/msg/v1/mms` | api |
+| SMS | POST | `/xms/sms/v1` | **api-send** |
+| LMS/MMS (JSON) | POST | `/xms/mms/v1` | **api-send** |
+| LMS/MMS (multipart) | POST | `/xms/mms/file/v1` | **api-send** |
 
 ### 4.3 파일 관리
 
@@ -553,10 +558,10 @@ RCS fallback이 아닌, 직접 SMS/LMS/MMS를 보내야 할 경우 (예: RCS 브
 ### 7.1 SMS 직접 발송
 
 ```
-POST /msg/v1/sms
+POST /xms/sms/v1
 Authorization: Bearer {token}
 Content-Type: application/json
-Host: api.msghub.uplus.co.kr
+Host: api-send.msghub.uplus.co.kr
 ```
 
 | 필드 | 타입 | 필수 | 설명 |
@@ -577,10 +582,10 @@ Host: api.msghub.uplus.co.kr
 ### 7.2 LMS/MMS 직접 발송 (JSON)
 
 ```
-POST /msg/v1/mms
+POST /xms/mms/v1
 Authorization: Bearer {token}
 Content-Type: application/json
-Host: api.msghub.uplus.co.kr
+Host: api-send.msghub.uplus.co.kr
 ```
 
 | 필드 | 타입 | 필수 | 설명 |
@@ -601,10 +606,10 @@ Host: api.msghub.uplus.co.kr
 ### 7.3 MMS 직접 발송 (multipart)
 
 ```
-POST /msg/v1/mms
+POST /xms/mms/file/v1
 Authorization: Bearer {token}
 Content-Type: multipart/form-data
-Host: api.msghub.uplus.co.kr
+Host: api-send.msghub.uplus.co.kr
 ```
 
 | 파트 | 타입 | 필수 | 설명 |
@@ -1179,6 +1184,11 @@ def calculate_message_cost(message: Message) -> int:
     }
     return mapping.get((message.channel, message.product_code), 0)
 ```
+
+현재 구현은 위 건당 단가를 저장하기 전에 성공한 `(RCS, CHAT)`을 동일 챗봇·고객의
+24시간 세션으로 묶는다. 시간순 첫 10건만 8원이고 이후는 0원이며, 리포트가 늦게
+도착하면 해당 대화의 성공 CHAT 전체와 관련 캠페인 합계를 다시 계산한다. 실패 CHAT과
+대체 SMS는 각각 0원·9원으로 처리한다.
 
 ### 12.4 캠페인 비용 집계
 

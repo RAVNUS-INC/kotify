@@ -164,8 +164,8 @@ curl -X GET "https://api.msghub.uplus.co.kr/msg/v1/template/get?tmpltId=TPL1IY6G
 ## 이 앱에서의 활용 포인트 (참고)
 
 현재 이 앱은 **템플릿 기반 발송을 쓰지 않고** 직접 발송 API를 호출한다:
-- `/msg/v1/sms` — SMS
-- `/msg/v1/mms` — LMS/MMS
+- `/xms/sms/v1` — SMS
+- `/xms/mms/v1` — LMS/MMS
 - `/rcs/v1.1` — RCS 단방향 (장문/이미지)
 - `/rcs/bi/v1.1` — RCS 양방향 CHAT
 

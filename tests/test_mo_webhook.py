@@ -20,8 +20,14 @@ def _setup_token(db):
     db.commit()
 
 
-def _add_caller(db, number: str):
-    db.add(Caller(number=number, label="발신", active=1, created_at="2026-01-01T00:00:00+00:00"))
+def _add_caller(db, number: str, *, rcs_chatbot_id: str | None = None):
+    db.add(Caller(
+        number=number,
+        label="발신",
+        active=1,
+        rcs_chatbot_id=rcs_chatbot_id,
+        created_at="2026-01-01T00:00:00+00:00",
+    ))
     db.commit()
 
 
@@ -94,3 +100,42 @@ def test_receive_mo_accepts_registered_callback_format_insensitive(db_session):
     rows = db_session.execute(select(MoMessage)).scalars().all()
     assert len(rows) == 1
     assert rows[0].mo_msg == "정상"
+
+
+def test_receive_mo_uses_official_number_semantics(db_session):
+    """공식 SMS/MMS MO는 moNumber=우리 수신번호, moCallback=고객 번호다."""
+    _setup_token(db_session)
+    _add_caller(db_session, "0212345678")
+    body = {"moCnt": 1, "moLst": [{
+        "moKey": "official-1", "moNumber": "02-1234-5678",
+        "moCallback": "010-1111-2222", "moMsg": "공식 형식",
+    }]}
+    resp = asyncio.run(receive_mo("wtok", _mo_request(body), db_session))
+    assert resp.status_code == 200
+    mo = db_session.query(MoMessage).filter_by(mo_key="official-1").one()
+    assert mo.mo_number == "01011112222"
+    assert mo.mo_callback == "0212345678"
+
+
+def test_receive_rcs_mo_accepts_registered_chatbot_alias(db_session):
+    """RCS chatbotId가 번호와 달라도 등록 별칭이면 대표번호로 저장한다."""
+    _setup_token(db_session)
+    _add_caller(
+        db_session,
+        "0212345678",
+        rcs_chatbot_id="CHATBOT_0123",
+    )
+    body = {"rcsBiCnt": 1, "rcsBiLst": [{
+        "msgKey": "rcs-alias-1",
+        "phone": "010-1111-2222",
+        "chatbotId": "CHATBOT_0123",
+        "eventType": "message",
+        "contentInfo": {"textMessage": "RCS 회신"},
+    }]}
+
+    resp = asyncio.run(receive_mo("wtok", _mo_request(body), db_session))
+
+    assert resp.status_code == 200
+    mo = db_session.query(MoMessage).filter_by(mo_key="rcs-alias-1").one()
+    assert mo.mo_number == "01011112222"
+    assert mo.mo_callback == "0212345678"

@@ -32,6 +32,7 @@ from app.services import audit
 from app.services.report import _refresh_campaign_counters, awaiting_record
 from app.util.phone import normalize_phone, parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
+from app.util.time import parse_mixed_ts
 
 if TYPE_CHECKING:
     from app.msghub.client import MsghubClient
@@ -118,6 +119,7 @@ def _norm_to_number(phone: str) -> str:
 
 # 예약 발송 최소 리드타임 (10분)
 RESERVE_MIN_LEAD_SECONDS = 10 * 60
+RESERVE_MAX_AHEAD = 30 * 24 * 60 * 60
 
 # 메시지 유형 → 채널 중립 유형
 _MSG_TYPE_MAP = {"SMS": "short", "LMS": "long", "MMS": "image"}
@@ -144,9 +146,10 @@ _MESSAGEBASE_MAP = {
 
 def _classify_msg_type(content: str, has_attachment: bool) -> str:
     """메시지 내용과 첨부 여부로 채널 중립 유형 결정."""
+    # 이미지가 있어도 본문 인코딩·길이 제한은 동일하다.
+    legacy = classify_message_type(content)
     if has_attachment:
         return "image"
-    legacy = classify_message_type(content)
     return _MSG_TYPE_MAP.get(legacy, "short")
 
 
@@ -173,6 +176,8 @@ def parse_reserve_time(reserve_time_local: str) -> tuple[str, str]:
     if (utc_dt - now_utc).total_seconds() < RESERVE_MIN_LEAD_SECONDS:
         minutes = RESERVE_MIN_LEAD_SECONDS // 60
         raise ValueError(f"예약 시각은 현재로부터 최소 {minutes}분 이후여야 합니다.")
+    if (utc_dt - now_utc).total_seconds() > RESERVE_MAX_AHEAD:
+        raise ValueError("예약 시각은 현재로부터 최대 30일 이내여야 합니다.")
 
     msghub_format = local_dt.strftime("%Y-%m-%d %H:%M")
     return msghub_format, utc_dt.isoformat()
@@ -476,8 +481,24 @@ async def dispatch_campaign(
             raise ValueError("이 첨부 파일은 이미 다른 캠페인에 사용되었습니다.")
         if not attachment.msghub_file_id:
             raise ValueError("첨부 파일이 msghub에 업로드되지 않았습니다.")
-        rcs_file_id = attachment.msghub_file_id
+        # 공급자 컨텐츠는 채널별 fileId가 다르다. 구버전 첨부는 MMS ID만
+        # 있으므로 RCS 발송을 거부해 잘못된 채널 ID를 보내지 않는다.
+        rcs_file_id = attachment.msghub_rcs_file_id
         mms_file_id = attachment.msghub_file_id
+        if send_channel != "sms" and not rcs_file_id:
+            raise ValueError("RCS용 첨부 파일이 등록되지 않았습니다. 이미지를 다시 업로드해주세요.")
+        use_at = parse_mixed_ts(reserve_utc_iso) if reserve_utc_iso else datetime.now(UTC)
+        expiries = [("MMS", attachment.file_expires_at)]
+        if send_channel != "sms":
+            expiries.append(("RCS", attachment.rcs_file_expires_at))
+        for channel_name, expiry in expiries:
+            expires_at = parse_mixed_ts(expiry)
+            if expiry and expires_at is None:
+                raise ValueError(f"{channel_name} 첨부 파일 만료 시각을 확인할 수 없습니다. 다시 업로드해주세요.")
+            if expires_at is not None and use_at is not None and expires_at <= use_at:
+                raise ValueError(
+                    f"{channel_name} 첨부 파일이 발송 시각 전에 만료됩니다. 이미지를 다시 업로드해주세요."
+                )
 
     # 1. 발신번호 검증
     caller = db.execute(

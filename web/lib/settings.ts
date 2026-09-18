@@ -54,7 +54,8 @@ export type ProviderPatchInput = Partial<
 >;
 
 /**
- * n8n 알림 테스트 — 입력한(또는 저장된) URL 로 샘플 페이로드 1건 전송.
+ * 회신 알림 테스트 — 입력한(또는 저장된) URL 로 현재 로그인 사용자를
+ * lastSender로 넣은 샘플 1건을 보내 실제 Telegram 라우팅을 요청한다.
  * url 미지정 시 서버가 저장값을 사용. 실패 시 throw.
  */
 export async function testN8nNotifyClient(

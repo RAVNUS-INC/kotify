@@ -15,6 +15,7 @@ import {
   Radio,
 } from '@/components/ui';
 import type { UploadedAttachment } from '@/lib/campaigns-client';
+import { previewCampaignClient, type CampaignPreview } from '@/lib/campaign-preview';
 import { apiSend } from '@/lib/csrf-client';
 import {
   lookupHiworks,
@@ -30,37 +31,44 @@ type SendChannel = 'rcs' | 'sms';
 
 type Sender = { value: string; label: string };
 
-const SMS_BYTES = 90;
-const LMS_BYTES = 2000;
-
+/**
+ * Compatibility helper for callers that used the old synchronous estimate.
+ * ComposeForm itself uses the server preview below, because browsers do not
+ * provide the server's EUC-KR encoder. Keep this helper deliberately small and
+ * deterministic for existing component consumers and unit tests.
+ */
 export function computeEstimate(
   message: string,
   recipientCount: number,
   hasAttachment = false,
-  sendChannel: 'rcs' | 'sms' = 'rcs',
+  sendChannel: SendChannel = 'rcs',
 ) {
-  // 단가: U+ msghub 공식(VAT 별도, 백엔드 PRICE_TABLE 과 일치).
-  // 채널 판정은 백엔드 _classify_msg_type 와 동일하게 — 첨부(이미지)가 있으면
-  // MMS, 아니면 본문 바이트로 단문/장문. 보수적으로 채널 단가를 표시한다.
-  // 단문만 전송 방식에 따라 갈린다: RCS 17 / 일반 SMS 9. 장문(27)·이미지(85)는 동일.
+  // Preserve the legacy helper's UTF-8 result for external callers. The form
+  // never uses this value for sending; it uses previewCampaignClient instead.
   const bytes = new TextEncoder().encode(message).length;
   let channel: 'SMS' | 'LMS' | 'MMS' = 'SMS';
-  let perUnit = sendChannel === 'sms' ? 9 : 17; // 단문: 일반 SMS 9 / RCS 17
-  if (hasAttachment) {
+  let perUnit = sendChannel === 'sms' ? 9 : 17;
+  if (hasAttachment || bytes > 2000) {
     channel = 'MMS';
-    perUnit = 85; // 이미지(첨부): RCS MMS형 RPMSMMX001 = productCode MMS = 85
-  } else if (bytes > LMS_BYTES) {
-    channel = 'MMS';
-    perUnit = 85; // 초장문(>2000B)
-  } else if (bytes > SMS_BYTES) {
+    perUnit = 85;
+  } else if (bytes > 90) {
     channel = 'LMS';
-    perUnit = 27; // 장문: RCS LMS = LMS fallback = 27
+    perUnit = 27;
   }
-  const cost = recipientCount * perUnit;
-  const bytesState: 'warn' | 'err' | undefined =
-    bytes > LMS_BYTES ? 'err' : bytes > SMS_BYTES ? 'warn' : undefined;
-  return { bytes, channel, perUnit, cost, bytesState };
+  return {
+    bytes,
+    channel,
+    perUnit,
+    cost: recipientCount * perUnit,
+    bytesState: bytes > 2000 ? ('err' as const) : bytes > 90 ? ('warn' as const) : undefined,
+  };
 }
+
+type PreviewState = {
+  key: string;
+  result: CampaignPreview | null;
+  failure: string | null;
+};
 
 export function ComposeForm() {
   const router = useRouter();
@@ -83,6 +91,63 @@ export function ComposeForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachment, setAttachment] = useState<UploadedAttachment | null>(null);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const previewGeneration = useRef(0);
+  const trimmedMessage = message.trim();
+  const hasAttachment = attachment !== null;
+  const previewInput = useMemo(
+    () => ({ message: trimmedMessage, recipients, sendChannel, hasAttachment }),
+    [trimmedMessage, recipients, sendChannel, hasAttachment],
+  );
+  const previewKey = JSON.stringify(previewInput);
+
+  useEffect(() => {
+    const generation = ++previewGeneration.current;
+    if (!previewInput.message) {
+      setPreview(null);
+      return;
+    }
+    const controller = new AbortController();
+    setPreview({ key: previewKey, result: null, failure: null });
+    const timer = setTimeout(() => {
+      void previewCampaignClient(previewInput, controller.signal)
+        .then((result) => {
+          if (controller.signal.aborted || generation !== previewGeneration.current) return;
+          setPreview({ key: previewKey, result, failure: null });
+        })
+        .catch((err: unknown) => {
+          if (controller.signal.aborted || generation !== previewGeneration.current) return;
+          const reason = err instanceof Error ? err.message : '통신 오류';
+          setPreview({
+            key: previewKey, result: null,
+            failure: `예상 비용을 확인하지 못했습니다 (${reason}). 다시 확인해 주세요.`,
+          });
+        });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [previewInput, previewKey, previewAttempt]);
+
+  // 입력·채널·수신자가 바뀐 첫 렌더부터 이전 견적으로 발송하지 않는다.
+  const currentPreview = preview?.key === previewKey ? preview : null;
+  const estimate = currentPreview?.result;
+  const previewError = currentPreview?.failure ?? estimate?.error ?? null;
+  const checking = Boolean(trimmedMessage && !estimate && !currentPreview?.failure);
+  const bytes = trimmedMessage ? estimate?.byteLength ?? null : 0;
+  const channel = estimate?.channel;
+  const displayChannel = channel ?? 'SMS';
+  const bytesState: 'warn' | 'err' | undefined = previewError
+    ? 'err'
+    : bytes !== null && bytes > 90 ? 'warn' : undefined;
+  const lengthLabel = checking ? '길이 확인 중' : bytes === null ? '길이 확인 불가' : `${bytes} bytes`;
+  const costLabel = estimate?.valid && estimate.costMin !== null && estimate.costMax !== null
+    ? `예상 ${estimate.recipientCount}건 · ₩${estimate.costMin.toLocaleString('ko-KR')}${
+      estimate.costMin === estimate.costMax ? '' : `~${estimate.costMax.toLocaleString('ko-KR')}`
+    } (VAT 별도)`
+    : checking ? '예상 비용 확인 중' : '예상 비용 —';
 
   // 발신번호 로딩 (승인된 번호만). stale response race 방어를 위해 cancelled flag.
   // 번호·브랜드만 쓰므로 서버의 일일 사용량 집계는 건너뛴다.
@@ -133,11 +198,6 @@ export function ComposeForm() {
     };
   }, [recipients]);
 
-  const { bytes, channel, cost, bytesState } = useMemo(
-    () => computeEstimate(message, recipients.length, attachment != null, sendChannel),
-    [message, recipients.length, attachment, sendChannel],
-  );
-
   const recipientsState: 'warn' | 'err' | undefined =
     recipients.length > 1000 ? 'err' : recipients.length > 500 ? 'warn' : undefined;
 
@@ -146,8 +206,9 @@ export function ComposeForm() {
     !senderLoading &&
     recipients.length > 0 &&
     recipients.length <= 1000 &&
-    message.trim() !== '' &&
-    bytesState !== 'err' &&
+    trimmedMessage !== '' &&
+    estimate?.valid === true &&
+    !currentPreview?.failure &&
     (mode === 'now' || sendAt !== '') &&
     confirmed &&
     !submitting;
@@ -162,7 +223,7 @@ export function ComposeForm() {
   const idemKeyRef = useRef<string | null>(null);
   useEffect(() => {
     idemKeyRef.current = null;
-  }, [sender, recipients, message, sendAt, mode, attachment]);
+  }, [sender, recipients, message, sendAt, mode, attachment, sendChannel]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -184,7 +245,7 @@ export function ComposeForm() {
         body: JSON.stringify({
           sender,
           recipients,
-          message,
+          message: trimmedMessage,
           sendAt: mode === 'schedule' ? sendAt : null,
           attachmentId: attachment?.attachmentId ?? null,
           sendChannel,
@@ -336,16 +397,11 @@ export function ComposeForm() {
           label="메시지"
           htmlFor="msg"
           required
-          hint={`자동 채널: ${sendChannel === 'rcs' ? 'RCS·' : ''}${channel} · ${bytes} bytes`}
+          hint={`자동 채널: ${sendChannel === 'rcs' ? 'RCS·' : ''}${displayChannel} · ${lengthLabel}`}
           counter={{
-            value: `${bytes} bytes`,
+            value: lengthLabel,
             state: bytesState,
           }}
-          error={
-            bytesState === 'err'
-              ? 'MMS 본문 한계(2,000 bytes)를 초과했습니다'
-              : undefined
-          }
         >
           <Editor
             id="msg"
@@ -386,14 +442,34 @@ export function ComposeForm() {
             footer={
               <>
                 <span className="font-mono">
-                  {bytes} bytes · {channel}
+                  {lengthLabel} · {displayChannel}
                 </span>
-                <span className="font-mono text-ink-dim">
-                  예상 {recipients.length}건 · ₩{cost.toLocaleString('ko-KR')}
+                <span role="status" aria-live="polite" className="font-mono text-ink-dim">
+                  {costLabel}
                 </span>
               </>
             }
           />
+          {previewError && (
+            <div role="alert" className="mt-1 text-xs text-danger">
+              {previewError}
+              {currentPreview?.failure && (
+                <button
+                  type="button"
+                  onClick={() => setPreviewAttempt((attempt) => attempt + 1)}
+                  disabled={submitting}
+                  className="ml-2 underline"
+                >
+                  다시 확인
+                </button>
+              )}
+            </div>
+          )}
+          {estimate?.valid && estimate.costMin !== estimate.costMax && (
+            <p className="mt-1 text-xs text-ink-dim">
+              RCS 미지원 시 일반 문자로 대체되며, 실제 비용은 전달 결과에 따라 달라집니다.
+            </p>
+          )}
         </Field>
 
         <Field label="첨부 이미지" hint="선택 — 첨부 시 MMS 로 전송됩니다. JPEG/PNG/WebP 허용, 최대 10MB.">

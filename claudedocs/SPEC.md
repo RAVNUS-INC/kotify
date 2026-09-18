@@ -8,7 +8,7 @@
 ## 0. 한 페이지 요약 (TL;DR)
 
 - **목적**: 운영자가 웹 UI에서 다수 인원에게 RCS/SMS/LMS/MMS 공지를 발송하고, 발송 이력과 결과를 영구 보관·조회한다.
-- **발송 전략**: **RCS 우선**. RCS 실패 시 msghub `fbInfoLst`로 SMS/LMS/MMS 자동 fallback. ⚠️ 단문은 outbound 에서 양방향(8원) 미지원이라 **단방향 RCS(17원)** 로 발송되어 SMS(9원)보다 비쌈(비용 역전). 양방향 8원 전환은 U+ 확인 필요(TODO). 이미지: RCS 템플릿(40원) → MMS(85원, **53% 절감** — 이미지만 RCS 이득).
+- **발송 전략**: **RCS 우선**. RCS 실패 시 msghub `fbInfoLst`로 SMS/LMS/MMS 자동 fallback. 단문 공지는 **단방향 RCS(17원)** 로 발송되어 SMS(9원)보다 비싸다. 장문은 RCS/LMS 모두 27원, 이미지는 `RPMSMMX001` RCS MMS와 fallback MMS 모두 85원이다. 모두 VAT 별도 앱 추정 단가이며 공급자의 확정 청구액을 뜻하지 않는다.
 - **운영 도메인**: `sms.example.com`
 - **스택**: Python 3.12+ FastAPI 백엔드 + Node 20+ Next.js 14 프론트엔드 + SQLite + Authlib(Keycloak OIDC).
 - **배포**: Proxmox LXC CT (Debian 12/13, 1 vCPU / 1 GB / 8 GB). FastAPI는 내부(8080), Next.js가 외부 대면(3000). NPM이 TLS 종단.
@@ -193,6 +193,15 @@ CREATE TABLE messages (
   complete_time TEXT, received_at TEXT  -- webhook 수신 시각
 );
 
+-- 고객 회신 외부 알림 outbox (MO와 같은 트랜잭션으로 생성)
+CREATE TABLE notification_deliveries (
+  id INTEGER PRIMARY KEY, mo_id INTEGER NOT NULL UNIQUE,
+  url TEXT NOT NULL, payload TEXT NOT NULL,
+  status TEXT NOT NULL,        -- PENDING | SENDING | DELIVERED | FAILED
+  attempts INTEGER NOT NULL, next_attempt_at TEXT NOT NULL,
+  locked_at TEXT, last_error TEXT, created_at TEXT NOT NULL, delivered_at TEXT
+);
+
 -- 감사 로그
 CREATE TABLE audit_logs (
   id INTEGER PRIMARY KEY, actor_sub TEXT, action TEXT, target TEXT,
@@ -285,7 +294,28 @@ ID 재사용을 막는 별도 순번 또는 `AUTOINCREMENT`를 함께 설계해�
 - **서명 검증**: msghub가 전송하는 서명 헤더를 HMAC으로 검증. 실패 시 403.
 - 페이로드의 `cliKey` 또는 `msgKey`로 messages 테이블 매칭 → UPDATE.
 
-### 5.4 에러 처리
+SMS/MMS MO의 공급자 의미는 `moNumber=우리 MO 수신번호`, `moCallback=고객 발신번호`다.
+DB에는 대화방 규약에 맞춰 `mo_callback=우리 번호`, `mo_number=고객 번호`로 저장한다.
+RCS MO는 `chatbotId=우리 채널`, `phone=고객 번호`이며 SMS/MMS와 별도로 해석한다.
+등록된 활성 Caller 또는 chatbot ID로 우리 수신 채널을 검증한다.
+
+회신 알림이 켜져 있으면 새 MO와 n8n 요청을 같은 트랜잭션의
+`notification_deliveries`에 저장한다. 같은 고객에게 마지막으로 발송한 담당자는 성공 결과와
+접수된 즉시 발송만 대상으로 하며 실패·취소·발송 전 예약을 제외한다. 캠페인 생성 시각 대신
+완료 시각, 요청 시각, 지난 예약의 예약 시각 순으로 비교한다. HTTP 전송은 응답 뒤에 수행하고
+2xx만 성공으로 인정한다. 연결 오류와 비 2xx는 짧은 재시도 후 `FAILED`로 남기며 60초 주기
+작업이 지수 간격으로 다시 처리한다. 설정의 `POST /settings/test-n8n`은 로그인 사용자를
+`lastSender`로 넣어 실제 n8n·Telegram 라우팅을 요청한다.
+
+### 5.4 예약·첨부·세션 제약
+
+- 예약 발송은 현재부터 최소 10분, 최대 30일 이내다.
+- 이미지 업로드는 같은 전처리 JPEG를 MMS와 RCS 컨텐츠 API에 각각 등록한다. `attachments.msghub_file_id`는 MMS ID, `msghub_rcs_file_id`는 RCS ID이며 만료 시각도 채널별로 저장한다.
+- RCS 이미지의 `media`에는 RCS ID, `fbInfoLst`의 MMS에는 MMS ID를 사용한다. 즉시·예약 발송 모두 실제 발송 예정 시각 전에 만료되는 파일을 거부한다. 기존 MMS ID만 있는 첨부는 일반 MMS로만 사용할 수 있고 RCS 발송에는 다시 업로드해야 한다.
+- 백그라운드 루프는 60초마다 `PUT /client/v1/healthCheck`를 호출한다. health check 실패는 기록하되 리포트 재조정을 계속한다.
+- 재조정은 오래된 미완료 메시지부터 조회한다. 공급자가 `OVER_DATE` 또는 `INVALID_KEY`를 반환하면 해당 메시지를 `FAILED`로 닫아 최근 메시지 조회를 막지 않게 한다.
+
+### 5.5 에러 처리
 
 | HTTP | 처리 |
 |---|---|
@@ -336,15 +366,37 @@ ID 재사용을 막는 별도 순번 또는 `AUTOINCREMENT`를 함께 설계해�
 
 현재 앱의 본문 분류는 **EUC-KR 바이트 길이**를 기준으로 한다. 이는 공급자 HTTP 요청의 전송 인코딩과 별개인 앱 검증 정책이다. RCS/SMS/LMS/MMS 판정 기준:
 
-| 채널 | 조건 | 요금 |
+| 채널 | 조건 | 앱 추정 단가 (VAT 별도) |
 |---|---|---|
 | RCS 단문 (단방향 SMS형) | 본문 ≤ 90 byte, 이미지 없음 | **17원** (fallback SMS 9원) ⚠️ RCS 가 더 비쌈 |
 | RCS LMS | 본문 > 90 byte, 이미지 없음 | 27원 (fallback LMS 27원) |
-| RCS 이미지 템플릿 | 이미지 첨부 | 40원 (fallback MMS 85원) |
+| RCS MMS (`RPMSMMX001`) | 이미지 첨부 | 85원 (fallback MMS 85원) |
 
 > ⚠️ **비용 역전 주의**: 양방향 CHAT(8원)은 outbound 브로드캐스트에 사용 불가
 > (replyId 미보유 → 29003/404). 단문은 단방향 SMS형(17원)으로 발송되어 SMS
-> fallback(9원)보다 비싸다. 양방향 8원 전환은 U+ 지원 확인 필요(TODO).
+> fallback(9원)보다 비싸다. 이미지 공지는 `ITMPL`(40원) 상품을 사용하지 않는다.
+
+RCS 우선 발송의 예상 비용은 실제 선택한 메시지 유형의 RCS·fallback 단가 중 작은 값과
+큰 값에 중복 제거 수신자 수를 각각 곱한 범위다. 단문은 1명당 9~17원, 장문은 27원,
+이미지는 85원이다. RCS가 반드시 최소 비용 경로인 것은 아니다. 일반 문자 발송을 선택하면
+SMS 9원·LMS 27원·MMS 85원의 단일 단가로 계산한다.
+
+발송 후 저장 비용은 성공 리포트의 `(channel, productCode)`와 앱 단가표로 계산하고
+실패는 0원으로 처리한다. 양방향 `(RCS, CHAT)` 성공은 동일 `(caller_number,
+to_number)` 쌍의 첫 성공 발송부터 24시간을 한 세션으로 묶어 첫 10건만 건당 8원,
+11번째부터 0원으로 저장한다. 리포트 도착 순서가 달라도 해당 쌍의 성공 CHAT 전체를
+발송 시각순으로 재배분하고 영향을 받은 모든 캠페인의 `total_cost`를 다시 집계한다.
+실패한 CHAT은 세션 건수에 포함하지 않으며 대체 SMS 성공은 9원으로 별도 기록한다.
+이 합계는 VAT 별도 앱 추정값이며 공급자의 확정 청구액과 대조한 값은 아니다.
+
+확인된 성공 리포트 조합 `(RCS, RSMS)`는 단방향 RCS 단문 17원,
+`(SMS, LMS)`와 `(MMS, LMS)`는 장문 27원으로 계산한다. 채널과 과금 상품이 다른
+경우에도 이 조합을 인식한다. 데이터 마이그레이션 `0020_report_product_cost.py`는
+`DONE`·`10000` 성공이고 기존 비용이 0원인 이 세 조합만 보정한 뒤 해당 캠페인의
+`total_cost`를 메시지 비용 합계로 갱신한다. 실패·미확정·알 수 없는 상품·이미 기록된
+0원 이외 비용은 보존한다. 적용·복원 절차는 `deploy/README.md`의 `0020` 절을 따른다.
+데이터 마이그레이션 `0022_chat_session_cost_cap.py`는 기존 성공 CHAT에도 같은
+24시간·10건 배분을 적용하고 관련 캠페인 합계를 보정한다.
 
 최초 발송은 본문 > 2000 byte이면 거부한다. 대화방 답장은 RCS·일반 SMS 모두 90바이트 이내 단문만 허용하며 LMS로 자동 전환하지 않는다.
 
@@ -353,7 +405,7 @@ ID 재사용을 막는 별도 순번 또는 `AUTOINCREMENT`를 함께 설계해�
 - EUC-KR 인코딩 기준으로 측정한다: `len(text.encode("euc-kr"))`.
 - 보통 한글 1자 = 2바이트, ASCII 1자 = 1바이트다. 일부 확장 한글은 더 많은 바이트를 사용하므로 글자 수만으로 판정하지 않는다. 본문 안의 공백·줄바꿈도 포함하며, EUC-KR 미지원 문자(이모지 등)는 발송을 차단한다.
 - 대화방 답장은 발송할 본문의 앞뒤 공백을 제거한 뒤 서버에서 검증한다. 예를 들어 `가` 45자(90바이트)는 허용하고 46자(92바이트)는 거부한다. 입력 중 같은 서버 검증 결과로 길이·오류를 안내한다(§8.4).
-- 알려진 별도 제약: 최초 발송 화면 `ComposeForm`의 예상 길이 표시는 아직 `TextEncoder`의 UTF-8 계산을 사용해 서버 분류와 다를 수 있다. 이번 서버 기준 사전 검증 적용 범위는 대화방 답장이며, 최초 발송 화면의 계산 통일은 후속 작업이다.
+- 최초 발송 화면 `ComposeForm`도 서버의 동일한 EUC-KR 분류를 사용한다. 본문 앞뒤 공백을 제거한 후 길이·메시지 유형·선택한 채널의 비용을 함께 조회한다(§8.5).
 
 구현: `app/util/text.py`.
 
@@ -431,6 +483,41 @@ web/app/
 - 네트워크 단절 시 exponential backoff 재연결 (1s → 2s → 4s → max 30s). 서버는 25초마다 keep-alive를 보내며 이벤트 버스는 단일 uvicorn 워커를 전제로 한다.
 - Korean IME 처리: `isComposing` 상태에서는 Enter 무시.
 
+### 8.5 공지 발송 미리보기 API
+
+브라우저 `POST /api/campaigns/preview` → FastAPI `POST /campaigns/preview`는 로그인·설정 완료·CSRF 검사를 유지하며 DB 변경, 첨부 업로드 또는 공급자 발송 없이 검증·견적만 반환한다.
+
+```json
+{
+  "message": "공지",
+  "recipients": ["01000000000"],
+  "sendChannel": "rcs",
+  "hasAttachment": false
+}
+```
+
+`message`와 `sendChannel`은 필수이며 채널은 `rcs` 또는 `sms`다. `recipients`는 기본 빈 배열·최대 1000개, `hasAttachment`는 기본 false다. 수신자 수는 실제 발송 API와 같은 **문자열이 완전히 같은 항목의 중복 제거**로 계산한다. 번호 표기 정규화 정책은 변경하지 않는다.
+
+```json
+{
+  "data": {
+    "byteLength": 4,
+    "maxBytes": 2000,
+    "valid": true,
+    "error": null,
+    "recipientCount": 1,
+    "channel": "SMS",
+    "costMin": 9,
+    "costMax": 17
+  }
+}
+```
+
+- `channel`은 본문·이미지로 분류한 `SMS`·`LMS`·`MMS` 유형이며 공급자가 실제 전달한 채널은 아니다. 비용은 `sendChannel` 선택을 반영한 VAT 별도 원화 추정값이다.
+- 앞뒤 공백을 제거한 본문에 실제 발송의 EUC-KR 바이트 계산·90바이트 분류·2000바이트 상한을 적용한다. 이미지가 있어도 본문은 같은 규칙으로 검증한다.
+- 입력 문자열 4000자 초과 또는 EUC-KR 미지원 문자는 `byteLength=null`이다. 본문 초과·미지원·빈 본문은 HTTP 200의 `valid=false`, 비용 null로 응답한다. 빈 본문은 오류 문구 없이 0바이트다. 수신자가 없으면 `valid=false`와 수신자 입력 안내를 반환한다. 요청 형식 오류·허용하지 않은 채널·수신자 배열 상한 초과는 HTTP 422다.
+- `ComposeForm`은 입력 후 300ms에 견적을 요청한다. 본문·수신자·채널·첨부가 바뀌면 이전 응답을 무효화하며, 현재 검증 성공 전에는 발송 버튼을 비활성화한다. 통신 실패 시 `다시 확인`으로 재시도한다. 최종 발송은 기존 `POST /campaigns`의 발신번호·예약·첨부 등 검증을 다시 거친다.
+
 ---
 
 ## 9. 모션 디자인 시스템
@@ -487,6 +574,8 @@ web/app/
   keycloak.client_id   (plain, = "sms-sys")
   session.secret       (encrypted, 자동 생성)
   app.public_url       (plain)
+  notify.n8n_enabled   (plain)
+  notify.n8n_url       (plain)
 ```
 
 ### 10.3 CSRF

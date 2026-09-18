@@ -7,6 +7,9 @@ resultCodeDesc가 없는 엣지케이스에서는 raw 코드만 노출한다.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+from datetime import datetime, timedelta
+
 # 재시도가 필요한 에러 코드 (msghub API 가이드 공통 결과 코드 기준)
 # 참조: claudedocs/msghub-error-codes.md
 #
@@ -40,11 +43,17 @@ PRICE_TABLE: dict[tuple[str, str], int] = {
     # U+ 공식 18.7원(VAT 포함)=17원. SMS fallback(9원)보다 비싸다(비용 역전).
     # 양방향 CHAT(8원)은 outbound 불가(compose.py:_MESSAGEBASE_MAP 주석 참조).
     ("RCS", "SMS"): 17,
+    # 2026-09-18 실발송 RPSSAXX001 성공 리포트의 실제 상품코드.
+    ("RCS", "RSMS"): 17,
     ("RCS", "LMS"): 27,       # RCS LMS
     ("RCS", "MMS"): 85,       # RCS MMS
     ("RCS", "ITMPL"): 40,     # RCS 이미지 템플릿
     ("SMS", "SMS"): 9,
+    # 전송 채널과 과금 상품은 다를 수 있다. 공식 report_v12 예시는 MMS/LMS,
+    # 기존 연동 스펙은 SMS/LMS로 장문 결과를 전달하므로 둘 다 LMS 단가다.
+    ("SMS", "LMS"): 27,
     ("LMS", "LMS"): 27,
+    ("MMS", "LMS"): 27,
     ("MMS", "MMS"): 85,
 }
 
@@ -73,6 +82,27 @@ def chat_session_cost(unit_count_in_window: int) -> int:
         return 0
     capped = min(unit_count_in_window, CHAT_SESSION_MAX_UNITS)
     return capped * PRICE_TABLE[("RCS", "CHAT")]
+
+
+def allocate_chat_session_costs(event_times: Iterable[datetime]) -> list[int]:
+    """시간순 CHAT 성공 건에 24시간 세션 상한을 배분한다.
+
+    세션은 첫 성공 발송 시각부터 24시간으로 고정한다. 세션 안의 첫 10건은 8원,
+    11번째 이후는 0원이며, 24시간 경계의 다음 성공 건부터 새 세션을 시작한다.
+    호출자는 같은 (챗봇, 고객) 쌍의 시각을 오름차순으로 넘겨야 한다.
+    """
+    unit_price = PRICE_TABLE[("RCS", "CHAT")]
+    window = timedelta(hours=CHAT_SESSION_WINDOW_HOURS)
+    costs: list[int] = []
+    session_start: datetime | None = None
+    session_units = 0
+    for event_time in event_times:
+        if session_start is None or event_time >= session_start + window:
+            session_start = event_time
+            session_units = 0
+        session_units += 1
+        costs.append(unit_price if session_units <= CHAT_SESSION_MAX_UNITS else 0)
+    return costs
 
 # 메시지 유형 → (RCS 키, Fallback 키). 견적은 두 단가의 min~max 범위로 계산한다.
 # 주의: 단문은 outbound 에서 양방향 CHAT(8원)을 쓸 수 없어 단방향 SMS형
@@ -123,7 +153,7 @@ def calculate_cost(channel: str | None, product_code: str | None, success: bool)
 
 
 def estimate_cost(msg_type: str, recipient_count: int) -> tuple[int, int]:
-    """예상 비용 범위 (최소=RCS 전체 성공, 최대=전체 fallback).
+    """예상 비용 범위 (항상 낮은 단가부터 높은 단가 순).
 
     PRICE_TABLE에서 실제 단가를 참조하여 계산.
 

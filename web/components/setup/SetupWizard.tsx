@@ -10,6 +10,8 @@ import {
 } from '@/lib/setup';
 import { Button, Field, Icon, Input } from '@/components/ui';
 
+type MsghubEnv = 'production' | 'qa';
+
 export type SetupWizardProps = {
   initial: SetupStatus;
 };
@@ -43,7 +45,7 @@ export function SetupWizard({ initial }: SetupWizardProps) {
   const [keycloakClientSecret, setKeycloakClientSecret] = useState('');
   const [msghubApiKey, setMsghubApiKey] = useState('');
   const [msghubApiPwd, setMsghubApiPwd] = useState('');
-  const [msghubEnv, setMsghubEnv] = useState('production');
+  const [msghubEnv, setMsghubEnv] = useState<MsghubEnv>('production');
   const [msghubBrandId, setMsghubBrandId] = useState('');
   const [msghubChatbotId, setMsghubChatbotId] = useState('');
   const [appPublicUrl, setAppPublicUrl] = useState('');
@@ -325,12 +327,16 @@ export function SetupWizard({ initial }: SetupWizardProps) {
                   required
                 />
               </Field>
-              <Field label="환경" hint="production / staging / sandbox">
-                <Input
+              <Field label="환경" hint="production / qa">
+                <select
                   value={msghubEnv}
-                  onChange={(e) => setMsghubEnv(e.target.value)}
+                  onChange={(e) => setMsghubEnv(e.target.value as MsghubEnv)}
                   disabled={submitting}
-                />
+                  className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand focus:shadow-[0_0_0_3px_rgba(59,0,139,0.08)] focus:outline-none disabled:bg-gray-1 disabled:text-ink-dim"
+                >
+                  <option value="production">production (상용)</option>
+                  <option value="qa">qa (검수)</option>
+                </select>
               </Field>
               <div className="flex flex-col justify-end gap-1">
                 <Button

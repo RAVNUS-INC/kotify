@@ -12,7 +12,7 @@ import csv
 import io
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -31,13 +31,15 @@ from app.auth.deps import (
 )
 from app.db import get_db
 from app.models import Attachment, Campaign, Message, MsghubRequest, User
-from app.msghub.codes import SUCCESS_CODE
+from app.msghub.codes import PRICE_TABLE, SUCCESS_CODE, estimate_cost
 from app.msghub.schemas import MsghubBadRequest, MsghubError
 from app.security.csrf import verify_csrf
 from app.services import audit
+from app.services.compose import _classify_msg_type, dedupe_recipients
 from app.services.image import ImageProcessingError, preprocess_mms_image
 from app.services.report import _refresh_campaign_counters
 from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
+from app.util.text import measure_bytes
 
 if TYPE_CHECKING:
     from sqlalchemy.sql import ColumnElement
@@ -204,6 +206,50 @@ class CampaignCreateBody(BaseModel):
         if v not in ("rcs", "sms"):
             raise ValueError("sendChannel 은 'rcs' 또는 'sms' 여야 합니다")
         return v
+
+
+class CampaignPreviewBody(BaseModel):
+    message: str
+    recipients: list[str] = Field(default_factory=list, max_length=1000)
+    sendChannel: Literal["rcs", "sms"]
+    hasAttachment: bool = False
+
+
+@router.post("/campaigns/preview", dependencies=[Depends(verify_csrf)])
+def preview_campaign(body: CampaignPreviewBody) -> dict:
+    """실제 발송의 본문 정책과 단가로 견적을 낸다. DB·공급자 요청은 없다."""
+    data: dict = {
+        "byteLength": None, "maxBytes": 2000, "valid": False, "error": None,
+        "recipientCount": 0, "channel": None, "costMin": None, "costMax": None,
+    }
+    if len(body.message) > 4000:
+        data["error"] = "메시지는 4000자 이내로 입력해 주세요."
+        return {"data": data}
+    content = body.message.strip()
+    try:
+        data["byteLength"] = measure_bytes(content)
+        msg_type = _classify_msg_type(content, body.hasAttachment)
+    except UnicodeEncodeError:
+        data["error"] = "EUC-KR 미지원 문자(이모지 등)가 포함되어 있습니다. 발송 전 제거하세요."
+        return {"data": data}
+    except ValueError as exc:
+        data["error"] = str(exc)
+        return {"data": data}
+    channel = {"short": "SMS", "long": "LMS", "image": "MMS"}[msg_type]
+    data["channel"] = channel
+    recipients = dedupe_recipients(body.recipients)
+    count = len(recipients)
+    data["recipientCount"] = count
+    if not content:
+        return {"data": data}
+    if body.sendChannel == "sms":
+        data["costMin"] = data["costMax"] = PRICE_TABLE[(channel, channel)] * count
+    else:
+        data["costMin"], data["costMax"] = estimate_cost(msg_type, count)
+    data["valid"] = bool(count)
+    if not count:
+        data["error"] = "수신자를 입력해 주세요."
+    return {"data": data}
 
 
 # ── S3: GET /campaigns ───────────────────────────────────────────────────────
@@ -838,12 +884,12 @@ async def upload_attachment(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict | JSONResponse:
-    """MMS 첨부 이미지 업로드 — sender/admin 전용.
+    """RCS/MMS 첨부 이미지 업로드 — sender/admin 전용.
 
     파이프라인:
       1) 원본 읽기 (≤10 MiB)
-      2) preprocess_mms_image() — JPEG 300KB/1920x1080 변환
-      3) msghub upload_file(channel='mms') — fileId 발급
+      2) preprocess_mms_image() — 양쪽에서 쓸 수 있는 JPEG 300KB/1500x1440 변환
+      3) msghub에 mms/rcs 채널별 등록 — 각 fileId 발급
       4) attachments 테이블에 BLOB + 메타 저장
       5) 응답: {attachmentId, width, height, sizeBytes, originalFilename, url}
     """
@@ -894,11 +940,13 @@ async def upload_attachment(
     file_id = uuid.uuid4().hex
     stored_filename = f"{file_id}.jpg"
     try:
-        upload_resp = await msghub_client.upload_file(
-            channel="mms",
-            file_id=f"mms-{file_id}",
-            file_bytes=processed,
-            content_type="image/jpeg",
+        # U+는 컨텐츠를 채널별로 등록한다. 같은 원본이라도 RCS용과 MMS용
+        # fileId를 각각 발급받아 발송 시 해당 채널의 ID만 사용한다.
+        mms_resp = await msghub_client.upload_file(
+            channel="mms", file_id=f"mms-{file_id}", file_bytes=processed, content_type="image/jpeg",
+        )
+        rcs_resp = await msghub_client.upload_file(
+            channel="rcs", file_id=f"rcs-{file_id}", file_bytes=processed, content_type="image/jpeg",
         )
     except MsghubError as exc:
         return JSONResponse(
@@ -910,7 +958,8 @@ async def upload_attachment(
     now_iso = datetime.now(_UTC).isoformat()
     attachment = Attachment(
         campaign_id=None,  # 발송 시점에 연결됨
-        msghub_file_id=getattr(upload_resp, "file_id", None),
+        msghub_file_id=getattr(mms_resp, "file_id", None),
+        msghub_rcs_file_id=getattr(rcs_resp, "file_id", None),
         original_filename=file.filename or stored_filename,
         stored_filename=stored_filename,
         content_blob=processed,
@@ -919,8 +968,9 @@ async def upload_attachment(
         height=height,
         uploaded_by=user.sub,
         uploaded_at=now_iso,
-        file_expires_at=getattr(upload_resp, "file_exp_dt", None),
-        channel="mms",
+        file_expires_at=getattr(mms_resp, "file_exp_dt", None),
+        rcs_file_expires_at=getattr(rcs_resp, "file_exp_dt", None),
+        channel="mms+rcs",
     )
     db.add(attachment)
     db.flush()

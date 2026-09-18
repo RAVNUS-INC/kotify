@@ -21,6 +21,7 @@ from __future__ import annotations
 import ipaddress
 import secrets as _secrets
 import socket
+from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -174,7 +175,7 @@ async def test_keycloak(body: TestKeycloakBody) -> dict | JSONResponse:
 class TestMsghubBody(BaseModel):
     msghubApiKey: str = Field(..., min_length=1)
     msghubApiPwd: str = Field(..., min_length=1)
-    msghubEnv: str = Field(default="production")
+    msghubEnv: Literal["production", "qa"] = Field(default="production")
 
 
 @router.post(
@@ -230,7 +231,7 @@ class CompleteSetupBody(BaseModel):
     # msghub (필수)
     msghubApiKey: str = Field(..., min_length=1)
     msghubApiPwd: str = Field(..., min_length=1)
-    msghubEnv: str = Field(default="production")
+    msghubEnv: Literal["production", "qa"] = Field(default="production")
     msghubBrandId: str | None = None
     msghubChatbotId: str | None = None
     # App (옵션)

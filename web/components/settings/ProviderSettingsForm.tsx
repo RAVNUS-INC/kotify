@@ -12,6 +12,8 @@ import {
 import { testHiworksConnection } from '@/lib/hiworks-client';
 import { Button, Check, Field, Icon, Input } from '@/components/ui';
 
+type MsghubEnv = 'production' | 'qa';
+
 export type ProviderSettingsFormProps = {
   initial: ProviderSettings;
   /** 어떤 섹션을 보여줄지 — 설정 탭별로 관련 필드만 노출. */
@@ -36,7 +38,8 @@ export function ProviderSettingsForm({
   const [keycloakIssuer, setKeycloakIssuer] = useState(initial.public.keycloakIssuer);
   const [keycloakClientId, setKeycloakClientId] = useState(initial.public.keycloakClientId);
   const [appPublicUrl, setAppPublicUrl] = useState(initial.public.appPublicUrl);
-  const [msghubEnv, setMsghubEnv] = useState(initial.public.msghubEnv || 'production');
+  const initialMsghubEnv: MsghubEnv = initial.public.msghubEnv === 'qa' ? 'qa' : 'production';
+  const [msghubEnv, setMsghubEnv] = useState<MsghubEnv>(initialMsghubEnv);
   const [msghubBrandId, setMsghubBrandId] = useState(initial.public.msghubBrandId);
   const [msghubChatbotId, setMsghubChatbotId] = useState(initial.public.msghubChatbotId);
   // n8n 아웃바운드 알림 (고객 회신 → n8n → 하이웍스 등)
@@ -143,7 +146,7 @@ export function ProviderSettingsForm({
       // 입력칸의 현재 URL 로 테스트 (저장 전에도 확인 가능). 비어 있으면
       // 서버가 저장값을 사용.
       const r = await testN8nNotifyClient(n8nNotifyUrl.trim() || undefined);
-      setMsg({ kind: 'ok', text: `✓ n8n ${r.message}` });
+      setMsg({ kind: 'ok', text: `✓ ${r.message}` });
     } catch (err) {
       setMsg({
         kind: 'err',
@@ -191,13 +194,16 @@ export function ProviderSettingsForm({
           </header>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="환경" hint="production · staging · sandbox">
-              <Input
+            <Field label="환경" hint="production · qa">
+              <select
                 value={msghubEnv}
-                onChange={(e) => setMsghubEnv(e.target.value)}
-                placeholder="production"
+                onChange={(e) => setMsghubEnv(e.target.value as MsghubEnv)}
                 disabled={submitting}
-              />
+                className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand focus:shadow-[0_0_0_3px_rgba(59,0,139,0.08)] focus:outline-none disabled:bg-gray-1 disabled:text-ink-dim"
+              >
+                <option value="production">production (상용)</option>
+                <option value="qa">qa (검수)</option>
+              </select>
             </Field>
             <Field label="브랜드 ID">
               <Input
@@ -300,7 +306,8 @@ export function ProviderSettingsForm({
             </h2>
             <p className="mt-0.5 text-[12.5px] text-ink-muted">
               고객이 문자/RCS 로 회신하면 지정한 n8n Webhook URL 로 전송합니다.
-              n8n 에서 하이웍스 등으로 포워딩하세요.
+              n8n 에서 Telegram 등으로 포워딩하세요. 알림 테스트는 현재 로그인
+              사용자에게 실제 Telegram 알림을 요청합니다.
             </p>
           </header>
 
@@ -534,7 +541,7 @@ export function ProviderSettingsForm({
                 disabled={submitting || testingN8n || !n8nNotifyUrl.trim()}
                 icon={<Icon name="zap" size={12} />}
               >
-                {testingN8n ? 'n8n 테스트 중…' : 'n8n 테스트'}
+                {testingN8n ? '알림 테스트 중…' : 'Telegram 알림 테스트'}
               </Button>
               <Button
                 type="button"

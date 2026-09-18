@@ -40,6 +40,9 @@ def _make_msghub_client():
         env = store.get("msghub.env") or "production"
         if not (api_key and api_pwd):
             return None
+        if env not in ("production", "qa"):
+            logger.error("지원하지 않는 msghub.env=%r — 클라이언트를 초기화하지 않음", env)
+            return None
         brand_id = store.get("msghub.brand_id") or ""
         chatbot_id = store.get("msghub.chatbot_id") or ""
         return MsghubClient(
@@ -95,26 +98,38 @@ async def reset_msghub_client():
 
 # 웹훅 유실 대비 재조정 주기 (초). 발송 후 충분히 기다린 미완료 메시지를
 # msghub 에서 능동 조회해 상태를 보정한다 (C5). 단일 uvicorn 워커 전제.
-_RECONCILE_INTERVAL_SECONDS = 300
+_RECONCILE_INTERVAL_SECONDS = 60
 
 
 async def _reconcile_loop() -> None:
-    """주기적으로 미완료 메시지를 재조정하는 self-healing 백그라운드 루프.
+    """미완료 메시지를 재조정하고 실패한 알림을 다시 보내는 주기 루프.
 
-    msghub 미설정(setup 전)이면 건너뛰고, 일시 오류는 로그만 남기고 다음 주기로
-    넘어가 한 번의 장애가 루프를 영구 중단시키지 않게 한다.
+    msghub 설정 여부와 관계없이 알림 outbox는 처리한다. 각 작업의 일시 오류는
+    로그만 남겨 한 경로의 장애가 다른 경로나 다음 주기를 중단하지 않게 한다.
     """
+    from app.services.notify import process_n8n_outbox
     from app.services.reconcile import reconcile_pending_messages
 
     while True:
         try:
             await asyncio.sleep(_RECONCILE_INTERVAL_SECONDS)
-            client = await aget_msghub_client()
-            if client is None:
-                continue  # setup 전 — msghub 미설정이면 건너뜀
             db = SessionLocal()
             try:
-                await reconcile_pending_messages(db, client)
+                try:
+                    await process_n8n_outbox(db)
+                except Exception:  # noqa: BLE001
+                    logger.exception("n8n 알림 outbox 처리 실패")
+
+                client = await aget_msghub_client()
+                if client is not None:
+                    try:
+                        await client.health_check()
+                    except Exception:  # noqa: BLE001
+                        logger.exception("msghub health check 실패")
+                    try:
+                        await reconcile_pending_messages(db, client)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("msghub 재조정 실패")
             finally:
                 db.close()
         except asyncio.CancelledError:

@@ -19,10 +19,13 @@ built specifically for Korean phone numbers and Korean operators.
 ### Features
 
 - **RCS-first messaging** via U+ msghub with SMS/LMS/MMS auto-fallback (`fbInfoLst`), up to 1,000 recipients per campaign
-  - Short text: RCS one-way SMS-type (17원) → SMS fallback (9원). ⚠️ outbound cannot use two-way RCS (8원), so short text over RCS costs **more** than SMS (cost inversion). Two-way 8원 needs U+ confirmation (TODO).
+  - Short text: RCS one-way SMS-type (17원) → SMS fallback (9원). Outbound broadcasts use one-way RCS, which costs more than SMS.
   - RCS LMS (27원) → LMS (27원) for long text
-  - RCS image template (40원) → MMS (85원) for images — 53% cost saving (RCS wins only for images)
+  - RCS MMS (`RPMSMMX001`, 85원) → MMS (85원) for images
+  - Prices and recorded costs are app estimates in KRW, excluding VAT. Image broadcasts do not use the 40원 `ITMPL` product. Successful two-way CHAT replies charge the first 10 messages at 8원 within each 24-hour chatbot/customer session; later replies are recorded as 0원 until the next session. SMS fallback is charged separately. Provider invoices are not reconciled.
+- **Server-backed cost preview** uses the same EUC-KR byte classification and price table as sending, including the selected channel and attachment. Sending stays disabled until the current preview succeeds.
 - **Shared chat inbox** with sender names, reply byte validation, server-side search/pagination, observed-message read markers, and reconnect catch-up. Explicit RCS reply rejection can fall back; uncertain submission outcomes remain recorded for reconciliation without immediate resending.
+- **Reply-owner notifications** route each customer reply through n8n to the most recent valid sender. Notification requests are stored durably, retry after failures, and the settings test targets the signed-in user.
 - **Webhook-based delivery reports**, with reconciliation for delayed or uncertain results
 - **Keycloak OIDC** authentication with role-based access (viewer / sender / admin)
   - Requests use the latest user roles and profile stored in the database; verified login updates them from Keycloak, and older sessions cannot restore revoked roles or deleted users.
@@ -116,11 +119,15 @@ MIT — see [LICENSE](LICENSE).
 ### 주요 기능
 
 - **RCS 우선 발송**: U+ msghub를 통한 RCS/SMS/LMS/MMS 자동 fallback (캠페인당 최대 1,000명)
-  - RCS 양방향(8원) → SMS(9원) 폴백 (단문)
+  - RCS 단방향 SMS형(17원) → SMS(9원) 폴백 (단문, RCS가 SMS보다 비쌈)
   - RCS LMS(27원) → LMS(27원) (장문)
-  - RCS 이미지 템플릿(40원) → MMS(85원) (이미지, **53% 절감**)
+  - RCS MMS(`RPMSMMX001`, 85원) → MMS(85원) (이미지)
+  - 단가와 기록된 비용은 VAT 별도인 앱 추정값이다. 이미지 공지는 40원 `ITMPL` 상품을 사용하지 않는다. 양방향 CHAT은 동일 챗봇·고객의 24시간 세션에서 성공한 첫 10건만 건당 8원, 이후는 0원으로 기록하며 SMS 대체 발송은 별도 과금한다. 공급자의 확정 청구액과 대조한 값은 아니다.
+- **서버 기준 비용 미리보기**: 실제 발송과 같은 EUC-KR 바이트 분류·단가표에 선택한 채널과 첨부 여부를 반영한다. 현재 입력의 검증이 완료되기 전에는 발송을 차단한다.
 - **팀 공유 대화방**: 발신자 표시, 답장 바이트 검증, 전체 검색·페이지 이동, 실제 조회한 회신 기준 읽음 처리와 재연결 갱신. RCS 답장 명시 거부는 대체 발송하고, 접수 미확정은 기록을 보존해 결과를 확인하며 즉시 재발송하지 않는다.
+- **회신 담당자 알림**: 고객에게 마지막으로 정상 발송한 담당자를 찾아 n8n을 통해 Telegram으로 알린다. 알림 요청은 DB에 보존해 장애 후 재시도하며 설정 테스트는 로그인한 사용자를 대상으로 실제 알림 경로를 확인한다.
 - **웹훅 기반 실시간 결과 수신** — 지연되거나 접수 여부가 불명확한 결과는 재조정
+- **최신 U+ 연동 규칙 반영** — `production`/`qa` 환경, 예약 30일 상한, MMS·RCS 채널별 이미지 등록과 만료 검사, 60초 세션 health check
 - Keycloak OIDC 인증 + 역할 기반 권한 (viewer / sender / admin)
   - 요청은 DB의 최신 역할·프로필을 사용한다. Keycloak 변경은 검증된 새 로그인으로 반영하며, 기존 세션이 회수된 권한이나 삭제된 사용자를 복원하지 않는다.
 - 한국 휴대폰 번호 자동 정규화 (다양한 형식 지원)

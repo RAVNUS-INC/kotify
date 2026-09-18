@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.models import Campaign, Message
 from app.msghub.codes import SUCCESS_CODE, calculate_cost
 from app.msghub.schemas import RecvInfo, ReportItem, SendResponse
+from app.services.cost import apply_chat_session_cap
 from app.util.phone import mask_phone
 
 if TYPE_CHECKING:
@@ -135,6 +136,7 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
     processed = 0
     campaign_ids: set[int] = set()
     failed_msgs: list[Message] = []
+    updated_msgs: list[Message] = []
 
     for item in items:
         msg = _find_message(db, item.cli_key, item.msg_key, item.phone)
@@ -146,6 +148,7 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
             continue
 
         if _update_message(msg, item):
+            updated_msgs.append(msg)
             campaign_ids.add(msg.campaign_id)
             processed += 1
             if item.result_code != SUCCESS_CODE:
@@ -157,6 +160,8 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
     # 명시적으로 flush 해야 한다. flush를 안 하면 SUM(...) 쿼리가 업데이트
     # 이전 상태(status=REG 등)를 읽어 rcs_count/ok_count가 모두 0으로 찍힘.
     if campaign_ids:
+        db.flush()
+        campaign_ids.update(apply_chat_session_cap(db, updated_msgs))
         db.flush()
         for cid in campaign_ids:
             _refresh_campaign_counters(db, cid)
@@ -171,15 +176,15 @@ def process_sent_query(
     """cliKey 기반 개별 조회 결과를 처리한다.
 
     요청 예외로 실패 기록한 행(compose._record_failed_chunk — FAILED 인데 result_code 없음)도 받는다
-    (services.reconcile). msghub 가 접수했으면 결과대로 확정하거나 대기(REG/ING)로 되돌리고, 결과를 줄
-    수 없다고 답하면(INVALID_KEY 키 오류·OVER_DATE 조회기간 초과) 실패를 유지하며 그 답을 result_code 에
-    남긴다 — 재조정이 같은 행을 매 주기 다시 조회하지 않게 하는 표시다.
+    (services.reconcile). msghub 가 접수했으면 결과대로 확정하거나 대기(REG/ING)로 되돌린다. 결과를 줄
+    수 없다고 답하면(INVALID_KEY 키 오류·OVER_DATE 조회기간 초과) 미완료 행도 실패로 닫고 캠페인 집계를
+    갱신한다 — 재조정이 같은 행을 매 주기 다시 조회하지 않게 하는 표시다.
 
     recovered_campaign_ids 를 넘기면 FAILED → REG/ING 로 복구한 캠페인 id 를 넣는다.
     확정(DONE) 건수에는 포함하지 않지만, 호출자는 커밋 뒤 실패 → 대기 화면 변경을 알려야 한다.
 
     Returns:
-        (확정(DONE)한 메시지 건수, SMS fallback이 필요한 메시지 목록) — process_report 와 같다.
+        (최종 상태로 확정한 메시지 건수, SMS fallback이 필요한 메시지 목록).
         양방향 실패는 먼저 확정한 경로가 대체 발송해야 한다. 리포트 웹훅이 늦으면(msghub 는
         실패한 웹훅을 72시간 재시도) 재조정이 먼저 확정하고, 뒤늦게 온 실패 리포트는 이미
         확정된 행이라 _update_message 가 버린다 — 여기서 넘기지 않으면 답장이 끝내 안 간다.
@@ -190,11 +195,15 @@ def process_sent_query(
     campaign_ids: set[int] = set()
     recovering_campaign_ids: set[int] = set()
     failed_msgs: list[Message] = []
+    updated_msgs: list[Message] = []
 
     for raw in raw_items:
         sq = SentQueryItem.from_dict(raw)
         if sq.status in ("OVER_DATE", "INVALID_KEY"):
-            _record_no_result(db, sq.cli_key, sq.status)
+            campaign_id = _record_no_result(db, sq.cli_key, sq.status)
+            if campaign_id is not None:
+                campaign_ids.add(campaign_id)
+                processed += 1
             continue
 
         msg = _find_message(db, sq.cli_key, sq.msg_key)
@@ -229,6 +238,7 @@ def process_sent_query(
                 )
 
             campaign_ids.add(msg.campaign_id)
+            updated_msgs.append(msg)
             processed += 1
             if not success:
                 failed_msgs.append(msg)
@@ -246,6 +256,8 @@ def process_sent_query(
 
     # autoflush=False — 집계 SELECT 전에 ORM 변경을 명시 flush (process_report 참조)
     if campaign_ids:
+        db.flush()
+        campaign_ids.update(apply_chat_session_cap(db, updated_msgs))
         db.flush()
         for cid in campaign_ids:
             _refresh_campaign_counters(db, cid)
@@ -370,20 +382,35 @@ def _mark_chat_fallback(db: Session, failed_msgs: list[Message]) -> list[Message
     return fallback_needed
 
 
-def _record_no_result(db: Session, cli_key: str, query_status: str) -> None:
-    """조회가 결과를 주지 않은(INVALID_KEY·OVER_DATE) 요청 예외 실패 행에 그 상태를 result_code 로 남긴다.
+def _record_no_result(db: Session, cli_key: str, query_status: str) -> int | None:
+    """INVALID_KEY·OVER_DATE 메시지를 실패로 닫고 바뀐 캠페인 ID를 반환한다.
 
-    발송 후 조회 기간(reconcile._FAILED_QUERY_WINDOW) 안의 INVALID_KEY 는 msghub 가 그 요청을 접수하지
-    않았다는 뜻으로 본다 — 접수하지 않은 키의 응답은 문서에 없고 실측 전이다. 그 키로 조회한 행에만
-    남긴다 — _find_message 의 -fb·msgKey 대체 매칭은 다른 요청의 행을 고를 수 있다. 미완료 행은 접수
-    응답을 받은 행이라 건드리지 않는다(조회 발송일 reqDt 가 어긋난 경우일 수 있다). 집계는 그대로다 —
-    result_code 가 성공 코드가 아닌 FAILED 는 계속 실패로 센다.
+    정확히 조회한 cliKey 행만 갱신한다. ``_find_message``의 fallback·msgKey 보조 매칭은
+    다른 요청의 행을 고를 수 있어 사용하지 않는다.
     """
     if not cli_key:
-        return
+        return None
     msg = db.execute(select(Message).where(Message.cli_key == cli_key)).scalar_one_or_none()
-    if msg is not None and msg.status == "FAILED" and msg.result_code is None:
+    if (
+        msg is not None
+        and msg.result_code is None
+        and msg.status in ("PENDING", "REG", "ING", "FB_PENDING", "FAILED")
+    ):
+        # OVER_DATE/INVALID_KEY는 더 이상 공급자 조회로 확정할 수 없는
+        # 종료 상태다. REG/ING를 계속 pending으로 남기면 재조정 상한을
+        # 영구 점유하므로 실패로 닫는다.
+        status_changed = msg.status != "FAILED"
+        msg.status = "FAILED"
         msg.result_code = query_status
+        msg.result_desc = (
+            "리포트 조회 가능 기간을 초과했습니다."
+            if query_status == "OVER_DATE"
+            else "공급자에서 cliKey를 찾을 수 없습니다."
+        )
+        # 이미 실패 집계된 요청 예외 행은 result_code만 보강한다. 예약의
+        # 미확정 상태까지 다시 집계하면 RESERVED를 FAILED로 잘못 닫을 수 있다.
+        return msg.campaign_id if status_changed else None
+    return None
 
 
 def _find_message(

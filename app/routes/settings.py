@@ -20,6 +20,7 @@ import logging
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends
@@ -416,7 +417,7 @@ class ProviderPatchBody(BaseModel):
     keycloakIssuer: str | None = None
     keycloakClientId: str | None = None
     appPublicUrl: str | None = None
-    msghubEnv: str | None = None  # production | staging | sandbox 등
+    msghubEnv: Literal["production", "qa"] | None = None
     msghubBrandId: str | None = None
     msghubChatbotId: str | None = None
     # 아웃바운드 알림 (n8n). enabled 는 "true"/"false" 문자열, url 은 n8n Webhook URL.
@@ -593,12 +594,13 @@ class N8nTestBody(BaseModel):
 )
 async def test_n8n_notify(
     body: N8nTestBody,
+    user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict | JSONResponse:
-    """n8n 알림 URL 로 샘플 페이로드 1건을 보내 연동을 확인한다.
+    """현재 로그인 사용자를 수신자로 삼아 실제 Telegram 경로를 확인한다.
 
     body.url 이 오면 그 값으로(아직 저장 안 한 입력값 테스트), 없으면 저장된
-    notify.n8n_url 로 전송. 성공 시 `{data:{ok,message}}`, 실패 시 422.
+    notify.n8n_url 로 전송한다. 성공 시 `{data:{ok,message}}`, 실패 시 422.
     """
     store = SettingsStore(db)
     url = (body.url or store.get("notify.n8n_url", "") or "").strip()
@@ -613,7 +615,15 @@ async def test_n8n_notify(
 
     from app.services.notify import send_n8n_test
 
-    ok, message = await send_n8n_test(url)
+    now = datetime.now(UTC).isoformat()
+    recipient = {
+        "id": user.email,
+        "email": user.email,
+        "name": user.display_name or user.name or "",
+        "sentAt": now,
+        "messageId": "TEST",
+    }
+    ok, message = await send_n8n_test(url, recipient)
     if ok:
         return {"data": {"ok": True, "message": message}}
     return JSONResponse(

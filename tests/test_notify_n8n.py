@@ -11,7 +11,18 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.models import Campaign, Message, MsghubRequest, User
+import httpx
+from sqlalchemy import select
+
+from app.models import (
+    Campaign,
+    Message,
+    MsghubRequest,
+    NotificationDelivery,
+    User,
+)
+from app.routes.settings import N8nTestBody
+from app.routes.settings import test_n8n_notify as _test_n8n_notify_route
 from app.routes.webhook import receive_mo
 from app.security.settings_store import SettingsStore
 from app.services import notify
@@ -90,11 +101,58 @@ def test_notify_failure_is_swallowed(db_session):
     mo = MagicMock(mo_number="01012345678", mo_msg="x", mo_callback="025771000",
                    mo_title=None, mo_type="SMS", telco=None, mo_recv_dt="",
                    received_at="2026-01-01T00:00:00+00:00", mo_key="k1")
-    import httpx
-
     with patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=httpx.ConnectError("down"))):
         sent = asyncio.run(notify.notify_n8n_mo(db_session, [mo]))
     assert sent == 0  # 실패해도 예외 없이 0 반환
+
+
+def test_notify_redirect_is_failure(db_session):
+    """3xx는 n8n 실행 성공이 아니므로 성공 건수에 포함하지 않는다."""
+    resp = MagicMock(status_code=302)
+    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=resp)) as post:
+        sent = asyncio.run(notify.deliver_n8n("https://n8n.example/hook", [{"a": 1}]))
+    assert sent == 0
+    post.assert_awaited_once()
+
+
+def test_n8n_test_routes_to_current_user():
+    """설정 테스트도 실제 워크플로가 요구하는 lastSender를 포함한다."""
+    recipient = {
+        "id": "tester@example.com",
+        "email": "tester@example.com",
+        "name": "테스터",
+        "sentAt": "2026-09-18T00:00:00+00:00",
+        "messageId": "TEST",
+    }
+    resp = MagicMock(status_code=200)
+    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=resp)) as post:
+        ok, _ = asyncio.run(
+            notify.send_n8n_test("https://n8n.example/hook", recipient)
+        )
+    assert ok is True
+    payload = post.await_args.kwargs["json"]
+    assert payload["lastSender"] == recipient
+    assert "test" not in payload
+
+
+def test_settings_test_n8n_uses_logged_in_user(db_session, sample_user):
+    """설정 API가 버튼을 누른 로그인 사용자를 Telegram 수신자로 넘긴다."""
+    with patch(
+        "app.services.notify.send_n8n_test",
+        new=AsyncMock(return_value=(True, "ok")),
+    ) as send:
+        result = asyncio.run(
+            _test_n8n_notify_route(
+                N8nTestBody(url="https://n8n.example/hook"),
+                user=sample_user,
+                db=db_session,
+            )
+        )
+
+    recipient = send.await_args.args[1]
+    assert result == {"data": {"ok": True, "message": "ok"}}
+    assert recipient["id"] == sample_user.email
+    assert recipient["messageId"] == "TEST"
 
 
 # ── receive_mo 통합 (수신 → 알림) ─────────────────────────────────────────────
@@ -127,8 +185,6 @@ def test_receive_mo_success_even_if_n8n_down(db_session):
     """n8n 이 죽어도 msghub 응답은 success(200) 여야 한다."""
     _setup_token(db_session)
     _enable_n8n(db_session)
-    import httpx
-
     with patch(
         "httpx.AsyncClient.post",
         new=AsyncMock(side_effect=httpx.ConnectError("down")),
@@ -138,6 +194,50 @@ def test_receive_mo_success_even_if_n8n_down(db_session):
         # 백그라운드 실행 시 예외가 새어 나오지 않아야 한다(deliver_n8n 이 격리).
         assert resp.background is not None
         asyncio.run(resp.background())  # 예외 없이 완료되어야 함
+
+    delivery = db_session.execute(select(NotificationDelivery)).scalar_one()
+    assert delivery.status == "FAILED"
+    assert delivery.attempts == 1
+    assert "down" in (delivery.last_error or "")
+
+
+def test_failed_outbox_is_retried_and_delivered(db_session):
+    """실패 행은 DB에 남고 다음 처리 주기에서 다시 전송된다."""
+    _setup_token(db_session)
+    _enable_n8n(db_session)
+    with patch(
+        "httpx.AsyncClient.post",
+        new=AsyncMock(side_effect=httpx.ConnectError("temporary")),
+    ):
+        resp = asyncio.run(receive_mo("wtok", _mo_request(_mo_body()), db_session))
+        asyncio.run(resp.background())
+
+    delivery = db_session.execute(select(NotificationDelivery)).scalar_one()
+    delivery.next_attempt_at = "2000-01-01T00:00:00+00:00"
+    db_session.commit()
+
+    with patch(
+        "httpx.AsyncClient.post",
+        new=AsyncMock(return_value=MagicMock(status_code=204)),
+    ) as post:
+        delivered = asyncio.run(notify.process_n8n_outbox(db_session))
+
+    db_session.refresh(delivery)
+    assert delivered == 1
+    assert delivery.status == "DELIVERED"
+    assert delivery.attempts == 2
+    post.assert_awaited_once()
+
+
+def test_duplicate_mo_does_not_duplicate_outbox(db_session):
+    """msghub 재전송은 같은 MO와 알림 행을 추가하지 않는다."""
+    _setup_token(db_session)
+    _enable_n8n(db_session)
+    first = asyncio.run(receive_mo("wtok", _mo_request(_mo_body()), db_session))
+    second = asyncio.run(receive_mo("wtok", _mo_request(_mo_body()), db_session))
+    assert first.background is not None
+    assert second.background is None
+    assert len(db_session.execute(select(NotificationDelivery)).scalars().all()) == 1
 
 
 def test_receive_mo_no_n8n_when_disabled(db_session):
@@ -164,21 +264,39 @@ def _make_user(db, sub, email, display_name):
     db.commit()
 
 
-def _make_outbound(db, *, sub, phone, created_at):
+def _make_outbound(
+    db,
+    *,
+    sub,
+    phone,
+    created_at,
+    sent_at=None,
+    complete_time=None,
+    status="DONE",
+    result_code="10000",
+    state="COMPLETED",
+    reserve_time=None,
+):
     """sub 직원이 phone 으로 보낸 발송(MT) 1건."""
     c = Campaign(
         created_by=sub, caller_number="0212345678", message_type="short",
-        content="공지", total_count=1, pending_count=0, state="DISPATCHED",
-        created_at=created_at,
+        content="공지", total_count=1, pending_count=0, state=state,
+        created_at=created_at, reserve_time=reserve_time,
     )
     db.add(c)
     db.flush()
-    req = MsghubRequest(campaign_id=c.id, chunk_index=0, sent_at=created_at)
+    req = MsghubRequest(
+        campaign_id=c.id, chunk_index=0, sent_at=sent_at or created_at
+    )
     db.add(req)
     db.flush()
     db.add(Message(
         campaign_id=c.id, msghub_request_id=req.id,
-        to_number=phone, to_number_raw=phone, status="DELIVERED",
+        to_number=phone,
+        to_number_raw=phone,
+        status=status,
+        result_code=result_code,
+        complete_time=(complete_time or sent_at or created_at) if status == "DONE" else complete_time,
     ))
     db.commit()
 
@@ -218,6 +336,106 @@ def test_lookup_last_sender_most_recent_wins(db_session):
 
     got = notify.lookup_last_sender(db_session, "01012345678")
     assert got["id"] == "new@ravnus.com"
+
+
+def test_lookup_last_sender_uses_delivery_time_not_campaign_creation(db_session):
+    """늦게 만든 캠페인보다 실제 전달 시각이 늦은 발송 담당자가 선택된다."""
+    _make_user(db_session, "u1", "late-delivery@ravnus.com", "늦은전달")
+    _make_user(db_session, "u2", "late-created@ravnus.com", "늦은생성")
+    _make_outbound(
+        db_session,
+        sub="u1",
+        phone="01012345678",
+        created_at="2026-06-01T00:00:00+00:00",
+        complete_time="2026-06-03T00:00:00+00:00",
+    )
+    _make_outbound(
+        db_session,
+        sub="u2",
+        phone="01012345678",
+        created_at="2026-06-02T00:00:00+00:00",
+        complete_time="2026-06-02T01:00:00+00:00",
+    )
+    assert notify.lookup_last_sender(db_session, "01012345678")["id"] == (
+        "late-delivery@ravnus.com"
+    )
+
+
+def test_lookup_last_sender_ignores_failed_latest_message(db_session):
+    """최근 캠페인의 실패 메시지가 이전 정상 담당자를 가로채지 않는다."""
+    _make_user(db_session, "u1", "ok@ravnus.com", "정상담당")
+    _make_user(db_session, "u2", "failed@ravnus.com", "실패담당")
+    _make_outbound(
+        db_session,
+        sub="u1",
+        phone="01012345678",
+        created_at="2026-06-01T00:00:00+00:00",
+    )
+    _make_outbound(
+        db_session,
+        sub="u2",
+        phone="01012345678",
+        created_at="2026-06-02T00:00:00+00:00",
+        status="FAILED",
+        result_code="50000",
+        state="FAILED",
+    )
+    assert notify.lookup_last_sender(db_session, "01012345678")["id"] == (
+        "ok@ravnus.com"
+    )
+
+
+def test_lookup_last_sender_ignores_future_reservation(db_session):
+    """아직 발송 시각이 오지 않은 예약 건은 마지막 담당자가 아니다."""
+    _make_user(db_session, "u1", "sent@ravnus.com", "발송담당")
+    _make_user(db_session, "u2", "reserved@ravnus.com", "예약담당")
+    _make_outbound(
+        db_session,
+        sub="u1",
+        phone="01012345678",
+        created_at="2026-06-01T00:00:00+00:00",
+    )
+    _make_outbound(
+        db_session,
+        sub="u2",
+        phone="01012345678",
+        created_at=datetime.now(UTC).isoformat(),
+        sent_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        status="REG",
+        result_code=None,
+        state="RESERVED",
+        reserve_time=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+    )
+    assert notify.lookup_last_sender(db_session, "01012345678")["id"] == (
+        "sent@ravnus.com"
+    )
+
+
+def test_lookup_last_sender_uses_elapsed_reservation_time(db_session):
+    """지난 예약은 등록 시각이 아니라 실제 예약 시각으로 최근 발송을 정한다."""
+    _make_user(db_session, "u1", "immediate@ravnus.com", "즉시담당")
+    _make_user(db_session, "u2", "reserved@ravnus.com", "예약담당")
+    _make_outbound(
+        db_session,
+        sub="u1",
+        phone="01012345678",
+        created_at="2026-06-02T00:00:00+00:00",
+        complete_time="2026-06-02T01:00:00+00:00",
+    )
+    _make_outbound(
+        db_session,
+        sub="u2",
+        phone="01012345678",
+        created_at="2026-06-01T00:00:00+00:00",
+        sent_at="2026-06-01T00:00:00+00:00",
+        status="REG",
+        result_code=None,
+        state="RESERVED",
+        reserve_time="2026-06-03T09:00:00+09:00",
+    )
+    got = notify.lookup_last_sender(db_session, "01012345678")
+    assert got["id"] == "reserved@ravnus.com"
+    assert got["sentAt"] == "2026-06-03T09:00:00+09:00"
 
 
 def test_lookup_last_sender_matches_old_history(db_session):
