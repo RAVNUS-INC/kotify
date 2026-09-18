@@ -252,11 +252,8 @@ def test_same_instant_prefers_earlier_row(db_session, sample_user):
     assert threads[phone_both].caller == _CALLERS[2]
 
 
-def test_threads_without_time_sort_last(db_session, sample_user):
-    """리포트 전(시각 없음)만 있는 대화방은 맨 뒤다. 파싱할 수 없는 시각은 그 바로 앞.
-
-    시각이 없어도 대표 caller 는 정해진다 — 대화방 id 가 'caller:phone' 이다.
-    """
+def test_new_outbound_without_report_uses_campaign_creation(db_session, sample_user):
+    """리포트가 없어도 신규 발신은 생성 시각으로 정렬하고 해당 본문을 표시한다."""
     phone_real, phone_garbage, phone_pending = "01000000001", "01000000002", "01000000003"
     _add_mt(db_session, caller=_CALLERS[1], phone=phone_pending, content="대기 A")
     _add_mt(db_session, caller=_CALLERS[1], phone=phone_pending, content="대기 B")
@@ -268,14 +265,14 @@ def test_threads_without_time_sort_last(db_session, sample_user):
 
     assert total == 3
     assert [(t.phone, t.last_direction, t.last_timestamp, t.last_body, t.caller) for t in threads] == [
+        (phone_pending, "OUT", "2026-06-01T00:00:00+00:00", "대기 A", _CALLERS[1]),
         (phone_real, "OUT", "20260101090000", "발송", _CALLERS[0]),
         (phone_garbage, "IN", "N/A", "회신", _CALLERS[2]),
-        (phone_pending, "OUT", "", "대기 A", _CALLERS[1]),
     ]
 
 
 def test_unread_follows_last_reply_even_when_we_sent_after(db_session, sample_user):
-    """안읽음은 방향과 무관하게 마지막 회신이 팀 읽음 시각 이후인가다 — 회신 뒤 발송이 있어도 같다."""
+    """안읽음은 발신 방향/시각과 무관하게 마지막 회신 ID가 읽음 경계를 넘는가다."""
     phone_unread, phone_read = "01000000001", "01000000002"
     for phone, read_at in [
         (phone_unread, "2026-06-01T02:30:00.100000+00:00"),  # KST 11:30 — 회신 전에 읽음
@@ -285,7 +282,9 @@ def test_unread_follows_last_reply_even_when_we_sent_after(db_session, sample_us
                 recv_dt="2026-06-01T12:00:00")  # KST 12:00
         _add_mt(db_session, caller=_CALLERS[0], phone=phone, content="발송",
                 complete_time="2026-06-01T12:30:00")  # KST 12:30 — 방향은 OUT
-        db_session.add(ThreadRead(caller=_CALLERS[0], phone=phone, read_at=read_at))
+        mo_id = db_session.scalar(select(MoMessage.id).where(MoMessage.mo_number == phone))
+        db_session.add(ThreadRead(caller=_CALLERS[0], phone=phone, read_at=read_at,
+                                  last_read_mo_id=mo_id if phone == phone_read else 0))
     db_session.commit()
 
     threads, _ = list_threads(db_session, limit=200)
@@ -399,6 +398,7 @@ def _seed_random_threads(db: Session, seed: int, phones: int = 60) -> None:
             db.add(ThreadRead(
                 caller=caller, phone=phone, read_at=(_BASE + timedelta(minutes=minutes)).isoformat()
             ))
+    db.flush()
     rng.shuffle(rows)
     for n, (kind, phone, caller, ts, ts2) in enumerate(rows):
         if kind == "mt":
@@ -406,6 +406,9 @@ def _seed_random_threads(db: Session, seed: int, phones: int = 60) -> None:
         else:
             body = None if n % 9 == 0 else f"회신 {n}"
             _add_mo(db, key=f"mo-{n}", caller=caller, phone=phone, body=body, recv_dt=ts, received_at=ts2)
+    for read in db.scalars(select(ThreadRead)):
+        ids = list(db.scalars(select(MoMessage.id).where(MoMessage.mo_number == read.phone).order_by(MoMessage.id)))
+        read.last_read_mo_id = rng.choice([0, *ids])
     db.commit()
 
 
@@ -492,3 +495,75 @@ def test_query_count_does_not_grow_with_phones(db_engine, db_session, sample_use
 
     assert service[6] == service[240] == 5  # 집계 2 + 읽음 1 + 본문 MO·MT 각 1
     assert route[6] == route[240]
+
+
+def test_filters_cover_threads_after_first_200_and_pages_are_complete(db_session):
+    """최근 200개가 읽음이어도 오래된 미읽음과 검색 일치 항목이 누락되지 않는다."""
+    for i in range(205):
+        phone = f"0108000{i:04d}"
+        _add_mo(db_session, key=f"page-{i}", caller=_CALLERS[0], phone=phone,
+                body=f"메모 {i}" if i else "찾을 유일한 본문", recv_dt=None,
+                received_at=(_BASE + timedelta(minutes=i)).isoformat())
+        if i >= 5:
+            mo_id = db_session.scalar(select(MoMessage.id).where(MoMessage.mo_number == phone))
+            db_session.add(ThreadRead(caller=_CALLERS[0], phone=phone,
+                                      read_at=_BASE.isoformat(), last_read_mo_id=mo_id))
+    db_session.commit()
+    first = api_list_threads(db=db_session)
+    second = api_list_threads(offset=200, db=db_session)
+    assert first["meta"] == {"total": 205, "limit": 200, "offset": 0, "hasMore": True, "unreadTotal": 5}
+    assert second["meta"] == {"total": 205, "limit": 200, "offset": 200, "hasMore": False, "unreadTotal": 5}
+    assert len(first["data"]) == 200
+    assert len(second["data"]) == 5
+    assert len({row["id"] for row in first["data"] + second["data"]}) == 205
+    assert api_list_threads(offset=205, db=db_session)["data"] == []
+    filtered = api_list_threads(unread=True, limit=2, offset=2, db=db_session)
+    assert [row["phone"] for row in filtered["data"]] == ["01080000002", "01080000001"]
+    assert filtered["meta"] == {"total": 5, "limit": 2, "offset": 2, "hasMore": True, "unreadTotal": 5}
+    for query in ("01080000000", "유일한 본문"):
+        found = api_list_threads(q=query, db=db_session)
+        assert [row["phone"] for row in found["data"]] == ["01080000000"]
+        assert found["meta"]["unreadTotal"] == found["meta"]["total"] == 1
+    assert api_list_threads(q="메모 204", unread=True, db=db_session)["meta"]["unreadTotal"] == 0
+
+    from app.routes.dashboard import get_dashboard
+    inbox = get_dashboard(db=db_session)["data"]["inbox"]
+    assert inbox["unread"] == 5
+    assert len(inbox["threads"]) == 5
+    assert all(not row["unread"] for row in inbox["threads"])
+
+
+def test_search_matches_latest_body_only_and_tied_pages_are_stable(db_session):
+    for i in range(4):
+        phone = f"0108000{i:04d}"
+        _add_mo(db_session, key=f"old-{i}", caller=_CALLERS[0], phone=phone,
+                body="old needle", recv_dt="2026-05-01T00:00:00+00:00")
+        _add_mo(db_session, key=f"new-{i}", caller=_CALLERS[0], phone=phone,
+                body="LATEST", recv_dt="2026-06-01T00:00:00+00:00")
+    db_session.commit()
+    assert api_list_threads(q="needle", db=db_session)["data"] == []
+    page1 = api_list_threads(q="latest", limit=2, db=db_session)
+    page2 = api_list_threads(q="latest", limit=2, offset=2, db=db_session)
+    assert [row["phone"] for row in page1["data"] + page2["data"]] == [f"0108000{i:04d}" for i in (3, 2, 1, 0)]
+    assert page2["meta"]["hasMore"] is False
+
+
+@pytest.mark.parametrize("status", ["REG", "FAILED"])
+@pytest.mark.parametrize("missing", [None, ""])
+def test_new_send_preview_matches_detail_before_report(db_session, sample_user, status, missing):
+    from app.services.chat import get_thread
+
+    _add_mt(db_session, caller=_CALLERS[0], phone=_PHONE, content="이전 발신",
+            complete_time="2026-05-01T00:00:00+00:00")
+    _add_mo(db_session, key="old-mo", caller=_CALLERS[0], phone=_PHONE, body="이전 회신",
+            recv_dt="2026-05-15T00:00:00+00:00")
+    _add_mt(db_session, caller=_CALLERS[0], phone=_PHONE, content="방금 작성한 답장",
+            complete_time=missing, report_dt=missing)
+    last_message = db_session.scalar(select(Message).order_by(Message.id.desc()))
+    last_message.status = status
+    db_session.commit()
+    thread = _only_thread(db_session)
+    detail_last = get_thread(db_session, _CALLERS[0], _PHONE)[-1]
+    assert (thread.last_direction, thread.last_timestamp, thread.last_body) == (
+        "OUT", detail_last.timestamp, detail_last.body,
+    ) == ("OUT", "2026-06-01T00:00:00+00:00", "방금 작성한 답장")

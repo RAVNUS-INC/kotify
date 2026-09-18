@@ -1,162 +1,185 @@
-"""대화방 팀 공유 읽음 추적 테스트.
-
-"안읽음"을 "미답(답장 안 함)"이 아니라 "마지막 고객(MO) 메시지가 팀 read_at
-이후"로 판정한다. 대화방을 열면(api_mark_read) read_at 이 갱신되어 팀 전체에게
-읽음 처리되고, 새 MO 가 오면 다시 안읽음이 된다.
-"""
+"""팀 공유 읽음은 화면에서 관측한 MO ID 경계이며 수신 시각/요청 완료 순서에 의존하지 않는다."""
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
+import httpx
+import pytest
+from fastapi import FastAPI
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import Session
+
+from app.auth.deps import require_setup_complete, require_user
+from app.db import Base, get_db
 from app.models import Campaign, Message, MoMessage, MsghubRequest, ThreadRead
-from app.routes.threads import api_get_thread, api_mark_read
+from app.routes.threads import ThreadReadBody, api_get_thread, api_mark_read, router
 from app.services.chat import list_threads, thread_unread
 
 _CALLER = "0212345678"
 _PHONE = "01099998888"
+_TID = f"{_CALLER}:{_PHONE}"
 
 
-def _make_mo(db, *, recv_dt, mo_key, caller=_CALLER, phone=_PHONE, msg="안녕하세요"):
-    """고객 수신(MO) 1건 생성 — list_threads 가 inbound 스레드로 인식."""
-    db.add(MoMessage(
-        mo_key=mo_key,
-        mo_number=phone,
-        mo_callback=caller,
-        mo_type="message",
-        mo_msg=msg,
-        mo_recv_dt=recv_dt,
-        raw_payload="{}",
-        received_at=recv_dt,
-    ))
+def _make_mo(db, *, recv_dt="2026-05-30T12:00:00+00:00", mo_key, caller=_CALLER,
+             phone=_PHONE, msg="안녕하세요", received_at=None):
+    mo = MoMessage(
+        mo_key=mo_key, mo_number=phone, mo_callback=caller, mo_type="message", mo_msg=msg,
+        mo_recv_dt=recv_dt, raw_payload="{}", received_at=received_at or recv_dt,
+    )
+    db.add(mo)
     db.commit()
+    return mo.id
 
 
 def _thread(db, phone=_PHONE):
-    threads, _ = list_threads(db)
-    return next(t for t in threads if t.phone == phone)
+    return next(t for t in list_threads(db)[0] if t.phone == phone)
 
 
-# ── thread_unread 헬퍼 (혼합 포맷) ────────────────────────────────────────────
+def _read(db, mo_id, caller=_CALLER):
+    return api_mark_read(f"{caller}:{_PHONE}", ThreadReadBody(lastReadMessageId=mo_id), db=db)
 
 
-def test_thread_unread_helper_iso():
-    assert thread_unread("2026-05-30T14:00:00+00:00", "2026-05-30T13:00:00+00:00") is True
-    assert thread_unread("2026-05-30T12:00:00+00:00", "2026-05-30T13:00:00+00:00") is False
-
-
-def test_thread_unread_helper_no_read_or_no_mo():
-    assert thread_unread("2026-05-30T12:00:00+00:00", None) is True   # 한 번도 안 읽음
-    assert thread_unread("2026-05-30T12:00:00+00:00", "") is True
-    assert thread_unread("", "2026-05-30T13:00:00+00:00") is False    # 고객 메시지 없음
-    assert thread_unread(None, None) is False
-
-
-def test_thread_unread_helper_mixed_format():
-    # msghub 네이티브 20260530140000(KST=05:00Z) vs ISO 04:00Z → mo 가 더 최근 → 안읽음.
-    # 문자열 비교였다면 '2026-..'<'202605..' 로 뒤집혔을 케이스 — epoch 비교 검증.
-    assert thread_unread("20260530140000", "2026-05-30T04:00:00+00:00") is True
-    assert thread_unread("20260530120000", "2026-05-30T06:00:00+00:00") is False  # 12:00KST=03:00Z<06:00Z
-
-
-# ── list_threads 읽음 판정 (now 비의존: 양쪽 시각 직접 지정) ───────────────────
-
-
-def test_unread_before_any_read(db_session):
-    """한 번도 안 읽은 고객 메시지는 안읽음이다."""
-    _make_mo(db_session, recv_dt="2026-05-30T12:00:00+00:00", mo_key="mo-a")
-    assert _thread(db_session).unread is True
-
-
-def test_not_unread_after_read(db_session):
-    """read_at 이 마지막 MO 이후면 안읽음 아니다."""
-    _make_mo(db_session, recv_dt="2026-05-30T12:00:00+00:00", mo_key="mo-b")
-    db_session.add(ThreadRead(caller=_CALLER, phone=_PHONE, read_at="2026-05-30T13:00:00+00:00"))
-    db_session.commit()
-    assert _thread(db_session).unread is False
-
-
-def test_new_mo_after_read_is_unread_again(db_session):
-    """읽은 뒤 새 MO 가 오면 다시 안읽음."""
-    _make_mo(db_session, recv_dt="2026-05-30T12:00:00+00:00", mo_key="mo-c1")
-    db_session.add(ThreadRead(caller=_CALLER, phone=_PHONE, read_at="2026-05-30T13:00:00+00:00"))
-    db_session.commit()
-    _make_mo(db_session, recv_dt="2026-05-30T14:00:00+00:00", mo_key="mo-c2")  # 읽음 이후
-    assert _thread(db_session).unread is True
-
-
-def test_unread_clears_with_msghub_kst_recv_dt(db_session):
-    """회귀: msghub moRecvDt('2026-05-30 11:36:38' = KST 11:36 = UTC 02:36)를
-    UTC 03:00 에 읽으면 unread 해제돼야 한다.
-
-    이전엔 naive 를 UTC 로 파싱해 MO 를 UTC 11:36(9h 늦게)로 계산 → read_at(UTC
-    03:00)보다 항상 최신 → 읽어도 unread 유지(프로덕션 버그). KST 로 파싱하면
-    MO(UTC 02:36) < read(UTC 03:00) → 읽음 처리.
-    """
-    _make_mo(db_session, recv_dt="2026-05-30 11:36:38", mo_key="mo-kst")  # 공백 KST
-    db_session.add(ThreadRead(caller=_CALLER, phone=_PHONE, read_at="2026-05-30T03:00:00+00:00"))
-    db_session.commit()
-    assert _thread(db_session).unread is False
-
-
-# ── api_mark_read 통합 (전체 루프) ────────────────────────────────────────────
+@pytest.mark.parametrize(("mo", "read", "expected"), [
+    (10, 9, True), (10, 10, False), (9, 10, False), (10, None, True),
+    (10, 0, True), (None, 10, False), (None, None, False),
+])
+def test_thread_unread_helper(mo, read, expected):
+    assert thread_unread(mo, read) is expected
 
 
 def test_mark_read_clears_unread_and_upserts(db_session):
-    """열람(mark_read) → 읽음 처리 + read_at upsert(중복 행 없음)."""
-    # MO 는 과거(2026-01-01)로 둬 실행 시각과 무관하게 now > mo 보장.
-    _make_mo(db_session, recv_dt="2026-01-01T00:00:00+00:00", mo_key="mo-d")
+    mo_id = _make_mo(db_session, mo_key="a")
     assert _thread(db_session).unread is True
-
-    res = api_mark_read(f"{_CALLER}:{_PHONE}", db_session)
-    assert res["data"]["unread"] is False
-    assert _thread(db_session).unread is False  # read_at(now) > mo(과거)
-
-    # 재호출은 upsert — 행이 늘지 않음
-    api_mark_read(f"{_CALLER}:{_PHONE}", db_session)
-    count = db_session.execute(
-        select(func.count()).select_from(ThreadRead)
-        .where(ThreadRead.caller == _CALLER, ThreadRead.phone == _PHONE)
-    ).scalar()
-    assert count == 1
+    assert _read(db_session, mo_id)["data"] == {
+        "id": _TID, "unread": False, "lastReadMessageId": mo_id,
+    }
+    _read(db_session, mo_id)
+    assert _thread(db_session).unread is False
+    assert db_session.scalar(select(func.count()).select_from(ThreadRead)) == 1
 
 
-def _make_outbound(db, *, created_at, caller=_CALLER, phone=_PHONE):
-    """우리 발신(MT) 1건 — 같은 (caller, phone) 스레드에 OUT 메시지를 만든다."""
-    campaign = Campaign(
-        created_by="test-sub-001", caller_number=caller, message_type="short",
-        content="답장드립니다", total_count=1, pending_count=0,
-        state="DISPATCHED", created_at=created_at,
-    )
-    db.add(campaign)
-    db.flush()
-    req = MsghubRequest(campaign_id=campaign.id, chunk_index=0, sent_at=created_at)
-    db.add(req)
-    db.flush()
-    db.add(Message(
-        campaign_id=campaign.id, msghub_request_id=req.id,
-        to_number=phone, to_number_raw=phone, status="DELIVERED",
-    ))
-    db.commit()
+def test_read_snapshot_does_not_swallow_message_arriving_after_get(db_session):
+    first = _make_mo(db_session, mo_key="first")
+    snapshot = api_get_thread(_TID, db_session)["data"]
+    assert snapshot["lastInboundMessageId"] == first
+    later = _make_mo(db_session, mo_key="later", recv_dt="2026-05-30T14:00:00+00:00")
+
+    result = _read(db_session, snapshot["lastInboundMessageId"])
+
+    assert result["data"]["unread"] is True
+    assert _thread(db_session).unread is True
+    detail = api_get_thread(_TID, db_session)["data"]
+    assert detail["unread"] is True
+    assert detail["lastInboundMessageId"] == later
+    _read(db_session, later)
+    assert _thread(db_session).unread is False
+
+
+def test_delayed_old_source_timestamp_stays_unread_and_snapshot_uses_max_id(db_session):
+    first = _make_mo(db_session, mo_key="first", recv_dt="2026-05-30T12:00:00")
+    _read(db_session, first)
+    assert _thread(db_session).unread is False
+    later = _make_mo(db_session, mo_key="delayed", recv_dt="20260529090000",
+                     received_at="2026-05-30T04:00:00+00:00")
+    detail = api_get_thread(_TID, db_session)["data"]
+    assert detail["messages"][-1]["id"] == f"m-in-{first}"  # 시각으로는 이전 행이 마지막이다.
+    assert detail["lastInboundMessageId"] == later
+    assert detail["unread"] is True
+    assert _thread(db_session).unread is True
+    _read(db_session, later)
+    assert _thread(db_session).unread is False
+
+
+def test_phone_read_is_shared_across_callers_and_reverse_requests_do_not_regress(db_session):
+    first = _make_mo(db_session, mo_key="first")
+    second = _make_mo(db_session, mo_key="second", caller="CHATBOT_OTHER")
+    _read(db_session, second)
+    _read(db_session, first)  # 같은 caller의 늦게 끝난 이전 요청.
+    _read(db_session, first, caller="CHATBOT_OTHER")  # 다른 caller의 이전 요청.
+    assert _thread(db_session).unread is False
+    for caller in (_CALLER, "CHATBOT_OTHER"):
+        assert "unread" not in api_get_thread(f"{caller}:{_PHONE}", db_session)["data"]
+    assert db_session.scalar(select(ThreadRead.last_read_mo_id).where(ThreadRead.caller == _CALLER)) == second
+
+
+def test_parallel_read_upserts_do_not_regress(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'read-race.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        first = _make_mo(db, mo_key="first")
+        second = _make_mo(db, mo_key="second")
+    barrier = Barrier(2)
+
+    def mark(mo_id):
+        with Session(engine) as db:
+            barrier.wait(timeout=5)
+            return _read(db, mo_id)["data"]["lastReadMessageId"]
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(mark, [second, first]))
+        with Session(engine) as db:
+            assert db.scalar(select(ThreadRead.last_read_mo_id)) == second
+            assert _thread(db).unread is False
+        assert all(value >= first for value in results)
+    finally:
+        engine.dispose()
+
+
+def test_invalid_or_other_phone_marker_does_not_write(db_session):
+    other = _make_mo(db_session, mo_key="other", phone="01000000001")
+    for marker in (other, other + 100):
+        result = _read(db_session, marker)
+        assert result.status_code == 422
+    assert db_session.scalar(select(func.count()).select_from(ThreadRead)) == 0
+
+
+@pytest.fixture
+def thread_app(db_session, sample_user):
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user] = lambda: sample_user
+    app.dependency_overrides[require_setup_complete] = lambda: None
+    app.dependency_overrides[get_db] = lambda: db_session
+    db_session.connection()  # 인메모리 DB 연결을 요청 worker와 공유한다.
+    return app
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"lastReadMessageId": 0}, {"lastReadMessageId": -1},
+                                      {"lastReadMessageId": True}, {"lastReadMessageId": "1"}])
+async def test_old_or_invalid_read_body_fails_closed(thread_app, db_session, payload):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=thread_app), base_url="http://test") as client:
+        result = await client.post(f"/threads/{_TID}/read", json=payload)
+    assert result.status_code == 422
+    assert db_session.scalar(select(func.count()).select_from(ThreadRead)) == 0
 
 
 def test_detail_unread_with_trailing_outbound(db_session, sample_user):
-    """회귀(프로덕션 버그): 고객 MO(T1) 뒤에 우리 발신(T2>T1)이 있는 스레드.
-
-    목록은 '마지막 고객 메시지 vs read_at' 으로 unread=True 인데, 상세는
-    예전엔 messages[-1] 이 IN 일 때만 unread 로 봐서(끝 메시지가 OUT) read 로
-    응답 → ThreadView 가드(wasUnread)가 mark-read POST 를 건너뜀 → read_at 이
-    영원히 저장되지 않아 목록에서 계속 안읽음으로 남았다. 상세도 목록과 동일
-    기준(마지막 고객 메시지)을 써야 한다.
-    """
-    _make_mo(db_session, recv_dt="2026-05-30T01:00:00+00:00", mo_key="mo-trail")
-    _make_outbound(db_session, created_at="2026-05-30T02:00:00+00:00")  # MO 뒤 발신
-
-    # 목록·상세 모두 unread=True 여야 한다(일치).
-    assert _thread(db_session).unread is True
-    res = api_get_thread(f"{_CALLER}:{_PHONE}", db_session)
-    assert res["data"].get("unread") is True
-
-    # 열람 후엔 둘 다 읽음(상세는 unread 키 자체가 없음).
-    api_mark_read(f"{_CALLER}:{_PHONE}", db_session)
+    mo_id = _make_mo(db_session, recv_dt="2026-05-30T01:00:00+00:00", mo_key="mo-trail")
+    campaign = Campaign(
+        created_by=sample_user.sub, caller_number=_CALLER, message_type="short", content="답장드립니다",
+        total_count=1, pending_count=0, state="DISPATCHED", created_at="2026-05-30T02:00:00+00:00",
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    request = MsghubRequest(campaign_id=campaign.id, chunk_index=0, sent_at=campaign.created_at)
+    db_session.add(request)
+    db_session.flush()
+    db_session.add(Message(campaign_id=campaign.id, msghub_request_id=request.id,
+                           to_number=_PHONE, to_number_raw=_PHONE, status="REG"))
+    db_session.commit()
+    detail = api_get_thread(_TID, db_session)["data"]
+    assert detail["messages"][-1]["side"] == "us"
+    assert detail["lastInboundMessageId"] == mo_id
+    assert detail["unread"] is True
+    _read(db_session, mo_id)
     assert _thread(db_session).unread is False
-    assert api_get_thread(f"{_CALLER}:{_PHONE}", db_session)["data"].get("unread") is None
+    assert "unread" not in api_get_thread(_TID, db_session)["data"]
+
+
+@pytest.mark.parametrize("query", ["limit=0", "limit=201", "offset=-1", "limit=nope"])
+async def test_invalid_page_bounds_rejected(thread_app, query):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=thread_app), base_url="http://test") as client:
+        result = await client.get(f"/threads?{query}")
+    assert result.status_code == 422

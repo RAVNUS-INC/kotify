@@ -25,8 +25,8 @@ export type CancelResult = {
 };
 
 /**
- * 예약 캠페인 취소. 상태가 RESERVED 가 아니면 400, 권한 없으면 403,
- * msghub 설정 없으면 503.
+ * 남은 예약 청크 취소. 일부 요청 실패 캠페인도 취소할 수 있다. 예약이 아니면 400,
+ * 권한 없으면 403, msghub 설정 없으면 503. 일부 취소는 안내 메시지와 함께 200.
  */
 export async function cancelCampaignClient(id: string): Promise<CancelResult> {
   const res = await apiSend(`/api/campaigns/${encodeURIComponent(id)}/cancel`, {

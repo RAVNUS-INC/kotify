@@ -20,6 +20,8 @@ export type ChatMessage = {
   time: string;
   /** 발신(us) 전용. 결과를 알 수 없는 과거 발송은 없음. */
   status?: DeliveryStatus;
+  /** 발신(us) 전용. 캠페인 작성자의 현재 표시명. */
+  senderName?: string;
 };
 
 export type ChatThread = {
@@ -38,6 +40,22 @@ export type ChatThread = {
 
 export type ChatThreadDetail = ChatThread & {
   messages: ChatMessage[];
+  /** 이 상세 응답에 포함된 수신 메시지의 최대 id. 읽음 처리의 상한. */
+  lastInboundMessageId: number | null;
   /** 이 번호로 가장 최근에 전달 성공한 발송의 전송 방식(답장 기본값). 이력 없으면 없음. */
   defaultSendChannel?: SendChannel;
+};
+
+export type ChatThreadPageMeta = {
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  /** q 검색 결과 전체의 안읽음 수. unread 필터·페이지와는 무관하다. */
+  unreadTotal: number;
+};
+
+export type ChatThreadPage = {
+  data: ChatThread[];
+  meta: ChatThreadPageMeta;
 };

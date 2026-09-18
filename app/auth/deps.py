@@ -1,35 +1,22 @@
 """FastAPI 의존성 — 인증/권한 검사.
 
-세션에서 사용자 정보를 읽어 DB upsert하고,
+세션의 사용자 식별자로 최신 DB 사용자 정보를 조회하고,
 라우트에서 require_user / require_role / require_setup_complete 등으로 사용한다.
 """
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.auth.oidc import role_diagnostic_summary
 from app.db import get_db
 from app.models import User
 
-if TYPE_CHECKING:
-    pass
-
-_auth_log = logging.getLogger("uvicorn.error")
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
 
 def parse_user_roles(user: User | None) -> list[str]:
-    """user.roles JSON 문자열을 list로 파싱한다. 실패 시 빈 list 반환.
+    """user.roles JSON 문자열을 list[str]로 파싱한다. 잘못된 형식은 빈 list 반환.
 
     Args:
         user: User ORM 객체 또는 None.
@@ -40,18 +27,22 @@ def parse_user_roles(user: User | None) -> list[str]:
     if not user or not user.roles:
         return []
     try:
-        return json.loads(user.roles)
+        roles = json.loads(user.roles)
     except (json.JSONDecodeError, TypeError):
         return []
+    if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
+        return []
+    return roles
 
 
 def get_current_user(
     request: Request,
     db: Session = Depends(get_db),
 ) -> User | None:
-    """세션에서 사용자 정보를 읽어 DB upsert 후 반환한다.
+    """세션의 사용자 식별자로 최신 DB 사용자를 조회한다.
 
-    세션에 사용자 정보가 없으면 None 반환.
+    역할·프로필·로그인 시각은 검증된 로그인 콜백에서만 갱신한다.
+    세션이 없거나 DB 사용자가 삭제됐으면 None을 반환한다.
 
     Args:
         request: Starlette Request.
@@ -60,67 +51,11 @@ def get_current_user(
     Returns:
         User 또는 None.
     """
-    sub = request.session.get("user_sub")
-    if not sub:
+    sub = request.session.get("user_sub") if "session" in request.scope else None
+    if not isinstance(sub, str) or not sub:
         return None
 
-    email = request.session.get("user_email", "")
-    name = request.session.get("user_name", "")
-    # user_display 는 auth.py 로그인 시 format_display_name 결과가 들어옴.
-    # 없으면 name / email fallback 으로 최소한 비어있지는 않게 유지.
-    display_name = request.session.get("user_display") or name or email or sub
-    # #29: user_roles는 list로 직접 저장됨 — 타입 안전 처리
-    roles_raw = request.session.get("user_roles", [])
-    if isinstance(roles_raw, list):
-        roles = roles_raw
-    else:
-        try:
-            roles = json.loads(roles_raw)
-        except (json.JSONDecodeError, TypeError):
-            roles = []
-
-    roles_json = json.dumps(roles, ensure_ascii=False)
-    now = _now_iso()
-
-    # upsert
-    user = db.get(User, sub)
-    if user is None:
-        user = User(
-            sub=sub,
-            email=email,
-            name=name,
-            display_name=display_name,
-            roles=roles_json,
-            created_at=now,
-            last_login_at=now,
-        )
-        db.add(user)
-    else:
-        existing_roles = parse_user_roles(user)
-        # 기존 세션이 새 로그인 결과를 덮는지 관찰한다. 권한 동작은 변경하지 않는다.
-        roles_differ = existing_roles != roles
-        if isinstance(existing_roles, list) and isinstance(roles, list) and all(
-            isinstance(role, str) for role in existing_roles + roles
-        ):
-            roles_differ = set(existing_roles) != set(roles)
-        if roles_differ:
-            _auth_log.warning(
-                "auth_session_role_mismatch %s",
-                json.dumps({
-                    "db_roles": role_diagnostic_summary(existing_roles),
-                    "session_roles": role_diagnostic_summary(roles),
-                    "session_has_role_diagnostics": request.session.get("role_diagnostics_v1")
-                    is True,
-                }, sort_keys=True),
-            )
-        user.email = email
-        user.name = name
-        user.display_name = display_name
-        user.roles = roles_json
-        user.last_login_at = now
-
-    db.commit()
-    return user
+    return db.get(User, sub)
 
 
 def require_user(
@@ -194,7 +129,7 @@ def require_role(*roles: str, message: str = "권한이 없습니다.") -> Calla
     """
 
     # require_user 를 Depends 로 받아야 라우터 레벨 Depends(require_user) 와 같은
-    # 요청 안에서 캐시가 공유된다. 직접 호출하면 user upsert·commit 이 두 번 돈다.
+    # 요청 안에서 캐시가 공유된다. 직접 호출하면 사용자 조회가 두 번 돈다.
     def _check(user: User = Depends(require_user)) -> User:
         if not user_has_role(user, *roles):
             raise HTTPException(

@@ -348,11 +348,10 @@ class MoMessage(Base):
 
 
 class ThreadRead(Base):
-    """대화방(caller:phone) 읽음 상태 — 팀 공유(스레드당 단일 read_at).
+    """팀이 실제 관측한 마지막 MO ID. 같은 phone 의 모든 caller 행 중 MAX 를 공유한다.
 
-    대화방은 (발신번호 caller, 고객번호 phone) 가상 키로 식별된다. 팀 중 누구든
-    대화방을 열면 read_at 이 갱신되어 전체에게 읽음 처리된다. unread 판정은
-    "마지막 고객(MO) 메시지 시각 > read_at" (app/services/chat.py list_threads).
+    caller/read_at 은 기존 데이터·다운그레이드 호환용이다. 새 읽음 판정은 발생 시각이 아닌
+    last_read_mo_id 를 사용하므로 조회 이후 도착한 메시지와 지연 웹훅을 읽음으로 삼키지 않는다.
     """
 
     __tablename__ = "thread_reads"
@@ -364,7 +363,9 @@ class ThreadRead(Base):
     phone: Mapped[str] = mapped_column(Text, nullable=False)
     # 팀 전체 기준 마지막 읽음 시각 (ISO8601 UTC)
     read_at: Mapped[str] = mapped_column(Text, nullable=False)
+    last_read_mo_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     __table_args__ = (
         UniqueConstraint("caller", "phone", name="uq_thread_reads_caller_phone"),
+        Index("idx_thread_reads_phone", "phone"),
     )

@@ -8,7 +8,7 @@ import {
 } from '@/components/chat';
 import { EmptyState } from '@/components/ui';
 import { ApiError } from '@/lib/api';
-import { fetchThread, fetchThreads, getPendingDeliveryIds } from '@/lib/chat';
+import { fetchThread, fetchThreadPage, getDeliveryRefreshIds } from '@/lib/chat';
 
 const VALID_FILTERS = new Set<ChatFilter>(['all', 'unread', 'urgent']);
 
@@ -23,17 +23,22 @@ type ChatPageProps = {
   searchParams?: {
     filter?: string;
     selected?: string;
+    q?: string;
+    offset?: string;
   };
 };
 
 export default async function ChatPage({ searchParams }: ChatPageProps) {
   const filter = normalizeFilter(searchParams?.filter);
   const selected = searchParams?.selected;
+  const q = typeof searchParams?.q === 'string' ? searchParams.q.trim() : '';
+  const rawOffset = Number(searchParams?.offset ?? 0);
+  const offset = Number.isSafeInteger(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
 
-  const threads = await fetchThreads({
-    unread: filter === 'unread',
+  const { data: threads, meta } = await fetchThreadPage({
+    q, unread: filter === 'unread', limit: 200, offset,
   });
-  const unreadCount = threads.filter((t) => t.unread).length;
+  const unreadCount = meta.unreadTotal;
 
   // 선택된 스레드가 있으면 본문까지 로드 — 클릭 즉시 채팅 UI 노출.
   // 예전엔 ThreadPreview(요약 카드) + "스레드 열기" 버튼을 거쳐 /chat/{id}
@@ -58,11 +63,11 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
       {/* SSE 구독 — 고객 회신, 열린 대화의 전달 대기 메시지 결과를 새로고침 없이 갱신(UI 없음). */}
       <ChatLiveRefresh
         threadId={threadDetail?.id}
-        pendingDeliveryIds={getPendingDeliveryIds(threadDetail)}
+        deliveryRefreshIds={getDeliveryRefreshIds(threadDetail)}
       />
       <PageHeader
         title="대화방"
-        sub={`${threads.length}개 대화 · 미답 ${unreadCount}건`}
+        sub={`${meta.total}개 대화 · 안읽음 ${unreadCount}건`}
       />
 
       <div className="flex-1 min-h-0 overflow-hidden rounded-lg border border-line bg-surface">
@@ -70,8 +75,8 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
           className="grid h-full"
           style={{ gridTemplateColumns: '200px 320px 1fr' }}
         >
-          <ChatFilters active={filter} unreadCount={unreadCount} />
-          <ThreadList threads={threads} activeId={selected} filter={filter} />
+          <ChatFilters active={filter} unreadCount={unreadCount} selected={selected} q={q} />
+          <ThreadList threads={threads} activeId={selected} filter={filter} q={q} page={meta} />
           {threadDetail ? (
             <div className="flex min-h-0 flex-col bg-surface-subtle p-3">
               <ThreadView thread={threadDetail} />

@@ -40,6 +40,8 @@ from app.services.report import _refresh_campaign_counters
 from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
 
 if TYPE_CHECKING:
+    from sqlalchemy.sql import ColumnElement
+
     from app.msghub.client import MsghubClient
 
 # MMS 원본 업로드 상한 (전처리 전). 프론트가 초과분을 차단해도 서버가
@@ -277,6 +279,17 @@ def get_campaign(cid: str, db: Session = Depends(get_db)) -> dict | JSONResponse
 
     # 기본 응답 = 목록 shape + 추가 필드
     data = _campaign_to_dict(campaign)
+    data["canCancelReservation"] = _has_reservation_rows(db, campaign)
+    if campaign.reserve_time:
+        uncertain = db.scalar(select(func.count()).select_from(Message).where(
+            Message.campaign_id == campaign.id,
+            _uncertain_failure_condition(),
+        )) or 0
+        if uncertain:
+            data["failureReason"] = (
+                f"{uncertain}명은 예약 접수 여부를 확인하지 못했습니다. "
+                "예약이 남아 발송될 수 있으니 msghub 웹 콘솔에서 확인하고 취소해 주세요."
+            )
     data["recipientsSample"] = [_message_to_recipient(m) for m in messages]
     data["breakdown"] = {
         "total": total,
@@ -403,8 +416,37 @@ async def create_campaign(
 
 # ── POST /campaigns/{id}/cancel — 예약 발송 취소 ─────────────────────────────
 
-# 발송되지 않는 행 — 취소 확정(CANCELED)과 요청 단계 실패(FAILED). 이것만 남으면 전체 취소다.
-_NOT_SENT_STATUSES = ("CANCELED", "FAILED")
+def _uncertain_failure_condition() -> ColumnElement[bool]:
+    """조회 불가 표시는 요청 거부 증거가 아니다. 코드 없는 기존 실패도 접수 여부가 불확실하다."""
+    return and_(
+        Message.status == "FAILED",
+        or_(Message.result_code.is_(None), Message.result_code.in_(("INVALID_KEY", "OVER_DATE"))),
+    )
+
+
+def _has_reservation_rows(
+    db: Session, campaign: Campaign, statuses: tuple[str, ...] = ("PENDING",)
+) -> bool:
+    """캠페인 결과와 별개로 예약 접수된 수신자가 남았는지 확인한다.
+
+    일부 요청 실패는 PARTIAL_FAILED 지만 정상 접수된 청크는 여전히 예약이다. 예약 메타데이터와
+    요청 ID 를 함께 확인해 즉시 발송 실패를 예약으로 취급하지 않는다. RESERVED 는 이전 데이터와
+    접수 도중의 표현을 유지하며, 레거시 캠페인 ID 는 기존 콘솔 취소 안내로 연결한다.
+    """
+    if campaign.state == "RESERVE_CANCELED":
+        return False
+    if not campaign.reserve_time and campaign.state != "RESERVED":
+        return False
+    return db.execute(
+        select(Message.id)
+        .join(MsghubRequest, Message.msghub_request_id == MsghubRequest.id)
+        .where(
+            Message.campaign_id == campaign.id,
+            Message.status.in_(statuses),
+            or_(MsghubRequest.web_req_id.is_not(None), bool(campaign.web_req_id)),
+        )
+        .limit(1)
+    ).first() is not None
 
 # 예약 취소를 처리하고 있는 캠페인 id — 단일 uvicorn 워커 전제(compose._dispatching 과 같음).
 _cancelling: set[int] = set()
@@ -441,16 +483,18 @@ async def cancel_campaign(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict | JSONResponse:
-    """예약(`RESERVED`) 상태 캠페인을 취소한다.
+    """예약 접수된 청크를 취소한다. 일부 요청 실패 캠페인도 남은 예약을 취소한다.
 
     권한: sender/admin/owner. viewer/operator 는 403.
-    상태: RESERVED 만 허용. 이미 실행/완료/이미취소는 400.
+    상태: RESERVED 또는 예약 메타데이터·청크 ID 가 있는 대기/취소 행을 허용한다.
+      취소 행은 앞선 시도가 메시지만 커밋하고 종료된 경우 최종 상태를 복구하기 위한 것이다.
     청크: msghub 는 예약 요청(수신자 10명 청크)마다 webReqId 를 따로 주고 취소도 그 단위라,
       대기(PENDING) 행이 남은 청크마다 취소를 요청한다. 받아들여진 청크의 PENDING 행만
       CANCELED 로 바꾸고, 거부·실패한 청크는 PENDING 그대로 둔다(발송 여부는 리포트가 확정, H6).
-    결과: 발송될 수 있는 행이 남지 않으면 RESERVE_CANCELED. 일부만 취소되면 RESERVED 를
-      유지하고 200 으로 요약을 알린다 — 다시 누르면 남은 청크만 요청한다. 하나도 취소하지
-      못하면 거부 409 / 오류 502.
+    결과: 발송될 수 있는 행이 남지 않으면 RESERVE_CANCELED. 일부만 취소되면 200 으로
+      요약을 알린다 — 다시 누르면 남은 청크만 요청한다. 응답을 잃은 실패 행은 접수 여부를
+      알 수 없으므로 전체 취소로 단정하지 않고 콘솔 확인을 안내한다. 하나도 취소하지 못하면
+      거부 409 / 오류 502.
     레거시: 청크별 webReqId(alembic 0018) 이전의 여러 청크 예약은 마지막 청크 ID 만 남아
       전체를 취소할 수 없어 409 로 msghub 콘솔 취소를 안내한다.
     동시성: 예약 접수(청크 발송)나 다른 취소가 진행 중인 캠페인은 409 로 기다리게 한다.
@@ -473,7 +517,9 @@ async def cancel_campaign(
             {"error": {"code": "forbidden", "message": "예약 취소 권한이 없습니다"}},
             status_code=403,
         )
-    if campaign.state != "RESERVED":
+    if campaign.state != "RESERVED" and not _has_reservation_rows(
+        db, campaign, ("PENDING", "CANCELED")
+    ):
         return JSONResponse(
             {"error": {
                 "code": "not_reserved",
@@ -603,12 +649,20 @@ async def _cancel_reservation_chunks(
         db.commit()
         cancelled.append(web_req_id)
 
-    canceled_rows, live_rows = db.execute(
+    # FAILED 여도 응답 코드가 없으면 공급자가 접수한 뒤 응답만 유실됐을 수 있다. 명시적인
+    # 거부 코드가 있는 실패만 발송 불가능으로 센다. 기존 코드 없는 실패도 보수적으로 남긴다.
+    uncertain_failure = _uncertain_failure_condition()
+    definitively_not_sent = or_(
+        Message.status == "CANCELED",
+        and_(Message.status == "FAILED", ~uncertain_failure),
+    )
+    canceled_rows, live_rows, uncertain_rows = db.execute(
         select(
             func.coalesce(func.sum(case((Message.status == "CANCELED", 1), else_=0)), 0),
             func.coalesce(
-                func.sum(case((Message.status.not_in(_NOT_SENT_STATUSES), 1), else_=0)), 0
+                func.sum(case((~definitively_not_sent, 1), else_=0)), 0
             ),
+            func.coalesce(func.sum(case((uncertain_failure, 1), else_=0)), 0),
         ).where(Message.campaign_id == campaign.id)
     ).one()
 
@@ -638,6 +692,17 @@ async def _cancel_reservation_chunks(
                 }},
                 status_code=409,
             )
+        if uncertain_rows:
+            return JSONResponse(
+                {"error": {
+                    "code": "unconfirmed_reservation",
+                    "message": (
+                        f"{uncertain_rows}명은 예약 접수 여부를 확인하지 못했습니다. "
+                        "예약이 남아 발송될 수 있으니 msghub 웹 콘솔에서 확인하고 취소해 주세요."
+                    ),
+                }},
+                status_code=409,
+            )
         return JSONResponse(
             {"error": {
                 "code": "nothing_to_cancel",
@@ -649,13 +714,24 @@ async def _cancel_reservation_chunks(
             status_code=409,
         )
     else:
-        # 일부만 취소 — 나머지는 예정대로 발송될 수 있어 RESERVED 를 유지한다.
+        # 일부만 취소 — 명시적으로 취소된 청크와 남은 수신자 수를 안내한다.
         msg = _partial_cancel_message(
             campaign.total_count, canceled_rows, live_rows,
             rejected=bool(rejected), failed=error is not None,
         )
+        if uncertain_rows:
+            msg += (
+                f" 이 중 {uncertain_rows}명은 예약 접수 여부를 확인하지 못했습니다. "
+                "msghub 웹 콘솔에서 확인하고 취소해 주세요."
+            )
 
+    completed_at = campaign.completed_at
     _refresh_campaign_counters(db, campaign.id)
+    if uncertain_rows:
+        # FAILED 는 요청 응답을 못 받은 로컬 기록이다. 예약 취소로 접수 여부까지 확정할 수
+        # 없으므로 전체 실패/취소로 마무리하지 않는다. 상세에는 콘솔 확인 안내가 계속 남는다.
+        campaign.state = "RESERVED"
+        campaign.completed_at = completed_at
     audit.log(
         db,
         actor_sub=user.sub,

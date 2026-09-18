@@ -5,7 +5,8 @@
 - `message.new`: 고객 회신(MO) 저장 — 창당 1회로 합쳐 발행(publish_throttled).
   프론트는 받을 때마다 새로고침한다.
 - `thread.updated`: 발신 전달 상태 변경(리포트 웹훅·재조정) — 창당 1회로 합쳐
-  발행(publish_throttled). 프론트는 전달 대기 메시지가 보이는 대화방에서만 새로고침한다.
+  발행(publish_throttled). 프론트는 전달 대기·실패 메시지가 보이는 대화방에서 이벤트를 받으면
+  간격을 제한해 새로고침한다. 이벤트 없이 폴링하지 않는다.
 
 전제: uvicorn `--workers 1` 단일 프로세스 (deploy/kotify.service). 프로세스가
 여러 개가 되면 한 워커가 발행한 이벤트를 다른 워커의 SSE 연결이 못 받으므로,

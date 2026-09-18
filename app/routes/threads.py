@@ -1,6 +1,6 @@
 """스레드(대화방) API 라우트 — S5 인박스, S6 스레드 상세.
 
-실 DB (campaigns + messages + mo_messages) 기반. services.chat.list_threads
+실 DB (campaigns + messages + mo_messages) 기반. services.chat.list_thread_page
 / get_thread 를 재사용해 대화방 UI 와 동일한 머지 로직 유지.
 
 api-contract.md §S5/S6 계약 — web/types/chat.ts 의 ChatThread /
@@ -12,18 +12,19 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import case, func, select, tuple_
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_sender, require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, Message, ThreadRead, User
+from app.models import Campaign, Message, MoMessage, ThreadRead, User
 from app.security.csrf import verify_csrf
 from app.services.chat import (
     ChatMessage as ServiceChatMessage,
@@ -34,10 +35,13 @@ from app.services.chat import (
 from app.services.chat import (
     default_send_channel,
     get_thread,
-    list_threads,
+    list_thread_page,
     outbound_channel,
+    sender_display_name,
     thread_unread,
+    validate_reply_content,
 )
+from app.util.text import measure_bytes
 from app.util.time import fmt_kst_hhmm
 
 router = APIRouter(
@@ -180,6 +184,8 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
     # 발송(None)도 생략해 대기·실패로 단정하지 않는다.
     if m.delivery:
         row["status"] = m.delivery
+    if m.direction == "OUT":
+        row["senderName"] = m.sender_name or "알 수 없음"
     return row
 
 
@@ -239,22 +245,13 @@ def _batch_last_campaign_labels(
 def api_list_threads(
     q: str | None = None,
     unread: bool | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
     db: Session = Depends(get_db),
 ) -> dict:
-    """스레드 목록. q(번호/본문 부분 매치), unread(안읽음만) 필터."""
-    threads, _total = list_threads(db, limit=200, offset=0)
-
-    if q:
-        ql = q.lower()
-        threads = [
-            t
-            for t in threads
-            if ql in (t.phone or "").lower()
-            or ql in (t.last_body or "").lower()
-        ]
-
-    if unread:
-        threads = [t for t in threads if t.unread]
+    """번호/최근 본문 검색·미읽음 필터 후 페이지를 반환한다. 읽음 총수는 q 조건 전체 기준."""
+    page = list_thread_page(db, limit=limit, offset=offset, q=q, unread=bool(unread))
+    threads = page.threads
 
     # N+1 회피: 필터링 후 남은 쌍을 한 번에 수집 → 2쿼리 × 2종 = 4쿼리로 고정.
     pairs: set[tuple[str, str]] = {(t.caller, t.phone) for t in threads}
@@ -279,7 +276,10 @@ def api_list_threads(
             row["lastCampaign"] = label
         rows.append(row)
 
-    return {"data": rows}
+    return {"data": rows, "meta": {
+        "total": page.total, "limit": limit, "offset": offset,
+        "hasMore": offset + len(rows) < page.total, "unreadTotal": page.unread_total,
+    }}
 
 
 # ── S6: GET /threads/{id} ────────────────────────────────────────────────────
@@ -305,19 +305,13 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         )
 
     last = messages[-1]
-    read_at = db.execute(
-        select(ThreadRead.read_at).where(
-            ThreadRead.caller == caller, ThreadRead.phone == phone
-        )
-    ).scalar_one_or_none()
-    # 안읽음 기준을 목록(list_threads)과 일치 — "마지막 고객(IN) 메시지가 팀
-    # read_at 이후". 이전엔 messages[-1] 이 IN 일 때만 unread 라, 고객 메시지
-    # 뒤에 우리 발신(MT)이 있으면 상세=read → ThreadView 가드(wasUnread)가
-    # mark-read 를 건너뛰어 목록에선 영원히 안읽음으로 남았다(프로덕션 버그).
-    last_mo_ts = next(
-        (m.timestamp for m in reversed(messages) if m.direction == "IN"), ""
+    last_read_id = db.scalar(
+        select(func.max(ThreadRead.last_read_mo_id)).where(ThreadRead.phone == phone)
     )
-    unread = thread_unread(last_mo_ts, read_at)
+    # 현재 응답에 실제 포함된 MO 만 인정한다. 시각순 마지막 행이 아니라 ID 최댓값이며,
+    # 조회 이후 도착한 메시지를 추가 SELECT 로 섞으면 클라이언트가 못 본 행을 읽게 된다.
+    last_inbound_id = max((m.mo_id or 0 for m in messages if m.direction == "IN"), default=0)
+    unread = thread_unread(last_inbound_id, last_read_id)
     # 단건 조회도 batch 헬퍼 재사용 — pair 1개면 2쿼리로 동일, 코드 경로 통일.
     pair = {(caller, phone)}
     last_channel = _batch_last_mt_channels(db, pair).get((caller, phone), "sms")
@@ -336,6 +330,7 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         "time": fmt_kst_hhmm(last.timestamp),
         "channel": last_channel,
         "messages": [_service_message_to_ts(m) for m in messages],
+        "lastInboundMessageId": last_inbound_id or None,
     }
     if contact:
         detail["contactName"] = contact["display"]
@@ -348,6 +343,43 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
     if send_channel:
         detail["defaultSendChannel"] = send_channel
     return {"data": detail}
+
+
+# ── POST /threads/validate-reply — 전송 없는 답장 사전 검증 ───────────────────
+
+
+class ReplyValidationBody(BaseModel):
+    text: str
+
+
+@router.post(
+    "/threads/validate-reply",
+    dependencies=[Depends(verify_csrf)],
+)
+def api_validate_reply(body: ReplyValidationBody) -> dict:
+    """실제 답장과 같은 EUC-KR 정책으로 검증한다. DB 변경·공급자 호출은 없다."""
+    data: dict = {"byteLength": None, "maxBytes": 90, "valid": False, "error": None}
+    if len(body.text) > 4000:
+        data["error"] = "답장 입력은 4000자 이내로 작성해주세요."
+        return {"data": data}
+
+    content = body.text.strip()
+    if not content:
+        data["byteLength"] = 0
+        return {"data": data}
+
+    result = validate_reply_content(content)
+    try:
+        # validate_message 는 2000바이트 초과 시 byte_len=0 을 반환하므로
+        # 표시용 길이는 별도로 측정한다. 인코딩 불가를 0바이트로 오인하지 않는다.
+        data["byteLength"] = measure_bytes(content)
+    except UnicodeEncodeError:
+        data["error"] = "EUC-KR 미지원 문자(이모지 등)가 포함되어 있습니다. 발송 전 제거하세요."
+        return {"data": data}
+
+    data["valid"] = result["ok"]
+    data["error"] = result.get("error")
+    return {"data": data}
 
 
 # ── POST /threads/{id}/messages — 답장 발송 ──────────────────────────────────
@@ -394,6 +426,7 @@ async def api_post_message(
 
     from app.main import get_msghub_client
     from app.services.chat import send_reply
+    from app.services.compose import ReplySendFailed
 
     client = get_msghub_client()
     if client is None:
@@ -411,6 +444,14 @@ async def api_post_message(
             phone=phone,
             content=body.text,
             send_channel=body.sendChannel,
+        )
+    except ReplySendFailed as exc:
+        return JSONResponse(
+            {"error": {
+                "code": exc.code, "message": str(exc),
+                "fields": {"campaignId": str(exc.campaign_id)},
+            }},
+            status_code=502,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -434,9 +475,14 @@ async def api_post_message(
                 "kind": body.sendChannel,  # 요청한 전송 방식 — 실제 도달 채널은 리포트 후 확정
                 "text": body.text,
                 "time": now_kst.strftime("%H:%M"),
+                "senderName": sender_display_name(user),
             }
         }
     }
+
+
+class ThreadReadBody(BaseModel):
+    lastReadMessageId: int = Field(..., ge=1, strict=True)
 
 
 @router.post(
@@ -445,13 +491,9 @@ async def api_post_message(
     response_model=None,
 )
 def api_mark_read(
-    tid: str, db: Session = Depends(get_db)
+    tid: str, body: ThreadReadBody, db: Session = Depends(get_db)
 ) -> dict | JSONResponse:
-    """스레드 읽음 표시 — (caller, phone) 팀 공유 read_at 을 현재 시각으로 upsert.
-
-    팀 중 누구든 대화방을 열면 전체에게 읽음 처리된다. unread 판정은
-    list_threads / api_get_thread 의 thread_unread(마지막 MO > read_at).
-    """
+    """해당 phone 에서 실제 관측한 MO ID 까지만 팀 공유 읽음 처리한다. 역순 요청은 후퇴하지 않는다."""
     parsed = _parse_thread_id(tid)
     if parsed is None:
         return JSONResponse(
@@ -459,18 +501,35 @@ def api_mark_read(
             status_code=404,
         )
     caller, phone = parsed
-    now = datetime.now(UTC).isoformat()
-    existing = db.execute(
-        select(ThreadRead).where(
-            ThreadRead.caller == caller, ThreadRead.phone == phone
+    observed = db.execute(select(MoMessage.id, MoMessage.received_at).where(
+        MoMessage.id == body.lastReadMessageId, MoMessage.mo_number == phone,
+    )).one_or_none()
+    if observed is None:
+        return JSONResponse(
+            {"error": {"code": "invalid_read_marker", "message": "이 대화의 수신 메시지를 지정해 주세요"}},
+            status_code=422,
         )
-    ).scalar_one_or_none()
-    if existing is None:
-        db.add(ThreadRead(caller=caller, phone=phone, read_at=now))
-    else:
-        existing.read_at = now
+    statement = insert(ThreadRead).values(
+        caller=caller, phone=phone, last_read_mo_id=observed.id,
+        # 이전 코드로 되돌려도 관측한 메시지 이후의 수신을 read_at=현재시각으로 덮지 않는다.
+        read_at=observed.received_at,
+    )
+    db.execute(statement.on_conflict_do_update(
+        index_elements=[ThreadRead.caller, ThreadRead.phone],
+        set_={
+            "last_read_mo_id": func.max(ThreadRead.last_read_mo_id, statement.excluded.last_read_mo_id),
+            "read_at": case(
+                (statement.excluded.last_read_mo_id > ThreadRead.last_read_mo_id, statement.excluded.read_at),
+                else_=ThreadRead.read_at,
+            ),
+        },
+    ))
     db.commit()
-    return {"data": {"id": tid, "unread": False}}
+    last_read_id = db.scalar(select(func.max(ThreadRead.last_read_mo_id)).where(ThreadRead.phone == phone))
+    last_mo_id = db.scalar(select(func.max(MoMessage.id)).where(MoMessage.mo_number == phone))
+    return {"data": {
+        "id": tid, "unread": thread_unread(last_mo_id, last_read_id), "lastReadMessageId": last_read_id,
+    }}
 
 
 # ── SSE stream (Phase 후속) ───────────────────────────────────────────────────

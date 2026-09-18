@@ -2,8 +2,8 @@
 
 rcs: 유효한 고객 MO reply_id(받은 뒤 24h, 만료 직전 여유 제외)가 있으면 RCS 양방향
 (send_rcs_chat, RPCSAXX001, 8원)으로 응답하고, reply_id 가 없거나 만료가 가깝거나 양방향
-발송이 실패하면 단방향 RCS(dispatch_campaign)로 fallback 한다. 어느 경우든 답장은 전달되며,
-양방향 실패 시 미커밋 Campaign 은 폐기되어 dangling 캠페인이 남지 않는다.
+접수가 명시적으로 거부되면 단방향 RCS(dispatch_campaign)로 fallback 한다. 명시 거부의
+미커밋 Campaign 은 폐기하지만, 접수 미확정 요청은 실제 cliKey 로 기록해 결과를 확인한다.
 sms(일반): RCS 없이 직접 SMS 로 보낸다.
 """
 from __future__ import annotations
@@ -20,8 +20,9 @@ from app.msghub.codes import (
     REPLY_ID_VALID_HOURS,
     SUCCESS_CODE,
 )
-from app.msghub.schemas import MsghubBadRequest, MsghubError, SendResponse, SendResultItem
+from app.msghub.schemas import MsghubBadRequest, SendResponse, SendResultItem
 from app.services.chat import send_reply
+from app.services.compose import ReplySendFailed
 from app.util.time import KST
 
 _CALLER = "0212345678"
@@ -58,7 +59,7 @@ class _ReplySpyClient:
         self.chat_calls += 1
         self.chat_reply_ids.append(reply_id)
         if self._chat_fails:
-            raise MsghubError("[29003] 양방향 응답 실패", code="29003")
+            raise MsghubBadRequest("양방향 응답 거부", code="29003", status_code=400)
         # 양방향 응답 data 에는 phone 이 없다(cliKey/msgKey/replyId 만).
         return SendResponse(
             code="10000", message="OK",
@@ -134,70 +135,45 @@ async def test_reply_falls_back_when_chat_fails_no_dangling(db_session, sample_u
 
 
 class _AcceptedChatTimeoutClient:
-    """msghub 가 양방향 답장을 접수했지만 응답이 타임아웃으로 유실되고, 이미 받은 cliKey 를 다시 받으면 중복으로 거부한다.
+    """msghub 가 양방향 답장을 접수했지만 응답만 타임아웃으로 유실된다."""
 
-    중복 거부는 로컬 스펙(claudedocs/msghub-migration-spec.md: 10분 안 같은 cliKey → 29005) 기준이다. 요청 단위인지
-    수신자 단위(공식 결과코드표 31004 "중복된 키 접수 차단")인지 확인하지 못해 둘 다 흉내낸다.
-    """
-
-    def __init__(self, duplicate):
-        self.duplicate = duplicate
-        self.accepted: set[str] = set()
+    def __init__(self):
         self.chat_keys: list[str] = []
         self.rcs_keys: list[str] = []
         self.sms_keys: list[str] = []
 
     async def send_rcs_chat(self, *, description, phone, cli_key, reply_id=""):
         self.chat_keys.append(cli_key)
-        self.accepted.add(cli_key)
         raise httpx.ReadTimeout("응답 대기 시간 초과")
 
     async def send_rcs(self, *, recv_list, **kw):
         self.rcs_keys += [r.cli_key for r in recv_list]
-        return self._accept(recv_list)
+        return _ok(recv_list)
 
     async def send_sms(self, *, callback, msg, recv_list, resv_yn=None, resv_req_dt=None):
         self.sms_keys += [r.cli_key for r in recv_list]
-        return self._accept(recv_list)
-
-    def _accept(self, recv_list):
-        duplicates = {r.cli_key for r in recv_list if r.cli_key in self.accepted}
-        if duplicates and self.duplicate == "request":
-            raise MsghubBadRequest("[29005] 중복발송 오류", code="29005", status_code=400)
-        self.accepted.update(r.cli_key for r in recv_list)
-        return SendResponse(code=SUCCESS_CODE, message="OK", items=[
-            SendResultItem(cli_key=r.cli_key, msg_key=f"mk-{r.cli_key}", phone=r.phone, code="31004",
-                           message="중복된 키 접수 차단")
-            if r.cli_key in duplicates else
-            SendResultItem(cli_key=r.cli_key, msg_key=f"mk-{r.cli_key}", phone=r.phone, code=SUCCESS_CODE,
-                           message="성공")
-            for r in recv_list
-        ])
+        return _ok(recv_list)
 
 
-@pytest.mark.parametrize("duplicate", ["request", "item"])
 @pytest.mark.asyncio
-async def test_timed_out_chat_reply_does_not_share_cli_key_with_oneway_fallback(
-    db_session, sample_user, sample_caller, duplicate,
+async def test_timed_out_chat_reply_keeps_original_attempt_without_immediate_fallback(
+    db_session, sample_user, sample_caller,
 ):
-    """양방향 요청이 타임아웃이라 롤백한 답장 캠페인 id 를 SQLite 가 단방향 fallback 캠페인에 다시 준다. cliKey 가 캠페인
-    id 로만 정해지면 msghub 가 실제로 접수했던 양방향 요청과 같은 키라 중복으로 거부됐다 — 요청 단위면 단방향 RCS 대신
-    직접 SMS(-fb)로 나가고, 수신자 단위면 나간 답장이 실패 행으로 남았다.
-
-    양방향이 접수됐다면 고객은 fallback 과 함께 답장을 두 번 받는다. 타임아웃은 접수 여부를 알 수 없는 실패라 send_reply
-    가 감수하는 동작이고, 여기선 두 요청의 키가 겹치지 않는지만 본다."""
+    """타임아웃은 접수 거부가 아니다. 즉시 대체하지 않고 원래 키로 결과를 추적한다."""
     _make_mo(db_session, reply_id="rid-123")
-    client = _AcceptedChatTimeoutClient(duplicate)
+    client = _AcceptedChatTimeoutClient()
 
-    campaign = await send_reply(db_session, client, sample_user, _CALLER, _PHONE, "네 안내드릴게요")
+    with pytest.raises(ReplySendFailed) as failure:
+        await send_reply(db_session, client, sample_user, _CALLER, _PHONE, "네 안내드릴게요")
 
-    [chat_key], [oneway_key] = client.chat_keys, client.rcs_keys
-    assert chat_key.startswith(f"c{campaign.id}-")  # 전제: 롤백된 id 를 fallback 캠페인이 다시 받았다
-    assert chat_key != oneway_key
-    assert client.sms_keys == []
+    campaign = db_session.get(Campaign, failure.value.campaign_id)
+    [chat_key] = client.chat_keys
+    assert failure.value.uncertain
+    assert client.rcs_keys == client.sms_keys == []
     msg = db_session.execute(select(Message).where(Message.campaign_id == campaign.id)).scalar_one()
-    assert (msg.cli_key, msg.status, msg.result_code) == (oneway_key, "REG", SUCCESS_CODE)
-    assert campaign.state == "DISPATCHED"
+    assert (msg.cli_key, msg.status, msg.result_code) == (chat_key, "FAILED", None)
+    assert campaign.state == "FAILED"
+    assert _campaign_count(db_session) == 1
 
 
 @pytest.mark.asyncio

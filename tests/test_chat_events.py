@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -519,22 +520,31 @@ def test_reconcile_publishes_after_commit_when_messages_settle(
     assert calls == ["commit", "thread.updated"]
 
 
+@pytest.mark.parametrize("recover_failure", [False, True])
 def test_reconcile_publishes_committed_batches_when_a_later_batch_fails(
-    db_session, sample_user, monkeypatch
+    db_session, sample_user, monkeypatch, recover_failure,
 ):
     """뒤 배치가 예외(DB 잠김 등)로 끊겨도 앞서 커밋된 확정분은 알린다.
 
     확정된 행은 DONE 이라 다음 재조정 주기엔 잡히지 않는다 — 여기서 알리지 않으면 열린
     대화방은 다른 이벤트가 올 때까지 대기로 남는다.
     """
+    sent_at = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
     for i in range(11):  # query_sent 10건 제약 → 배치 2개
-        _reply(db_session, sample_user.sub, cli_key=f"c1-0-{i}")
+        _reply(
+            db_session, sample_user.sub, cli_key=f"c1-0-{i}", sent_at=sent_at,
+            status="FAILED" if recover_failure else "REG",
+        )
+    if recover_failure:
+        for request in db_session.execute(select(MsghubRequest)).scalars():
+            request.error_body = "timeout"
+        db_session.commit()
     calls = _record_commits_and_publishes(db_session, monkeypatch)
 
     class _AllDoneClient:
         async def query_sent(self, cli_keys):
             return [
-                {"cliKey": key, "status": "DONE", "resultCode": SUCCESS_CODE,
+                {"cliKey": key, "status": "ING" if recover_failure else "DONE", "resultCode": SUCCESS_CODE,
                  "ch": "RCS", "productCode": "SMS"}
                 for key, _req_dt in cli_keys
             ]
@@ -544,11 +554,11 @@ def test_reconcile_publishes_committed_batches_when_a_later_batch_fails(
     real_process = reconcile.process_sent_query
     batches: list[int] = []
 
-    def locked_on_second_batch(db, raw_items):
+    def locked_on_second_batch(db, raw_items, **kwargs):
         batches.append(len(raw_items))
         if len(batches) == 2:
             raise RuntimeError("database is locked")
-        return real_process(db, raw_items)
+        return real_process(db, raw_items, **kwargs)
 
     monkeypatch.setattr(reconcile, "process_sent_query", locked_on_second_batch)
 
@@ -573,3 +583,23 @@ def test_reconcile_without_settled_messages_does_not_publish(
 
     assert total == 0
     assert calls == ["commit"]
+
+
+@pytest.mark.parametrize("query_status", ["REG", "ING"])
+def test_reconcile_publishes_recovered_failure_after_commit_without_done_results(
+    db_session, sample_user, monkeypatch, query_status,
+):
+    """FAILED → 대기도 화면에 보이는 변경이다. 확정 건수가 0이어도 커밋 뒤 알린다."""
+    sent_at = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+    _reply(db_session, sample_user.sub, status="FAILED", sent_at=sent_at)
+    request = db_session.execute(select(MsghubRequest)).scalar_one()
+    request.error_body = "timeout"
+    db_session.commit()
+    calls = _record_commits_and_publishes(db_session, monkeypatch)
+    client = _QuerySentClient([{"cliKey": _CLI_KEY, "status": query_status}])
+
+    total = asyncio.run(reconcile_pending_messages(db_session, client))
+
+    assert total == 0
+    assert calls == ["commit", "thread.updated"]
+    assert db_session.execute(select(Message.status)).scalar_one() == query_status

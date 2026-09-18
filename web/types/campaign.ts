@@ -59,6 +59,8 @@ export type CampaignBreakdown = {
 };
 
 export type CampaignDetail = Campaign & {
+  /** 일부 요청이 실패했어도 취소할 수 있는 예약 청크가 남아 있음. 권한 검사는 별도. */
+  canCancelReservation: boolean;
   recipientsSample: Recipient[];
   breakdown: CampaignBreakdown;
 };

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.auth.deps import get_current_user, parse_user_roles
 from app.auth.oidc import diagnose_role_claims, get_oauth_client, parse_user_from_claims
 from app.db import get_db
 from app.models import User
@@ -24,15 +25,15 @@ def _now_iso() -> str:
 
 
 @router.get("/me")
-async def me(request: Request) -> JSONResponse:
+async def me(request: Request, db: Session = Depends(get_db)) -> JSONResponse:
     """현재 로그인한 사용자 정보 + CSRF 토큰을 envelope 형식으로 반환한다.
 
     Next.js 클라이언트가 POST/PATCH 시 이 토큰을 X-CSRF-Token 헤더로 돌려보내
     verify_csrf 를 통과한다. 세션에 csrf_token 이 없으면 여기서 새로 생성해
     저장한다 (double-submit 패턴).
     """
-    sub = request.session.get("user_sub") if "session" in request.scope else None
-    if not sub:
+    user = get_current_user(request, db)
+    if user is None:
         return JSONResponse(
             {
                 "error": {
@@ -43,16 +44,6 @@ async def me(request: Request) -> JSONResponse:
             status_code=401,
         )
 
-    roles_raw = request.session.get("user_roles", [])
-    if isinstance(roles_raw, list):
-        roles = [str(r) for r in roles_raw]
-    else:
-        try:
-            parsed = json.loads(roles_raw)
-            roles = [str(r) for r in parsed] if isinstance(parsed, list) else []
-        except (TypeError, ValueError, json.JSONDecodeError):
-            roles = []
-
     # CSRF 토큰: 로그인 후 첫 /me 호출에서 발급되어 세션에 저장된다.
     csrf_token = get_csrf_token(request)
 
@@ -60,12 +51,11 @@ async def me(request: Request) -> JSONResponse:
         {
             "data": {
                 "user": {
-                    "sub": sub,
-                    "email": request.session.get("user_email", ""),
-                    "name": request.session.get("user_name", ""),
-                    "display": request.session.get("user_display", "")
-                    or request.session.get("user_name", ""),
-                    "roles": roles,
+                    "sub": user.sub,
+                    "email": user.email,
+                    "name": user.name,
+                    "display": user.display_name or user.name,
+                    "roles": parse_user_roles(user),
                 },
                 "csrfToken": csrf_token,
             }

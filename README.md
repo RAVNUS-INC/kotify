@@ -22,8 +22,10 @@ built specifically for Korean phone numbers and Korean operators.
   - Short text: RCS one-way SMS-type (17원) → SMS fallback (9원). ⚠️ outbound cannot use two-way RCS (8원), so short text over RCS costs **more** than SMS (cost inversion). Two-way 8원 needs U+ confirmation (TODO).
   - RCS LMS (27원) → LMS (27원) for long text
   - RCS image template (40원) → MMS (85원) for images — 53% cost saving (RCS wins only for images)
-- **Webhook-based delivery reports** — no polling required, real-time updates
+- **Shared chat inbox** with sender names, reply byte validation, server-side search/pagination, observed-message read markers, and reconnect catch-up. Explicit RCS reply rejection can fall back; uncertain submission outcomes remain recorded for reconciliation without immediate resending.
+- **Webhook-based delivery reports**, with reconciliation for delayed or uncertain results
 - **Keycloak OIDC** authentication with role-based access (viewer / sender / admin)
+  - Requests use the latest user roles and profile stored in the database; verified login updates them from Keycloak, and older sessions cannot restore revoked roles or deleted users.
 - Korean phone number normalization (010-1234-5678, +82-10-1234-5678, etc.)
 - Encrypted secrets storage (Fernet) — no `.env` file required
 - Web-based setup wizard for first-time configuration
@@ -117,8 +119,10 @@ MIT — see [LICENSE](LICENSE).
   - RCS 양방향(8원) → SMS(9원) 폴백 (단문)
   - RCS LMS(27원) → LMS(27원) (장문)
   - RCS 이미지 템플릿(40원) → MMS(85원) (이미지, **53% 절감**)
-- **웹훅 기반 실시간 결과 수신** — 폴링 불필요
+- **팀 공유 대화방**: 발신자 표시, 답장 바이트 검증, 전체 검색·페이지 이동, 실제 조회한 회신 기준 읽음 처리와 재연결 갱신. RCS 답장 명시 거부는 대체 발송하고, 접수 미확정은 기록을 보존해 결과를 확인하며 즉시 재발송하지 않는다.
+- **웹훅 기반 실시간 결과 수신** — 지연되거나 접수 여부가 불명확한 결과는 재조정
 - Keycloak OIDC 인증 + 역할 기반 권한 (viewer / sender / admin)
+  - 요청은 DB의 최신 역할·프로필을 사용한다. Keycloak 변경은 검증된 새 로그인으로 반영하며, 기존 세션이 회수된 권한이나 삭제된 사용자를 복원하지 않는다.
 - 한국 휴대폰 번호 자동 정규화 (다양한 형식 지원)
 - 시크릿 암호화 저장 (Fernet) — `.env` 파일 불필요
 - 웹 기반 첫 설정 마법사

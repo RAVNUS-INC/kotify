@@ -48,8 +48,8 @@ export default async function CampaignDetail({ params }: PageProps) {
         actions={
           <CampaignDetailActions
             campaignId={campaign.id}
-            status={campaign.status}
             canCancel={canCancel}
+            canCancelReservation={campaign.canCancelReservation}
           />
         }
       />
@@ -69,7 +69,9 @@ export default async function CampaignDetail({ params }: PageProps) {
           role="alert"
           className="mt-6 rounded-lg border border-danger/30 bg-danger-bg p-4 text-sm text-danger"
         >
-          <div className="font-semibold">발송 실패 원인</div>
+          <div className="font-semibold">
+            {campaign.status === 'scheduled' ? '예약 확인 필요' : '발송 실패 원인'}
+          </div>
           <div className="mt-0.5 text-[13px]">{campaign.failureReason}</div>
         </div>
       )}
