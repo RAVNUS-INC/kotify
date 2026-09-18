@@ -165,13 +165,18 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
     return processed, fallback_needed
 
 
-def process_sent_query(db: Session, raw_items: list[dict]) -> tuple[int, list[Message]]:
+def process_sent_query(
+    db: Session, raw_items: list[dict], *, recovered_campaign_ids: set[int] | None = None,
+) -> tuple[int, list[Message]]:
     """cliKey 기반 개별 조회 결과를 처리한다.
 
     요청 예외로 실패 기록한 행(compose._record_failed_chunk — FAILED 인데 result_code 없음)도 받는다
     (services.reconcile). msghub 가 접수했으면 결과대로 확정하거나 대기(REG/ING)로 되돌리고, 결과를 줄
     수 없다고 답하면(INVALID_KEY 키 오류·OVER_DATE 조회기간 초과) 실패를 유지하며 그 답을 result_code 에
     남긴다 — 재조정이 같은 행을 매 주기 다시 조회하지 않게 하는 표시다.
+
+    recovered_campaign_ids 를 넘기면 FAILED → REG/ING 로 복구한 캠페인 id 를 넣는다.
+    확정(DONE) 건수에는 포함하지 않지만, 호출자는 커밋 뒤 실패 → 대기 화면 변경을 알려야 한다.
 
     Returns:
         (확정(DONE)한 메시지 건수, SMS fallback이 필요한 메시지 목록) — process_report 와 같다.
@@ -183,6 +188,7 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> tuple[int, list[Me
 
     processed = 0
     campaign_ids: set[int] = set()
+    recovering_campaign_ids: set[int] = set()
     failed_msgs: list[Message] = []
 
     for raw in raw_items:
@@ -233,6 +239,7 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> tuple[int, list[Me
                 # 요청 예외로 실패 기록했지만 msghub 는 접수해 처리 중이다 — 집계를 실패에서 대기로
                 # 옮긴다. 이후엔 미완료 행이라 리포트나 재조정이 확정한다.
                 campaign_ids.add(msg.campaign_id)
+                recovering_campaign_ids.add(msg.campaign_id)
             msg.status = sq.status
 
     fallback_needed = _mark_chat_fallback(db, failed_msgs)
@@ -242,8 +249,21 @@ def process_sent_query(db: Session, raw_items: list[dict]) -> tuple[int, list[Me
         db.flush()
         for cid in campaign_ids:
             _refresh_campaign_counters(db, cid)
+            if cid in recovering_campaign_ids:
+                campaign = db.get(Campaign, cid)
+                if (
+                    campaign is not None
+                    and campaign.pending_count > 0
+                    and campaign.state in _REPORT_DRIVEN_STATES
+                ):
+                    # 요청 예외를 실패로 봤지만 실제 발송은 진행 중이다. DISPATCHED 는 API/알림이
+                    # 발송 완료로 표시하므로 DISPATCHING 으로 복구한다. 예약 건도 실행 시각이 지난
+                    # 뒤 재조정 대상이 된다. 첫 결과 시각(completed_at)은 알림 읽음 기준이라 유지한다.
+                    campaign.state = "DISPATCHING"
 
     db.flush()
+    if recovered_campaign_ids is not None:
+        recovered_campaign_ids.update(recovering_campaign_ids)
     return processed, fallback_needed
 
 

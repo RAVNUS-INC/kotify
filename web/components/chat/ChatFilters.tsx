@@ -8,6 +8,8 @@ export type ChatFilter = 'all' | 'unread' | 'urgent';
 export type ChatFiltersProps = {
   active: ChatFilter;
   unreadCount?: number;
+  selected?: string;
+  q?: string;
 };
 
 type Item = {
@@ -22,7 +24,7 @@ const ITEMS: ReadonlyArray<Item> = [
   { value: 'urgent', label: '긴급', icon: 'alert' },
 ];
 
-export function ChatFilters({ active, unreadCount = 0 }: ChatFiltersProps) {
+export function ChatFilters({ active, unreadCount = 0, selected, q }: ChatFiltersProps) {
   return (
     <aside
       aria-label="대화 필터"
@@ -34,7 +36,11 @@ export function ChatFilters({ active, unreadCount = 0 }: ChatFiltersProps) {
 
       {ITEMS.map((item) => {
         const isActive = item.value === active;
-        const href = (item.value === 'all' ? '/chat' : `/chat?filter=${item.value}`) as Route;
+        const qs = new URLSearchParams();
+        if (item.value !== 'all') qs.set('filter', item.value);
+        if (selected) qs.set('selected', selected);
+        if (q) qs.set('q', q);
+        const href = `/chat${qs.size ? `?${qs.toString()}` : ''}` as Route;
         const count = item.value === 'unread' ? unreadCount : undefined;
         return (
           <Link

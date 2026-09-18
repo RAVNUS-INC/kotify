@@ -23,20 +23,23 @@ export function ThreadView({ thread }: ThreadViewProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [lastMessageId]);
 
-  // 스레드 진입 시 자동 읽음 처리 (unread인 경우만)
+  // 화면에 실제로 전달된 회신까지만 읽는다. 새 회신이 와도 unread가 true로 유지될 수 있다.
   const threadId = thread.id;
   const wasUnread = thread.unread === true;
+  const lastInboundMessageId = thread.lastInboundMessageId;
   useEffect(() => {
-    if (!wasUnread) return;
-    void markReadClient(threadId)
+    if (!wasUnread || lastInboundMessageId == null) return;
+    let active = true;
+    void markReadClient(threadId, lastInboundMessageId)
       .then(() => {
         // 서버 컴포넌트(목록·안읽음 배지) 재요청 — 새로고침 없이 즉시 반영.
-        router.refresh();
+        if (active) router.refresh();
       })
       .catch(() => {
         // 읽음 표시 실패는 치명적이지 않음 — silent
       });
-  }, [threadId, wasUnread, router]);
+    return () => { active = false; };
+  }, [threadId, wasUnread, lastInboundMessageId, router]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
@@ -59,6 +62,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
               kind={m.kind}
               status={m.status}
               timestamp={m.time}
+              senderName={m.senderName}
             >
               {m.text}
             </MessageBubble>

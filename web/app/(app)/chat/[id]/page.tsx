@@ -7,7 +7,7 @@ import {
   ThreadView,
 } from '@/components/chat';
 import { Button, Icon } from '@/components/ui';
-import { fetchThread, getPendingDeliveryIds } from '@/lib/chat';
+import { fetchThread, getDeliveryRefreshIds } from '@/lib/chat';
 import { ApiError } from '@/lib/api';
 import { formatPhone } from '@/lib/phone';
 
@@ -32,7 +32,7 @@ export default async function ThreadDetailPage({ params }: PageProps) {
       {/* SSE 구독 — 고객 회신, 전달 대기 메시지 결과를 새로고침 없이 갱신(UI 없음). */}
       <ChatLiveRefresh
         threadId={thread.id}
-        pendingDeliveryIds={getPendingDeliveryIds(thread)}
+        deliveryRefreshIds={getDeliveryRefreshIds(thread)}
       />
       <PageHeader
         title={thread.name}

@@ -11,8 +11,8 @@ import {
 
 export type CampaignDetailActionsProps = {
   campaignId: string;
-  status: string;
   canCancel: boolean;
+  canCancelReservation: boolean;
 };
 
 /**
@@ -20,21 +20,20 @@ export type CampaignDetailActionsProps = {
  *
  * - 목록 링크는 항상 노출.
  * - CSV 다운로드는 viewer 이상 모두 허용 (백엔드 router-level require_user).
- * - 취소 버튼은 canCancel=true AND status in {scheduled} 일 때만 (그외엔
- *   백엔드가 400).
+ * - 취소 권한이 있고 서버가 취소할 예약이 남았다고 응답하면 취소 버튼을 노출한다.
+ *   일부 청크 요청이 실패한 캠페인도 접수된 예약은 취소할 수 있다.
  */
 export function CampaignDetailActions({
   campaignId,
-  status,
   canCancel,
+  canCancelReservation,
 }: CampaignDetailActionsProps) {
   const router = useRouter();
   const [canceling, setCanceling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
 
-  // status 매핑: backend 'cancelled' = 취소완료, 'scheduled' = 예약됨
-  const showCancelButton = canCancel && status === 'scheduled';
+  const showCancelButton = canCancel && canCancelReservation;
 
   const onCancel = async () => {
     if (canceling) return;

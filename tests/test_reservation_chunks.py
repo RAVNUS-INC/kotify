@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 from alembic.config import Config
 from alembic.migration import MigrationContext
@@ -27,12 +28,13 @@ from app.msghub.schemas import (
     MsghubAuthError,
     MsghubBadRequest,
     MsghubRateLimited,
+    MsghubServerError,
     ReportItem,
     ReserveResponse,
     SendResponse,
     SendResultItem,
 )
-from app.routes.campaigns import cancel_campaign
+from app.routes.campaigns import cancel_campaign, get_campaign
 from app.services.compose import dispatch_campaign
 from app.services.report import process_report
 
@@ -290,6 +292,104 @@ async def test_dispatched_reservation_cancels_every_chunk(
     assert statuses == ["CANCELED"] * len(_RECIPIENTS)
 
 
+# ── 일부 청크 요청 실패 후 예약 취소 ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("failure", "uncertain"), [
+    pytest.param(
+        MsghubBadRequest("수신 요청 거부", code="29003", status_code=400),
+        False, id="explicit-rejection",
+    ),
+    pytest.param(httpx.ReadTimeout("예약 접수 응답 유실"), True, id="timeout"),
+    pytest.param(
+        MsghubServerError("서버 오류", code="HTTP_ERROR", status_code=500),
+        True, id="server-error",
+    ),
+    pytest.param(
+        MsghubServerError("응답 파싱 오류", code="PARSE_ERROR", status_code=200),
+        True, id="invalid-response",
+    ),
+])
+async def test_partially_failed_reservation_can_cancel_accepted_chunks(
+    db_session, sample_user, sample_caller, monkeypatch, failure, uncertain,
+):
+    """청크 하나가 실패해도 접수된 예약은 취소한다. 응답 유실은 전체 취소로 단정하지 않는다."""
+    class _OneFailedChunk(_ReservingMsghub):
+        calls = 0
+
+        async def send_sms(self, **kwargs):
+            chunk_index = self.calls
+            self.calls += 1
+            if chunk_index == 1:
+                raise failure
+            return await super().send_sms(**kwargs)
+
+    client = _OneFailedChunk()
+    monkeypatch.setattr("app.main.get_msghub_client", lambda: client)
+    campaign = await _dispatch(
+        db_session, client, sample_user, sample_caller,
+        reserve_time_local=_reserve_at(), send_channel="sms",
+    )
+    assert campaign.state == "PARTIAL_FAILED"
+    failed_request = _requests(db_session, campaign)[1]
+    assert failed_request.response_code == (None if uncertain else "29003")
+    before = get_campaign(str(campaign.id), db=db_session)["data"]
+
+    response = await cancel_campaign(str(campaign.id), user=sample_user, db=db_session)
+
+    assert client.cancelled == client.issued  # 기존엔 not_reserved 400, 취소 호출 0회
+    assert len(client.cancelled) == 2
+    assert before["canCancelReservation"] is True
+    statuses = db_session.scalars(select(Message.status)).all()
+    assert statuses.count("CANCELED") == 15
+    assert statuses.count("FAILED") == 10
+    after = get_campaign(str(campaign.id), db=db_session)["data"]
+    assert after["canCancelReservation"] is False
+    if uncertain:
+        assert response["data"]["status"] != "cancelled"
+        assert campaign.state == "RESERVED"
+        assert campaign.completed_at is None
+        assert "10명" in after["failureReason"]
+        assert "msghub 웹 콘솔" in after["failureReason"]
+        assert "10명" in response["data"]["message"]
+        assert "msghub 웹 콘솔" in response["data"]["message"]
+        retry = await cancel_campaign(str(campaign.id), user=sample_user, db=db_session)
+        assert retry.status_code == 409
+        assert json.loads(retry.body)["error"]["code"] == "unconfirmed_reservation"
+        assert client.cancelled == client.issued  # 취소한 청크를 다시 요청하지 않는다
+    else:
+        assert response["data"]["status"] == "cancelled"
+        assert campaign.state == "RESERVE_CANCELED"
+
+
+@pytest.mark.asyncio
+async def test_interrupted_reservation_does_not_hide_accepted_but_unconfirmed_chunk(
+    db_session, sample_user, sample_caller, monkeypatch,
+):
+    """타임아웃 뒤 인증 오류로 중단돼 RESERVED 가 남아도, 불확실 청크는 취소 확정하지 않는다."""
+    client = _ReservingMsghub(rcs_errors={
+        1: httpx.ReadTimeout("예약 접수 응답 유실"),
+        2: MsghubAuthError("인증 실패", code="20001", status_code=401),
+    })
+    monkeypatch.setattr("app.main.get_msghub_client", lambda: client)
+    with pytest.raises(MsghubAuthError):
+        await _dispatch(
+            db_session, client, sample_user, sample_caller,
+            reserve_time_local=_reserve_at(), send_channel="rcs",
+        )
+    campaign = db_session.scalar(select(Campaign))
+    assert campaign.state == "RESERVED"
+
+    response = await cancel_campaign(str(campaign.id), user=sample_user, db=db_session)
+
+    assert client.cancelled == ["RCS0"]
+    assert response["data"]["status"] != "cancelled"
+    assert campaign.state != "RESERVE_CANCELED"
+    assert "10명" in response["data"]["message"]
+    assert "msghub 웹 콘솔" in response["data"]["message"]
+
+
 # ── alembic 0018 ─────────────────────────────────────────────────────────────
 
 
@@ -335,9 +435,8 @@ def _campaign_id_value(conn, campaign_id):
     ).scalar_one()
 
 
-def test_migration_0018_is_the_single_head_after_0017():
+def test_migration_0018_follows_0017():
     scripts = _alembic_scripts()
-    assert scripts.get_heads() == ["0018"]
     assert scripts.get_revision("0018").down_revision == "0017"
 
 

@@ -12,8 +12,7 @@ cliKey 를 {원본}-fb 로 바꿔 SMS 를 보낸다. 행의 결과는 그 -fb SM
   state 는 실패로 남아 대시보드·알림에 "일부 실패 · 1/1 성공" 으로 보이던 문제.
 - 요청 응답보다 리포트가 먼저 와(대체 SMS·양방향 답장 트랜잭션 커밋 전) 그 리포트가 200 으로
   버려지던 문제 — 대체 SMS 리포트는 같은 번호에 미완료 메시지가 또 있을 때, 양방향 답장 리포트는 늘.
-- 타임아웃으로 롤백한 양방향 답장의 캠페인 id 를 단방향 fallback 이 다시 받아, msghub 가 접수했던 그
-  양방향 요청의 리포트가 같은 cliKey 인 fallback 행을 확정하던 문제.
+- 타임아웃인 양방향 답장은 원래 시도를 보존해 리포트로 확정하고, 실제 실패일 때만 SMS 로 대체한다.
 """
 from __future__ import annotations
 
@@ -35,7 +34,7 @@ from app.routes.notifications import list_notifications, mark_all_read
 from app.routes.webhook import receive_report
 from app.security.settings_store import SettingsStore
 from app.services.chat import send_reply
-from app.services.compose import dispatch_chat_reply
+from app.services.compose import ReplySendFailed, dispatch_chat_reply
 from app.services.reconcile import reconcile_pending_messages
 from app.services.report import awaiting_record
 
@@ -467,8 +466,7 @@ def test_chat_reply_report_before_commit_is_redelivered_and_falls_back(file_db, 
 
 
 class _ChatClientTimingOut(_SmsClient):
-    """msghub 가 양방향 답장을 접수해 리포트까지 보냈는데(during_send) 요청 응답은 타임아웃으로 못 받는다. 단방향 RCS 는
-    접수한다 — 같은 cliKey 중복 거부는 흉내내지 않는다(test_send_reply 가 다룬다)."""
+    """양방향 리포트는 먼저 왔으나 요청 응답은 타임아웃으로 유실된다."""
 
     def __init__(self, during_send):
         super().__init__()
@@ -494,11 +492,11 @@ def _chat_delivered(cli_key):
 
 
 @pytest.mark.parametrize("chat_report", [_chat_failure, _chat_delivered], ids=["failed", "delivered"])
-def test_timed_out_chat_reply_report_does_not_settle_oneway_fallback(file_db, monkeypatch, chat_report):
-    """양방향 답장 요청이 타임아웃이면 send_reply 가 답장 캠페인을 롤백하고 단방향 RCS 로 fallback 하는데, SQLite 가 롤백된
-    캠페인 id 를 fallback 캠페인에 다시 준다. msghub 가 그 양방향 요청을 접수했었다면 요청 중에 온 리포트(400)의 재전송이
-    같은 cliKey 인 단방향 행을 양방향 결과로 확정했다 — 실패면 전달된 답장이 실패로, 성공이면 채널·과금이 양방향(CHAT)으로
-    남고, 단방향 자신의 리포트는 DONE 이라 버려졌다. 롤백된 답장의 리포트는 기록하지 않은 메시지의 것이라 버린다."""
+def test_timed_out_chat_reply_report_settles_original_attempt(file_db, monkeypatch, chat_report):
+    """응답 타임아웃 후에도 같은 cliKey 기록이 남아 재전송 리포트가 실제 결과를 반영한다.
+
+    성공이면 추가 발송 없이 CHAT 비용만, 실패면 명시적 리포트 이후 한 번만 SMS 로 대체한다.
+    """
     webhook, db = file_db(), file_db()
     now = datetime.now(UTC).isoformat()
     db.add(MoMessage(
@@ -514,25 +512,29 @@ def test_timed_out_chat_reply_report_does_not_settle_oneway_fallback(file_db, mo
     client = _ChatClientTimingOut(report_meanwhile)
     monkeypatch.setattr("app.main.get_msghub_client", lambda: client)
 
-    campaign = asyncio.run(send_reply(
-        db, client, db.get(User, "test-sub-001"), "0212345678", _PHONE, "답장입니다",
-    ))
+    with pytest.raises(ReplySendFailed) as failure:
+        asyncio.run(send_reply(
+            db, client, db.get(User, "test-sub-001"), "0212345678", _PHONE, "답장입니다",
+        ))
 
-    [chat_key], [oneway_key] = client.chat_keys, client.rcs_keys
+    campaign_id = failure.value.campaign_id
+    [chat_key] = client.chat_keys
+    assert client.rcs_keys == []
+    assert failure.value.uncertain
     assert [(r.status_code, json.loads(r.body)) for r in responses] == [(400, {"error": "report before record"})]
     assert _post_report(webhook, chat_report(chat_key)).status_code == 200  # msghub 재전송
 
-    msg = _message(file_db(), campaign.id)
-    assert (msg.cli_key, msg.status, msg.channel) == (oneway_key, "REG", None)
-    assert file_db().get(Campaign, campaign.id).state == "DISPATCHED"
-    assert client.cli_keys == []  # 대체 SMS 도 없다
-
-    oneway_delivered = {
-        "msgKey": "mk-oneway", "cliKey": oneway_key, "ch": "RCS", "resultCode": SUCCESS_CODE,
-        "resultCodeDesc": "성공", "productCode": "SMS", "phone": _PHONE, "rptDt": "20260915100009",
-    }
-    assert _post_report(webhook, oneway_delivered).status_code == 200
-
-    msg = _message(file_db(), campaign.id)
-    assert (msg.status, msg.channel, msg.product_code, msg.cost) == ("DONE", "RCS", "SMS", 17)
-    assert file_db().get(Campaign, campaign.id).state == "COMPLETED"
+    msg = _message(file_db(), campaign_id)
+    if chat_report is _chat_failure:
+        assert (msg.cli_key, msg.status) == (f"{chat_key}-fb", "FB_PENDING")
+        assert client.cli_keys == [f"{chat_key}-fb"]
+        # 같은 실패 재전송으로 SMS 가 중복되지 않는다.
+        assert _post_report(webhook, chat_report(chat_key)).status_code == 200
+        assert client.cli_keys == [f"{chat_key}-fb"]
+        assert _post_report(webhook, _sms_success(f"{chat_key}-fb")).status_code == 200
+        msg = _message(file_db(), campaign_id)
+        assert (msg.status, msg.channel, msg.cost) == ("DONE", "SMS", 9)
+    else:
+        assert (msg.cli_key, msg.status, msg.channel, msg.cost) == (chat_key, "DONE", "RCS", 8)
+        assert client.cli_keys == []
+    assert file_db().get(Campaign, campaign_id).state == "COMPLETED"

@@ -53,6 +53,7 @@ class ChatMessage:
     mo_id: int | None = None
     campaign_id: int | None = None
     msg_id: int | None = None
+    sender_name: str | None = None    # OUT 전용: 캠페인 작성자의 현재 표시명
 
 
 @dataclass
@@ -64,9 +65,16 @@ class ChatThread:
     last_timestamp: str
     last_body: str
     last_direction: str
-    unread: bool          # 안읽음 = 마지막 고객(MO) 메시지가 팀 read_at 이후
+    unread: bool          # 안읽음 = 마지막 수신 MO ID가 phone 공유 읽음 경계 이후
     mo_count: int
     mt_count: int
+
+
+@dataclass
+class ThreadPage:
+    threads: list[ChatThread]
+    total: int
+    unread_total: int
 
 
 SEND_CHANNELS = ("rcs", "sms")
@@ -165,16 +173,9 @@ def _parse_ts_for_sort(raw: str | None) -> float:
     return dt.timestamp() if dt else 0.0
 
 
-def thread_unread(last_mo_ts: str | None, read_at: str | None) -> bool:
-    """안읽음 판정 — 고객(MO) 최종 메시지가 팀 read_at 이후인가.
-
-    ISO/msghub 네이티브(yyyyMMddHHmmss) 혼재 포맷을 epoch 로 파싱해 비교한다.
-    고객 메시지가 없으면 False, read_at 이 없으면(한 번도 안 읽음) True.
-    목록(list_threads)과 상세(routes.threads)가 동일 기준을 쓰도록 공유한다.
-    """
-    if not last_mo_ts:
-        return False
-    return _parse_ts_for_sort(last_mo_ts) > _parse_ts_for_sort(read_at or "")
+def thread_unread(last_mo_id: int | None, last_read_mo_id: int | None) -> bool:
+    """서버에 저장된 마지막 수신 ID 가 팀이 관측한 ID 보다 큰가. 공급자 시각과 무관하다."""
+    return (last_mo_id or 0) > (last_read_mo_id or 0)
 
 
 def _ts_rank(raw: str | None) -> tuple[int, float]:
@@ -281,11 +282,11 @@ def _batch_last_mo_bodies(db: Session, phones: list[str]) -> dict[str, str]:
 def _batch_last_mt_bodies(db: Session, phones: list[str]) -> dict[str, str]:
     """phone → 가장 최근 발송(MT) 캠페인 본문. 고르는 규칙은 _batch_last_mo_bodies 와 같다.
 
-    기준 시각은 coalesce(complete_time, report_dt) — 둘 다 NULL(리포트 전)인 행은 시각이 있는
-    행에 진다. 순위는 id 만 매기고 본문은 1위 행에서만 읽는다(긴 LMS 본문을 번호의 발송 이력
+    기준 시각은 coalesce(complete_time, report_dt, campaign.created_at). 리포트 전·실패도
+    새 활동으로 표시한다. 순위는 id 만 매기고 본문은 1위 행에서만 읽는다(긴 LMS 본문을 번호의 발송 이력
     전체만큼 정렬하지 않도록).
     """
-    ts = func.coalesce(Message.complete_time, Message.report_dt)
+    ts = func.coalesce(func.nullif(Message.complete_time, ""), func.nullif(Message.report_dt, ""), Campaign.created_at)
     candidates: list = []
     for chunk in _chunks(phones):
         ranked = (
@@ -317,38 +318,34 @@ def _batch_last_mt_bodies(db: Session, phones: list[str]) -> dict[str, str]:
     return _latest_bodies(candidates)
 
 
-def _batch_read_at(db: Session, phones: list[str]) -> dict[str, str]:
-    """phone → 팀 공유 마지막 읽음 시각.
-
-    대화방을 phone 으로 묶으므로 같은 고객에 caller 별 읽음행이 여럿이면 가장 최근 읽음
-    시각으로 합친다(이미 읽은 대화가 안읽음으로 되살아나는 것 방지).
-    """
-    read_at: dict[str, str] = {}
-    for chunk in _chunks(phones):
-        for r in db.execute(
-            select(ThreadRead.phone, ThreadRead.read_at).where(ThreadRead.phone.in_(chunk))
-        ).all():
-            if (r.read_at or "") > read_at.get(r.phone, ""):
-                read_at[r.phone] = r.read_at or ""
-    return read_at
+def _unread_by_phone(db: Session) -> dict[str, bool]:
+    """필터·전체 카운트 전에 phone 별 읽음 경계를 집계한다. 본문을 가져오지 않는 단일 쿼리."""
+    reads = select(
+        ThreadRead.phone, func.max(ThreadRead.last_read_mo_id).label("last_read_id")
+    ).group_by(ThreadRead.phone).subquery()
+    rows = db.execute(
+        select(MoMessage.mo_number, func.max(MoMessage.id), reads.c.last_read_id)
+        .outerjoin(reads, reads.c.phone == MoMessage.mo_number)
+        .group_by(MoMessage.mo_number, reads.c.last_read_id)
+    ).all()
+    return {phone: thread_unread(last_id, read_id) for phone, last_id, read_id in rows}
 
 
-def list_threads(
-    db: Session, limit: int = 50, offset: int = 0
-) -> tuple[list[ChatThread], int]:
+def list_thread_page(
+    db: Session, limit: int = 50, offset: int = 0, *, q: str | None = None, unread: bool = False,
+) -> ThreadPage:
     """대화방 목록을 최근 활동순으로 반환한다.
 
-    정렬·자르기는 번호별 집계값(마지막 시각·방향)만으로 먼저 하고, 마지막 본문과 읽음
-    상태는 잘라낸 페이지의 번호만 묶어 조회한다. 쿼리 수는 전체 번호 수와 무관하다
-    (집계 2 + 읽음 1 + 본문 MO/MT 각 1). 번호마다 본문을 조회하면 대량 발송 수신자까지
-    전부 쿼리해 번호 수에 비례해 느려진다.
+    번호별 마지막 활동과 읽음 경계를 집계하고 검색·미읽음 필터를 적용한 뒤 페이지를 자른다.
+    검색이 없으면 본문은 페이지 번호만 배치 조회한다(집계 2 + 읽음 1 + 본문 MO/MT 각 1).
+    검색은 전체 번호의 최근 본문을 배치 조회해 번호/최근 본문 기준으로 거른다.
 
     시각은 msghub 원본(오프셋 없는 KST)과 우리가 기록한 UTC ISO 가 섞여 있어 방향·마지막
     시각·대표 caller·정렬을 모두 파싱한 실제 시각(_ts_rank)으로 비교한다. SQL 집계는 시각
     모양별 최댓값만 후보로 뽑는다(_ts_shape) — 문자열 max 는 모양이 섞이면 늦은 값을 놓친다.
     """
     # MT 측 — campaigns.caller_number + messages.to_number (+ 시각 모양) 으로 그룹
-    mt_ts = func.coalesce(Message.complete_time, Message.report_dt)
+    mt_ts = func.coalesce(func.nullif(Message.complete_time, ""), func.nullif(Message.report_dt, ""), Campaign.created_at)
     mt_rows = db.execute(
         select(
             Campaign.caller_number.label("caller"),
@@ -429,13 +426,26 @@ def list_threads(
         else:
             t["last_t"], t["last_rank"], t["last_dir"] = t["mt_last_t"], t["mt_rank"], "OUT"
 
-    # 안정 정렬이라 시각이 같은 대화방은 집계 순서를 유지한다.
-    ordered = sorted(threads.values(), key=lambda t: t["last_rank"], reverse=True)
+    # 동률도 phone 으로 고정해 페이지 경계에서 중복/누락이 없도록 한다.
+    ordered = sorted(threads.values(), key=lambda t: (t["last_rank"], t["phone"]), reverse=True)
+    unread_map = _unread_by_phone(db)
+    in_bodies: dict[str, str] = {}
+    out_bodies: dict[str, str] = {}
+    if q:
+        in_bodies = _batch_last_mo_bodies(db, [t["phone"] for t in ordered if t["last_dir"] == "IN"])
+        out_bodies = _batch_last_mt_bodies(db, [t["phone"] for t in ordered if t["last_dir"] == "OUT"])
+        query = q.lower()
+        ordered = [t for t in ordered if query in t["phone"].lower() or query in (
+            in_bodies if t["last_dir"] == "IN" else out_bodies
+        ).get(t["phone"], "").lower()]
+    unread_total = sum(unread_map.get(t["phone"], False) for t in ordered)
+    if unread:
+        ordered = [t for t in ordered if unread_map.get(t["phone"], False)]
+    total = len(ordered)
     page = ordered[offset : offset + limit]
-
-    in_bodies = _batch_last_mo_bodies(db, [t["phone"] for t in page if t["last_dir"] == "IN"])
-    out_bodies = _batch_last_mt_bodies(db, [t["phone"] for t in page if t["last_dir"] == "OUT"])
-    read_at_map = _batch_read_at(db, [t["phone"] for t in page])
+    if not q:
+        in_bodies = _batch_last_mo_bodies(db, [t["phone"] for t in page if t["last_dir"] == "IN"])
+        out_bodies = _batch_last_mt_bodies(db, [t["phone"] for t in page if t["last_dir"] == "OUT"])
 
     built = [
         ChatThread(
@@ -444,14 +454,31 @@ def list_threads(
             last_timestamp=t["last_t"],
             last_body=(in_bodies if t["last_dir"] == "IN" else out_bodies).get(t["phone"], ""),
             last_direction=t["last_dir"],
-            # 안읽음 = 고객(MO) 최종 메시지가 팀 마지막 읽음 시각 이후.
-            unread=thread_unread(t["mo_last_t"], read_at_map.get(t["phone"], "")),
+            unread=unread_map.get(t["phone"], False),
             mo_count=t["mo_count"],
             mt_count=t["mt_count"],
         )
         for t in page
     ]
-    return built, len(ordered)
+    return ThreadPage(built, total, unread_total)
+
+
+def list_threads(
+    db: Session, limit: int = 50, offset: int = 0,
+) -> tuple[list[ChatThread], int]:
+    """기존 내부 호출용 목록·전체 건수 계약. API 는 필터/읽음 총수를 제공하는 page 를 사용한다."""
+    page = list_thread_page(db, limit=limit, offset=offset)
+    return page.threads, page.total
+
+
+def sender_display_name(user: User | None) -> str:
+    """발신 작성자의 현재 표시명. 이름이 없으면 계정 식별자를 노출하지 않는다."""
+    if user is not None:
+        for value in (user.display_name, user.name):
+            name = (value or "").strip()
+            if name and "@" not in name and name not in (user.sub, user.email):
+                return name
+    return "알 수 없음"
 
 
 def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
@@ -466,11 +493,12 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
 
     # MT — 그 고객(phone)에게 보낸 모든 발송 (발신번호 무관).
     mt_rows = db.execute(
-        select(Message, Campaign)
+        select(Message, Campaign, User)
         .join(Campaign, Campaign.id == Message.campaign_id)
+        .outerjoin(User, User.sub == Campaign.created_by)
         .where(Message.to_number == phone)
     ).all()
-    for msg, campaign in mt_rows:
+    for msg, campaign, author in mt_rows:
         ts = _coalesce_ts(msg.complete_time, msg.report_dt, campaign.created_at)
         out.append(
             ChatMessage(
@@ -489,6 +517,7 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
                 cost=msg.cost,
                 campaign_id=campaign.id,
                 msg_id=msg.id,
+                sender_name=sender_display_name(author),
             )
         )
 
@@ -662,11 +691,14 @@ async def send_reply(
     """답장을 대화방에서 고른 전송 방식(send_channel)으로 발송한다.
 
     - "rcs": 24h 세션 안의 고객 MO reply_id 가 있으면 RCS 양방향(CHAT, 8원)으로
-      응답하고, 없거나 양방향 요청이 즉시 실패하면 단방향 RCS(dispatch_campaign,
+      응답하고, 없거나 양방향 요청이 명시적으로 거부되면 단방향 RCS(dispatch_campaign,
       17원)로 fallback 한다. 양방향이 접수된 뒤 리포트(웹훅·재조정)에서 실패하면 일반
-      SMS 로 대체 발송한다(report.send_sms_fallback) — 어느 경우든 답장은 전달된다.
+      SMS 로 대체 발송한다(report.send_sms_fallback). 접수 여부 미확정은 기록을 보존해
+      확인하고 즉시 재발송하지 않는다. 대체 경로도 실패할 수 있어 전달을 보장하지 않는다.
     - "sms"(일반): RCS 를 쓰지 않고 직접 SMS(9원)로 보낸다.
     """
+    from app.services.compose import ChatReplyRejected, ReplySendFailed
+
     if send_channel not in SEND_CHANNELS:
         raise ValueError(f"전송 방식은 'rcs' 또는 'sms' 여야 합니다: {send_channel}")
 
@@ -688,19 +720,16 @@ async def send_reply(
                 phone=phone,
                 reply_id=reply_id,
             )
-        except Exception:
+        except ChatReplyRejected:
             log.warning(
-                "양방향(8원) 응답 실패 → 단방향 fallback: caller=%s",
+                "양방향(8원) 접수 거부 → 단방향 fallback: caller=%s",
                 caller,
                 exc_info=True,
             )
-            # fall through to 단방향. 요청 예외(응답 타임아웃)여도 msghub 는 양방향을 접수했을 수 있다 — 그러면
-            # 고객은 fallback 과 함께 두 번 받는다. 롤백한 캠페인 id 를 fallback 캠페인이 다시 받지만 cliKey 는
-            # 겹치지 않아 그 양방향 리포트는 어느 행에도 붙지 않는다(compose._make_chat_reply_cli_key).
 
-    # rcs: reply_id 없음(세션 밖) 또는 양방향 실패 → 단방향 RCS(17원).
+    # rcs: reply_id 없음(세션 밖) 또는 양방향 명시 거부 → 단방향 RCS(17원).
     # sms: 일반 직접 발송(9원).
-    return await dispatch_campaign(
+    campaign = await dispatch_campaign(
         db=db,
         msghub_client=msghub_client,
         created_by=user.sub,
@@ -711,3 +740,11 @@ async def send_reply(
         subject=None,
         send_channel=send_channel,
     )
+    if campaign.state == "FAILED":
+        # dispatch_campaign 은 실패도 기록한 캠페인을 반환한다. 단건 답장은 이를
+        # 성공 응답으로 내보내면 프런트가 작성한 본문을 지우므로 오류를 구분한다.
+        result_code = db.execute(
+            select(Message.result_code).where(Message.campaign_id == campaign.id)
+        ).scalar_one_or_none()
+        raise ReplySendFailed(campaign.id, uncertain=result_code is None)
+    return campaign

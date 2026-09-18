@@ -345,6 +345,7 @@ async def _dispatch_rcs_chunks(
                 db.rollback()
                 _record_failed_chunk(
                     db, campaign.id, chunk_idx, chunk, sent_at, str(retry_exc), cli_key_suffix="-fb",
+                    rejection_code=_explicit_rejection_code(retry_exc),
                 )
                 db.commit()
                 failed_chunks.append(chunk_idx)
@@ -386,20 +387,27 @@ async def _dispatch_rcs_chunks(
                 _record_failed_chunk(
                     db, campaign.id, chunk_idx, chunk, sent_at,
                     f"RCS: {exc} / 직접 발송: {retry_exc}", cli_key_suffix="-fb",
+                    rejection_code=_explicit_rejection_code(retry_exc),
                 )
                 db.commit()
                 failed_chunks.append(chunk_idx)
                 failed_chunk_sizes.append(len(chunk))
 
-        except MsghubAuthError:
+        except MsghubAuthError as exc:
             db.rollback()
-            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, "인증 오류")
+            _record_failed_chunk(
+                db, campaign.id, chunk_idx, chunk, sent_at, "인증 오류",
+                rejection_code=_explicit_rejection_code(exc),
+            )
             db.commit()
             raise
 
         except (MsghubServerError, MsghubError, Exception) as exc:
             db.rollback()
-            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, str(exc))
+            _record_failed_chunk(
+                db, campaign.id, chunk_idx, chunk, sent_at, str(exc),
+                rejection_code=_explicit_rejection_code(exc),
+            )
             db.commit()
             failed_chunks.append(chunk_idx)
             failed_chunk_sizes.append(len(chunk))
@@ -593,15 +601,32 @@ async def dispatch_campaign(
     return campaign
 
 
+class ChatReplyRejected(Exception):
+    """양방향 답장이 명시적으로 접수 거부됨. 단방향 대체를 시도해도 중복되지 않는다."""
+
+
+class ReplySendFailed(Exception):
+    """답장 접수 실패. 미확정 요청은 저장된 campaign_id 로 결과를 추적한다."""
+
+    def __init__(self, campaign_id: int, *, uncertain: bool = False) -> None:
+        self.campaign_id = campaign_id
+        self.uncertain = uncertain
+        self.code = "send_status_unknown" if uncertain else "send_failed"
+        message = (
+            "접수 여부를 확인 중입니다. 재발송 전에 대화방의 전송 결과를 확인해 주세요."
+            if uncertain else
+            "답장이 접수되지 않았습니다. 전송 결과를 확인한 뒤 다시 시도해 주세요."
+        )
+        super().__init__(message)
+
+
 def _make_chat_reply_cli_key(campaign_id: int) -> str:
     """양방향 답장 cliKey. 패턴: c{campaign_id}-0-0-{시도 토큰 hex 6자}
 
-    답장 캠페인은 커밋하지 않고 보낸 뒤 실패하면 롤백한다(dispatch_chat_reply). SQLite 는 롤백된 id 를 다음 캠페인에
+    답장 캠페인은 커밋하지 않고 보낸 뒤 명시 거부되면 롤백한다(dispatch_chat_reply). SQLite 는 롤백된 id 를 다음 캠페인에
     다시 준다 — campaigns.id 에 AUTOINCREMENT 가 없고(alembic 0001), 있어도 sqlite_sequence 갱신이 함께 롤백된다.
-    요청 예외(응답 타임아웃)여도 msghub 는 접수했을 수 있어, 키가 id 로만 정해지면 그 id 를 받은 단방향 fallback
-    (chat.send_reply)이 같은 cliKey 를 보내 중복 키로 거부될 수 있고(10분 규칙은 claudedocs/msghub-migration-spec.md
-    에만 있다), 롤백된 답장의 리포트가 fallback 행을 확정했다. 토큰으로 시도마다 키를 달리해 그 리포트는 어느 행에도
-    붙지 않는다(report._find_message).
+    거부된 시도와 그 id 를 받은 단방향 fallback(chat.send_reply)의 키가 겹치지 않도록 시도 토큰을 붙인다.
+    응답 타임아웃 등 접수 여부가 불명확한 시도는 실제 cliKey 를 기록하고 즉시 대체하지 않는다.
 
     양방향 cliKey 는 최대 20자(공식 문서 2.3.2 §2 — 단방향·xMS 는 30자)라 캠페인 id 8자리까지 들어간다. 대체 SMS 는
     -fb 를 붙인다(report.send_sms_fallback).
@@ -621,9 +646,10 @@ async def dispatch_chat_reply(
     """RCS 양방향(CHAT, 8원) 단건 응답 발송 — 고객 MO 에 대한 답장 전용.
 
     reply_id 는 고객 MO 의 응답 템플릿 ID(MoMessage.reply_id). 양방향은 단건이라
-    청크가 없다. 발송 실패 시 미커밋 Campaign 을 rollback 으로 폐기하고 예외를 다시
-    던지므로, 호출자(chat.send_reply)가 단방향 fallback 을 결정할 수 있다. 폐기한 id 는
-    다음 캠페인이 다시 받으므로 cliKey 는 시도마다 다르다(_make_chat_reply_cli_key).
+    청크가 없다. 명시적 요청·수신자 거부는 미커밋 Campaign 을 rollback 으로 폐기하고
+    ChatReplyRejected 를 던져 호출자가 단방향으로 대체한다. 타임아웃·서버 오류처럼 접수
+    여부를 모르면 실제 cliKey 를 FAILED/result_code=None 으로 보존해 리포트·재조정으로
+    확인한다. 즉시 대체하면 이미 접수된 답장이 중복 전달될 수 있다.
 
     주의: 양방향 응답 data 에는 phone 이 없어(cliKey/msgKey/replyId 만) Message 는
     아는 phone 으로 직접 만든다 — _create_messages_from_response(item.phone 의존) 미사용.
@@ -657,7 +683,7 @@ async def dispatch_chat_reply(
         idempotency_key=None,
     )
     db.add(campaign)
-    db.flush()  # id 할당 (커밋 안 함 — 발송 실패 시 rollback 으로 폐기)
+    db.flush()  # id 할당 (명시 거부일 때만 rollback 으로 폐기)
 
     cli_key = _make_chat_reply_cli_key(campaign.id)
     # 답장 행을 커밋하기 전에 온 리포트는 msghub 재전송으로 받는다 (report.awaiting_record).
@@ -666,9 +692,48 @@ async def dispatch_chat_reply(
             resp = await msghub_client.send_rcs_chat(
                 description=content, phone=phone, cli_key=cli_key, reply_id=reply_id,
             )
-        except Exception:
-            db.rollback()  # 미커밋 Campaign 폐기 → 호출자가 단방향 fallback
-            raise
+            item = resp.items[0] if resp.items else None
+            code = item.code if item else resp.code
+            if not code or (item is not None and item.cli_key != cli_key):
+                raise MsghubServerError("양방향 접수 응답을 확인할 수 없습니다", code="PARSE_ERROR")
+        except Exception as exc:
+            response_rejected = _explicit_rejection_code(exc) or (
+                isinstance(exc, (MsghubBadRequest, MsghubAuthError, MsghubRateLimited))
+                and exc.status_code == 200
+                and exc.code
+                and exc.code != SUCCESS_CODE
+            )
+            if response_rejected or (
+                isinstance(exc, MsghubError) and exc.code == "CONFIG_ERROR"
+            ):
+                # HTTP 200 에도 최상위 결과 코드가 거부면 클라이언트가 위 예외를
+                # 던진다. 서버·파싱 오류와 구분하며 예약 청크의 판정은 바꾸지 않는다.
+                # CONFIG_ERROR 는 클라이언트가 HTTP 요청 전에 거부한 경우다.
+                db.rollback()
+                raise ChatReplyRejected(str(exc)) from exc
+
+            # 네트워크·서버·파싱 오류는 공급자가 접수했을 수 있다. 실제 시도 키를
+            # 보존해 웹훅과 재조정이 같은 단일 메시지를 확정하게 한다.
+            _record_failed_chunk(
+                db, campaign.id, 0, [phone], now, str(exc),
+                cli_key_suffix=cli_key.removeprefix(_make_cli_key(campaign.id, 0, 0)),
+            )
+            campaign.fail_count = 1
+            campaign.pending_count = 0
+            campaign.state = "FAILED"
+            campaign.completed_at = _now_iso()
+            audit.log(
+                db, actor_sub=created_by, action=audit.SEND, target=f"campaign:{campaign.id}",
+                detail={"total": 1, "channel": "chat", "acceptance": "unknown"},
+            )
+            db.commit()
+            raise ReplySendFailed(campaign.id, uncertain=True) from exc
+
+        if code != SUCCESS_CODE:
+            # 최상위 10000 도 수신자별 접수를 보장하지 않는다. 명시 거부는
+            # 커밋 전에 폐기해야 같은 답장에 실패/대체 말풍선이 두 개 남지 않는다.
+            db.rollback()
+            raise ChatReplyRejected(f"[{code}] {item.message if item else resp.message}")
 
         msghub_req = MsghubRequest(
             campaign_id=campaign.id,
@@ -681,9 +746,6 @@ async def dispatch_chat_reply(
         db.add(msghub_req)
         db.flush()
 
-        item = resp.items[0] if resp.items else None
-        code = item.code if item else resp.code
-        is_ok = code == SUCCESS_CODE
         db.add(Message(
             campaign_id=campaign.id,
             msghub_request_id=msghub_req.id,
@@ -691,13 +753,13 @@ async def dispatch_chat_reply(
             to_number_raw=phone,
             cli_key=cli_key,
             msg_key=item.msg_key if item else None,
-            status="REG" if is_ok else "FAILED",
+            status="REG",
             result_code=code,
             result_desc=item.message if item else resp.message,
         ))
-        campaign.fail_count = 0 if is_ok else 1
-        campaign.pending_count = 1 if is_ok else 0
-        campaign.state = "DISPATCHED" if is_ok else "FAILED"
+        campaign.fail_count = 0
+        campaign.pending_count = 1
+        campaign.state = "DISPATCHED"
         db.flush()
 
         audit.log(
@@ -836,15 +898,21 @@ async def _dispatch_direct_chunks(
             db.flush()
             db.commit()
 
-        except MsghubAuthError:
+        except MsghubAuthError as exc:
             db.rollback()
-            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, "인증 오류")
+            _record_failed_chunk(
+                db, campaign.id, chunk_idx, chunk, sent_at, "인증 오류",
+                rejection_code=_explicit_rejection_code(exc),
+            )
             db.commit()
             raise
 
         except Exception as exc:
             db.rollback()
-            _record_failed_chunk(db, campaign.id, chunk_idx, chunk, sent_at, str(exc))
+            _record_failed_chunk(
+                db, campaign.id, chunk_idx, chunk, sent_at, str(exc),
+                rejection_code=_explicit_rejection_code(exc),
+            )
             db.commit()
             failed_chunks.append(chunk_idx)
             failed_chunk_sizes.append(len(chunk))
@@ -911,6 +979,18 @@ def _create_messages_from_response(
     return accepted, failed
 
 
+def _explicit_rejection_code(exc: Exception) -> str | None:
+    """접수되지 않은 명시적 4xx 거부만 확정한다. 타임아웃·5xx·파싱 오류는 불확실하다."""
+    if (
+        isinstance(exc, (MsghubBadRequest, MsghubAuthError, MsghubRateLimited))
+        and exc.status_code in (400, 401, 403, 429)
+        and exc.code
+        and exc.code != SUCCESS_CODE
+    ):
+        return exc.code
+    return None
+
+
 def _record_failed_chunk(
     db: Session,
     campaign_id: int,
@@ -919,6 +999,8 @@ def _record_failed_chunk(
     sent_at: str,
     error_body: str,
     cli_key_suffix: str = "",
+    *,
+    rejection_code: str | None = None,
 ) -> None:
     """실패 청크의 MsghubRequest + Message 레코드를 기록한다.
 
@@ -926,11 +1008,12 @@ def _record_failed_chunk(
     요청 예외여도 msghub 가 실제로 접수했으면 리포트가 그 키로 오는데, 키가 다르면 FAILED 행은
     phone 보조매칭 대상도 아니라 리포트가 어디에도 붙지 않는다. 재조정(services.reconcile)도 이
     키로 조회한다 — 응답 코드 없는 요청(response_code NULL)과 result_code 없는 FAILED 행이 그 대상이다.
+    명시적 요청 거부는 응답 코드를 보존해, 예약 취소가 타임아웃과 구분하고 재조정도 제외한다.
     """
     msghub_req = MsghubRequest(
         campaign_id=campaign_id,
         chunk_index=chunk_idx,
-        response_code=None,
+        response_code=rejection_code,
         response_message="fail",
         error_body=error_body,
         sent_at=sent_at,
@@ -947,7 +1030,7 @@ def _record_failed_chunk(
             cli_key=f"{_make_cli_key(campaign_id, chunk_idx, i)}{cli_key_suffix}",
             msg_key=None,
             status="FAILED",
-            result_code=None,
+            result_code=rejection_code,
             result_desc=error_body,
         )
         db.add(msg)

@@ -145,6 +145,7 @@ async def reconcile_pending_messages(
 async def _query_and_apply(db: Session, client: MsghubClient, rows: Sequence[Row]) -> int:
     """행들을 10건씩 query_sent 로 조회해 결과를 반영·커밋한다. 확정(DONE) 건수 반환."""
     total = 0
+    committed_changes = False
     try:
         for i in range(0, len(rows), _QUERY_BATCH):
             batch = rows[i : i + _QUERY_BATCH]
@@ -157,7 +158,10 @@ async def _query_and_apply(db: Session, client: MsghubClient, rows: Sequence[Row
             except Exception:
                 log.exception("query_sent 실패 — 이 배치 skip (다음 주기 재시도)")
                 continue
-            processed, fallback_needed = process_sent_query(db, raw_items)
+            recovered_campaign_ids: set[int] = set()
+            processed, fallback_needed = process_sent_query(
+                db, raw_items, recovered_campaign_ids=recovered_campaign_ids,
+            )
             # 웹훅처럼 실패 확정과 대체 발송을 한 트랜잭션으로 커밋한다. 커밋 전엔 -fb 로 바꾼 행이 다른 요청에
             # 안 보인다 — 그사이 온 대체 SMS 리포트는 재전송으로 받는다(report.awaiting_record).
             with awaiting_record({m.campaign_id for m in fallback_needed}):
@@ -166,11 +170,12 @@ async def _query_and_apply(db: Session, client: MsghubClient, rows: Sequence[Row
                     log.info("재조정 SMS fallback 발송: %d/%d건", fallback_sent, len(fallback_needed))
                 db.commit()
             total += processed
+            committed_changes |= bool(processed or recovered_campaign_ids)
     finally:
-        if total:
+        if committed_changes:
             # 커밋된 배치 뒤 — 리포트 웹훅과 같은 이벤트·창으로 열린 대화방의 대기 라벨을
             # 갱신한다. 뒤 배치가 예외(DB 잠김 등)로 끊겨도 앞서 커밋된 확정분은 알린다 — 이미
-            # DONE 이라 다음 주기엔 잡히지 않는다. REG→ING 같은 대기 안 이동은 total 에 안 잡힌다.
-            # 미완료 확정과 요청 예외 실패 복구(reconcile_pending_messages 의 두 조회) 모두 여기서 알린다.
+            # DONE 이라 다음 주기엔 잡히지 않는다. FAILED→REG/ING 복구도 실패 배지가 대기로 바뀌므로
+            # 알리되 확정 건수(total)에는 세지 않는다. REG→ING 같은 대기 안 이동은 알리지 않는다.
             events.publish_throttled("thread.updated")
     return total

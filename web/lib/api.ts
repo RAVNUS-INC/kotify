@@ -17,9 +17,9 @@
 
 import { ApiError } from './api-error';
 
-export type ApiEnvelope<T> = {
+export type ApiEnvelope<T, M = { cursor?: string; total?: number }> = {
   data?: T;
-  meta?: { cursor?: string; total?: number };
+  meta?: M;
   error?: {
     code: string;
     message: string;
@@ -35,10 +35,15 @@ const FASTAPI_URL = process.env.FASTAPI_URL ?? 'http://127.0.0.1:8080';
  * FastAPI에 절대 URL로 fetch. envelope `{ data, error }`를 파싱해 `data`만
  * 반환. 에러 시 `ApiError` throw.
  */
-export async function apiFetch<T>(
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await apiFetchEnvelope<T>(path, init)).data;
+}
+
+/** data와 페이지 metadata를 함께 읽는다. 기존 apiFetch의 인증·에러 처리를 공유한다. */
+export async function apiFetchEnvelope<T, M = { cursor?: string; total?: number }>(
   path: string,
   init?: RequestInit,
-): Promise<T> {
+): Promise<ApiEnvelope<T, M> & { data: T }> {
   const url = path.startsWith('http') ? path : `${FASTAPI_URL}${path}`;
 
   // 서버 컴포넌트의 요청 쿠키를 FastAPI 로 forward. 이거 없으면 FastAPI 가
@@ -84,9 +89,9 @@ export async function apiFetch<T>(
   // 세션 만료·초기설정 미완료는 FastAPI 가 Location 없는 303 JSON 으로 돌려준다
   // (fetch 가 따라가지 않음). error.code 가 'auth_required' / 'setup_required' 라
   // 아래 일반 에러 분기의 ApiError 에 그대로 실린다.
-  let body: ApiEnvelope<T>;
+  let body: ApiEnvelope<T, M>;
   try {
-    body = (await res.json()) as ApiEnvelope<T>;
+    body = (await res.json()) as ApiEnvelope<T, M>;
   } catch {
     throw new ApiError(
       res.status,
@@ -117,5 +122,5 @@ export async function apiFetch<T>(
     throw new ApiError(res.status, 'missing_data', 'API 응답에 data가 없습니다');
   }
 
-  return body.data;
+  return { ...body, data: body.data };
 }

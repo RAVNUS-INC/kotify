@@ -11,7 +11,7 @@ api-contract.md 의 GET /api/dashboard 계약:
 
 실데이터 소스:
     - timeline:   `campaigns` 오늘 것 (created_at KST 기준)
-    - inbox:      `list_threads()` (MT+MO 머지, app/services/chat.py)
+    - inbox:      `list_thread_page()` (MT+MO 머지, app/services/chat.py)
     - kpis:       `messages` / `campaigns` 집계
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
 from app.models import Campaign, Message
 from app.msghub.codes import SUCCESS_CODE
-from app.services.chat import list_threads
+from app.services.chat import list_thread_page
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -131,9 +131,9 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
     ]
 
     # ── Inbox ────────────────────────────────────────────────────────────────
-    # list_threads() 는 MT+MO 를 머지해 최근 활동순 반환. 상위 5개 + 안읽음 count.
-    threads_all, _ = list_threads(db, limit=200, offset=0)
-    unread_count = sum(1 for t in threads_all if t.unread)
+    # 표시할 5개와 전체 미읽음 건수를 같은 집계에서 가져온다.
+    thread_page = list_thread_page(db, limit=5)
+    unread_count = thread_page.unread_total
 
     inbox_threads = [
         {
@@ -144,7 +144,7 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
             "time": _hhmm_kst(t.last_timestamp),
             "unread": t.unread,
         }
-        for t in threads_all[:5]
+        for t in thread_page.threads
     ]
 
     # ── KPIs ─────────────────────────────────────────────────────────────────

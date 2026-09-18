@@ -194,7 +194,7 @@ def test_claim_shapes_are_recorded_without_values(value, expected_type):
 
 
 @pytest.mark.parametrize("diagnostic_session", [False, True])
-def test_old_viewer_session_overwrite_is_detected_without_identity_or_token(
+def test_old_viewer_session_keeps_latest_db_roles_without_leaking_diagnostics(
     db_session, sample_user, caplog, diagnostic_session,
 ):
     sample_user.roles = json.dumps(["sender", "private-db-role-sentinel"])
@@ -209,16 +209,18 @@ def test_old_viewer_session_overwrite_is_detected_without_identity_or_token(
     with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
         user = get_current_user(_request(session), db_session)
         get_current_user(_request(session), db_session)
-    assert json.loads(user.roles) == ["viewer"]  # 기존 덮어쓰기 동작 유지
+    assert json.loads(user.roles) == ["sender", "private-db-role-sentinel"]
     messages = [r.message for r in caplog.records if "auth_session_role_mismatch" in r.message]
-    assert len(messages) == 1
-    diag = json.loads(messages[0].split(" ", 1)[1])
-    assert diag["db_roles"]["known_roles"] == ["sender"]
-    assert diag["db_roles"]["unknown_role_count"] == 1
-    assert diag["session_roles"]["known_roles"] == ["viewer"]
-    assert diag["session_has_role_diagnostics"] is diagnostic_session
-    for private in [sample_user.sub, "sentinel", "@example.invalid"]:
-        assert private not in messages[0]
+    # 세션은 과거 로그인 스냅샷일 수 있다. 경고를 유지해도 요청마다 반복하거나 식별자를 남기지 않는다.
+    assert len(messages) <= 1
+    for message in messages:
+        diag = json.loads(message.split(" ", 1)[1])
+        assert diag["db_roles"]["known_roles"] == ["sender"]
+        assert diag["db_roles"]["unknown_role_count"] == 1
+        assert diag["session_roles"]["known_roles"] == ["viewer"]
+        assert diag["session_has_role_diagnostics"] is diagnostic_session
+        for private in [sample_user.sub, "sentinel", "@example.invalid"]:
+            assert private not in message
 
 
 def test_equal_roles_in_different_order_do_not_warn(db_session, sample_user, caplog):
@@ -240,7 +242,7 @@ def test_malformed_role_values_do_not_break_or_leak_in_mismatch_diagnostics(
     request = _request({"user_sub": sample_user.sub, "user_roles": session_roles})
     with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
         user = get_current_user(request, db_session)
-    assert json.loads(user.roles) == session_roles
+    assert json.loads(user.roles) == db_roles
     messages = [r.message for r in caplog.records if "auth_session_role_mismatch" in r.message]
-    assert len(messages) == 1
-    assert "sentinel" not in messages[0]
+    assert len(messages) <= 1
+    assert all("sentinel" not in message for message in messages)

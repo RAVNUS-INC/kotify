@@ -5,8 +5,8 @@ import { useChatStream } from './useChatStream';
 export type ChatLiveRefreshProps = {
   /** 열린 대화방 id. 목록만 볼 땐 생략. */
   threadId?: string;
-  /** 열린 대화방의 전달 대기 발신 메시지 id(lib/chat getPendingDeliveryIds). 목록만 볼 땐 생략. */
-  pendingDeliveryIds?: string[];
+  /** 열린 대화방의 대기·실패 발신 메시지 id(lib/chat getDeliveryRefreshIds). 목록만 볼 땐 생략. */
+  deliveryRefreshIds?: string[];
 };
 
 /**
@@ -20,9 +20,9 @@ export type ChatLiveRefreshProps = {
  *
  * 탭당 이것 하나만 구독한다 — 예전엔 ThreadView 도 따로 구독해 대화를 연 /chat 에서 이벤트
  * 1건에 새로고침(목록·상세 API 재호출)이 두 번 돌았다. 열린 대화와 그 대화의 전달 대기
- * 메시지는 페이지가 넘겨 주고, 대기 메시지가 있을 때만 전달 상태 이벤트에 새로고침한다.
+ * 메시지는 페이지가 넘겨 주고, 대기·실패 메시지가 있을 때 전달 상태 이벤트에 새로고침한다.
  */
-export function ChatLiveRefresh({ threadId, pendingDeliveryIds }: ChatLiveRefreshProps) {
-  useChatStream({ threadId, pendingDeliveryIds });
+export function ChatLiveRefresh({ threadId, deliveryRefreshIds }: ChatLiveRefreshProps) {
+  useChatStream({ threadId, deliveryRefreshIds });
   return null;
 }

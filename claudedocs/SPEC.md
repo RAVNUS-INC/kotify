@@ -1,7 +1,7 @@
 # kotify — 개발 명세서
 
 > U+ msghub 기반 RCS 우선 단체 공지 발송 시스템
-> 작성일: 2026-04-08 / 최종 갱신: 2026-04-21 / 버전: 0.2
+> 작성일: 2026-04-08 / 최종 갱신: 2026-09-18 / 버전: 0.2
 
 ---
 
@@ -13,7 +13,7 @@
 - **스택**: Python 3.12+ FastAPI 백엔드 + Node 20+ Next.js 14 프론트엔드 + SQLite + Authlib(Keycloak OIDC).
 - **배포**: Proxmox LXC CT (Debian 12/13, 1 vCPU / 1 GB / 8 GB). FastAPI는 내부(8080), Next.js가 외부 대면(3000). NPM이 TLS 종단.
 - **규모**: 1회 발송 최대 1,000명.
-- **결과 동기화**: **msghub 웹훅** (`/webhook/msghub/report`) — 폴링 없음.
+- **결과 동기화**: **msghub 웹훅**과 지연·불명확한 발송 결과의 주기적 재조정.
 - **이력 보관**: 본 시스템 SQLite가 영구 저장소.
 - **인증**: 모든 앱 라우트는 Keycloak OIDC 보호 (realm/client = `sms-sys`). 2-tier guard (middleware + layout session).
 - **시크릿**: **`.env` 없음.** 마스터 키 1개만 `/var/lib/kotify/master.key` (600 권한, 자동 생성)에 두고, 모든 msghub/Keycloak 설정은 DB에 **Fernet 암호화** 저장. 웹 UI에서 관리.
@@ -66,8 +66,13 @@
 | **sender** | 발송 + 본인 이력 조회 |
 | **admin** | 전체 이력 조회, 발신번호/사용자/설정 관리 |
 
-권한은 Keycloak의 **realm role** 또는 **client role**로 매핑. ID 토큰 claim에서 읽어
-FastAPI 의존성(`require_user`, `require_role`)과 Next.js `layout.tsx`의 session guard에서 동시 검사.
+권한은 Keycloak의 **realm role** 또는 **client role**로 매핑한다. 검증된 로그인 콜백이
+역할·프로필·`last_login_at`을 DB에 저장하며 최초 관리자 이메일 정책도 이때 적용한다.
+일반 요청은 세션의 사용자 식별자로 DB를 조회한다. FastAPI 권한 검사와 Next.js가 사용하는
+`GET /api/auth/me` 모두 DB의 최신 역할·프로필을 사용하므로 오래된 세션이 이전 권한을 복원하지 않는다.
+DB 사용자가 없으면 인증을 거부하며 `/api/auth/me`는 HTTP 401을 반환한다. DB 역할은 문자열 배열만
+허용하고 잘못된 형식에는 권한을 부여하지 않는다. Keycloak에서 변경한 역할은 새 검증 로그인 후
+DB에 반영된다. 매 요청의 외부 권한 조회나 토큰 재검증은 추가하지 않는다.
 
 ---
 
@@ -163,7 +168,7 @@ CREATE TABLE campaigns (
   message_type TEXT,    -- RCS | RCS_LMS | RCS_IMAGE (각각 SMS/LMS/MMS fallback)
   subject TEXT, content TEXT,
   total_count INTEGER, ok_count INTEGER, fail_count INTEGER, pending_count INTEGER,
-  state TEXT,           -- DRAFT | DISPATCHING | DISPATCHED | COMPLETED | PARTIAL_FAILED | FAILED | RESERVED
+  state TEXT,           -- DRAFT | DISPATCHING | DISPATCHED | COMPLETED | PARTIAL_FAILED | FAILED | RESERVED | RESERVE_FAILED | RESERVE_CANCELED
   reserve_at TEXT,      -- 예약 발송 시각 (UTC)
   created_at TEXT, completed_at TEXT
 );
@@ -182,7 +187,7 @@ CREATE TABLE messages (
   to_number TEXT, to_number_raw TEXT,
   cli_key TEXT,         -- client-side key: c{campaign}-{chunk}-{idx} — webhook 매칭용
   msg_key TEXT,         -- msghub-side key: 발송 응답에서 받음
-  status TEXT,          -- PENDING | SENT | DELIVERED | FAILED | TIMEOUT
+  status TEXT,          -- PENDING | REG | ING | FB_PENDING | DONE | FAILED | CANCELED
   result_channel TEXT,  -- RCS | SMS | LMS | MMS (실제 도달된 채널)
   result_code TEXT, result_message TEXT,
   complete_time TEXT, received_at TEXT  -- webhook 수신 시각
@@ -198,28 +203,56 @@ CREATE TABLE audit_logs (
 
 ### 4.1 Campaign.state 상태 머신
 
-```
-  DRAFT ──(확정)──► DISPATCHING ──(모든 청크 전송 완료)──► DISPATCHED
-                                                                │
-                         예약 발송:                             ▼
-                         DRAFT ──► RESERVED ──(예약 시각)──► DISPATCHING
-                                                                │
-                                                                ▼
-                                         (모든 messages가 final state)
-                                 ┌──────────────┬───────────────┐
-                                 ▼              ▼               ▼
-                            COMPLETED    PARTIAL_FAILED      FAILED
-                         (전부 success)   (일부 실패)      (전부 실패/청크 실패)
-```
+| 단계 | 상태와 전이 |
+|---|---|
+| 작성·접수 | `DRAFT` → `DISPATCHING`; 즉시 발송 접수 결과는 `DISPATCHED` / `PARTIAL_FAILED` / `FAILED` |
+| 예약 접수 | `RESERVED` / `PARTIAL_FAILED` / `RESERVE_FAILED`; 일부 청크 요청 실패여도 접수된 예약은 남을 수 있음 |
+| 결과 확정 | 모든 수신자 결과가 정해지면 `COMPLETED` / `PARTIAL_FAILED` / `FAILED`로 재집계 |
+| 요청 시간 초과 복구 | 실패 메시지가 공급자 조회에서 `REG`/`ING`으로 확인되면 캠페인도 `DISPATCHING`으로 복구하고 커밋 뒤 변경 이벤트 발행 |
+| 예약 취소 | 확인된 청크의 대기 메시지를 `CANCELED`로 변경. 발송될 수 있는 행이 없으면 `RESERVE_CANCELED` |
+
+`completed_at`은 최초 결과 시각을 유지한다. 재조정으로 상태가 바뀌어도 알림 정렬·읽음 기준이
+새 시각으로 밀리지 않으며, 알림 내용은 현재 캠페인 상태를 따른다.
+
+`GET /api/campaigns/{id}`의 `canCancelReservation`은 예약 메타데이터·청크 요청 ID·대기 행으로
+계산한다. 상세 화면의 취소 버튼도 이 값을 사용하므로 `PARTIAL_FAILED`에서 접수된 예약을 취소할
+수 있다. `POST /api/campaigns/{id}/cancel`은 남은 청크만 처리하고 청크별 취소 성공을 저장한다.
+요청 시간 초과·5xx·응답 파싱 오류·과거 코드 없는 실패 및 조회의 `INVALID_KEY`/`OVER_DATE`는
+명시적인 공급자 거부와 구분하며, 이를 남긴 채 전체 취소로 표시하지 않는다. 확인된 청크를 취소한
+뒤에도 불명확한 예약은 `RESERVED`로 남기고 상세의 `failureReason`에 미확정 인원과 msghub 웹 콘솔
+확인·취소 안내를 계속 표시한다. 알려진 예약을 모두 취소하면 `canCancelReservation=false`가 되고,
+미확정 행만 남은 재취소 요청은 HTTP 409 `unconfirmed_reservation`을 반환한다.
 
 ### 4.2 Message.status 상태 머신
 
-```
-PENDING ──(msghub send 200)──► SENT ──(webhook)──► DELIVERED | FAILED
-   │                              │
-   │                              └─ 1시간 내 webhook 없음 → TIMEOUT
-   └─(msghub send 실패)──────────────────────────────► FAILED
-```
+| 상태 | 의미 |
+|---|---|
+| `PENDING` | 예약 등 결과 리포트 대기 |
+| `REG` / `ING` | 공급자 접수 / 처리 중 |
+| `FB_PENDING` | RCS 실패 뒤 대체 SMS의 결과 대기 |
+| `DONE` | 최종 리포트 수신. `result_code`로 전달 성공·실패 판정 |
+| `FAILED` | 요청 단계 실패. 명시적인 거부 코드가 없고 요청 결과가 불명확하면 지연 리포트·재조정으로 복구 가능 |
+| `CANCELED` | 예약 취소 확인. 성공·실패·대기 카운터에서 제외 |
+
+요청 시간 초과를 전달 실패 확정으로 취급하지 않는다. 재조정이 `FAILED`를 `REG`/`ING`으로 복구한
+경우도 변경 이벤트를 발행하지만, 재조정의 반환 건수에는 기존처럼 `DONE` 확정만 포함한다.
+
+
+### 4.3 팀 공유 읽음 경계 (스키마 0019)
+
+`thread_reads`는 기존 `caller`·`phone`·`read_at`과 `(caller, phone)` 고유 제약을 보존하고,
+`last_read_mo_id INTEGER NOT NULL DEFAULT 0` 및 `phone` 인덱스를 추가한다. 읽음 상태는 같은
+고객 번호의 모든 행에서 `MAX(last_read_mo_id)`를 사용하며 사용자별·발신번호별로 나누지 않는다.
+읽음 요청이 역순으로 완료돼도 원자적인 최댓값 갱신으로 경계가 후퇴하지 않는다.
+
+마이그레이션 `0019_thread_read_mo_cursor.py`는 기존 `read_at` 이전에 서버가 받은 MO의
+`received_at`을 사용해 번호별 연속 ID 구간만 이관한다. 공급자 `mo_recv_dt`로 과거의 지연 수신을
+읽음으로 추정하지 않는다. 불명확한 시각이나 미관측 ID를 건너뛰지 않으므로 일부 과거 회신이
+다시 안읽음으로 보일 수 있다. 기존 `mo_messages`의 재구축·삭제는 수행하지 않는다.
+
+현재 MO 삭제 경로가 없어 수신 ID는 저장 순서대로 증가한다. 향후 삭제·보관을 도입한다면 SQLite
+ID 재사용을 막는 별도 순번 또는 `AUTOINCREMENT`를 함께 설계해야 한다. 배포·구 클라이언트
+호환 안내는 `deploy/README.md`의 `0019` 절을 따른다.
 
 ---
 
@@ -301,7 +334,7 @@ PENDING ──(msghub send 200)──► SENT ──(webhook)──► DELIVERED
 
 ### 7.1 채널 자동 판정
 
-msghub는 **UTF-8 기반**. RCS/SMS/LMS/MMS 판정 기준:
+현재 앱의 본문 분류는 **EUC-KR 바이트 길이**를 기준으로 한다. 이는 공급자 HTTP 요청의 전송 인코딩과 별개인 앱 검증 정책이다. RCS/SMS/LMS/MMS 판정 기준:
 
 | 채널 | 조건 | 요금 |
 |---|---|---|
@@ -313,13 +346,14 @@ msghub는 **UTF-8 기반**. RCS/SMS/LMS/MMS 판정 기준:
 > (replyId 미보유 → 29003/404). 단문은 단방향 SMS형(17원)으로 발송되어 SMS
 > fallback(9원)보다 비싸다. 양방향 8원 전환은 U+ 지원 확인 필요(TODO).
 
-본문 > 2000 byte → 거부.
+최초 발송은 본문 > 2000 byte이면 거부한다. 대화방 답장은 RCS·일반 SMS 모두 90바이트 이내 단문만 허용하며 LMS로 자동 전환하지 않는다.
 
 ### 7.2 byte 계산
 
-- UTF-8 인코딩 기준으로 측정: `len(text.encode("utf-8"))`.
-- 한글 1자 = 3 byte, ASCII 1자 = 1 byte.
-- 이모지는 4 byte 이상 — 사용자에게 실제 byte 수 + 채널 변화를 실시간 표시.
+- EUC-KR 인코딩 기준으로 측정한다: `len(text.encode("euc-kr"))`.
+- 보통 한글 1자 = 2바이트, ASCII 1자 = 1바이트다. 일부 확장 한글은 더 많은 바이트를 사용하므로 글자 수만으로 판정하지 않는다. 본문 안의 공백·줄바꿈도 포함하며, EUC-KR 미지원 문자(이모지 등)는 발송을 차단한다.
+- 대화방 답장은 발송할 본문의 앞뒤 공백을 제거한 뒤 서버에서 검증한다. 예를 들어 `가` 45자(90바이트)는 허용하고 46자(92바이트)는 거부한다. 입력 중 같은 서버 검증 결과로 길이·오류를 안내한다(§8.4).
+- 알려진 별도 제약: 최초 발송 화면 `ComposeForm`의 예상 길이 표시는 아직 `TextEncoder`의 UTF-8 계산을 사용해 서버 분류와 다를 수 있다. 이번 서버 기준 사전 검증 적용 범위는 대화방 답장이며, 최초 발송 화면의 계산 통일은 후속 작업이다.
 
 구현: `app/util/text.py`.
 
@@ -375,11 +409,26 @@ web/app/
 | `ChipField` | 태그 입력 |
 | `DataTable` | 정렬/페이지네이션 테이블 |
 
-### 8.4 SSE (chat)
+### 8.4 대화방 API·입력·SSE
 
-- `/chat/[id]`는 서버 컴포넌트로 초기 히스토리 로드 + 클라이언트 컴포넌트로 `EventSource` 연결.
-- FastAPI `/chat/{id}/stream` 엔드포인트가 SSE로 메시지 푸시.
-- 네트워크 단절 시 exponential backoff 재연결 (1s → 2s → 4s → max 30s).
+- `GET /threads`는 `q`(번호·최근 본문), `unread`, `limit`(기본 200, 1~200), `offset`(기본 0, 0 이상)을 받는다. 전체 대화에 검색·안읽음 조건을 적용한 뒤 최근 활동순으로 페이지를 자른다. 응답은 `{ data: ChatThread[], meta: { total, limit, offset, hasMore, unreadTotal } }`이다. `total`은 검색·안읽음 조건을 적용한 결과 수이며 `unreadTotal`은 `q` 검색 결과 전체의 안읽음 수로 페이지·안읽음 필터와 무관하다. 검색어가 없으면 전체 안읽음 수다. 하이웍스 주소록 이름은 페이지 조회 후 표시용으로 붙이며 검색 대상은 아니다.
+- `/chat`는 검색어·필터·선택 대화·offset을 URL에 저장한다. 이전·다음 이동과 대화 선택은 나머지 조건을 유지하고, 검색·필터 변경은 offset을 초기화한다. 전체 건수와 검색 결과 기준 안읽음 수는 API metadata를 사용한다. 대시보드 안읽음 집계도 최신 200개에 제한되지 않는다.
+- 최근 발신의 목록 순서·본문 선택은 상세와 같이 `complete_time → report_dt → campaign.created_at` 순서로 보완한다. 따라서 리포트가 없는 신규 `REG`·`FAILED` 답장도 목록에 반영되며, 혼합 시각 포맷은 실제 시각으로 비교한다.
+- `GET /threads/{id}`는 실제로 조회한 수신 MO의 최대 ID를 `lastInboundMessageId: number | null`로 반환한다. 이 응답 이후 도착한 MO를 별도 조회해 끼워 넣지 않는다. `POST /threads/{id}/read`는 필수 JSON `{ "lastReadMessageId": 42 }`를 받으며 양의 정수와 해당 고객 번호의 수신 ID인지 확인한다. 누락·다른 번호의 MO는 HTTP 422다. 번호 단위 팀 공유 경계를 최댓값으로 갱신하고 `{ data: { id, unread, lastReadMessageId } }`를 반환한다. ID 이후에 온 회신은 안읽음으로 남고 공급자 발생 시각은 판정에 사용하지 않는다.
+- `ThreadView`는 `unread`가 계속 true여도 실제 관측 ID가 바뀌면 읽음을 다시 요청한다. 같은 관측값의 실패를 재렌더마다 반복하지 않으며, 다른 대화로 이동한 뒤 완료된 이전 읽음 응답은 새 화면을 갱신하지 않는다.
+- `GET /threads/{id}`의 `messages[]`와 답장 발송 응답은 발신(`side="us"`)에만 `senderName`을 포함한다. 단체 발송·대화 답장 모두 `Campaign.created_by`로 연결한 사용자의 현재 `display_name`, `name` 순으로 표시한다. 빈 값·이메일 형태·계정 식별자는 건너뛰며, 사용자나 표시명이 없으면 `알 수 없음`이다. 발송 시점의 이름 스냅샷은 아니며 현재 로그인한 열람자를 작성자로 추정하지 않는다. 수신 메시지는 이 필드를 생략하고 UI도 이름을 표시하지 않는다.
+- 발신 메타는 `12:31 / SMS / 가상 담당자` 형식이고 대기·실패·취소 상태만 뒤에 덧붙인다. 성공 상태는 별도 문구를 붙이지 않으며 긴 이름은 줄바꿈한다.
+- 브라우저 `POST /api/threads/validate-reply` → FastAPI `POST /threads/validate-reply`는 `{ "text": "본문" }`을 받아 `{ "data": { "byteLength": 4, "maxBytes": 90, "valid": true, "error": null } }` 형태로 응답한다. 로그인·설정 완료·CSRF 검사를 유지하며 DB 변경이나 공급자 발송 없이 실제 답장의 `validate_reply_content` 정책을 적용한다. 검증에 실패해도 HTTP 200의 `valid=false`와 오류 문구를 반환한다. 빈 입력은 0바이트·오류 문구 없음이며, 인코딩 불가나 입력 상한 4000자 초과로 측정하지 못하면 `byteLength=null`이다.
+- 입력이 멈춘 뒤 300ms 후 앞뒤 공백을 제거한 본문을 검증하고 현재 바이트·90바이트 한도·초과 또는 미지원 문자 오류를 표시한다. 확인 중이거나 검증 실패·통신 오류가 있으면 버튼과 발송 단축키를 모두 막는다. 오래된 응답은 무시하고 검증 통신 실패 시 재확인할 수 있다. 최종 발송에서도 서버가 같은 정책을 다시 검사한다.
+
+- `POST /threads/{id}/messages`의 RCS 답장은 유효한 MO `replyId`가 있으면 양방향으로 요청한다. 명시적인 요청 거부 또는 수신자별 거부는 단방향 RCS 대체 경로로 보낸다. 양방향 요청의 시간 초과·5xx·파싱 오류 등 접수 미확정은 실제 요청의 `cliKey`와 단건 메시지를 보존하고 즉시 추가 발송하지 않는다. 지연 리포트·재조정으로 원래 요청 결과를 확인한다. 접수 뒤 실패 리포트에 대한 기존 SMS 대체 경로는 유지한다.
+- 최종 요청 거부는 HTTP 502 `send_failed`, 접수 미확정은 HTTP 502 `send_status_unknown`이며 `{ error: { code, message, fields: { campaignId: "42" } } }`로 반환한다. 미확정 메시지는 기존 `FAILED`·`result_code=None`으로 저장되어 나중에 복구될 수 있다. 입력창은 본문을 유지하고 오류 안내와 기록 새로고침만 수행한다. 자동 재발송하지 않으며, 미확정 안내가 있으면 다시 보내기 전에 결과를 확인해야 한다. 대체 발송도 실패할 수 있어 전달 성공을 보장하지 않는다.
+
+- `/chat`와 `/chat/[id]`는 서버 컴포넌트로 데이터를 읽고 `ChatLiveRefresh`가 탭당 SSE 연결 하나를 유지한다.
+- 브라우저 `/api/chat/stream` → FastAPI `/chat/stream`은 전역 갱신 신호를 보낸다. `message.new`는 고객 회신, `thread.updated`는 발신 상태 변경이며 메시지 본문을 이벤트에 싣지 않는다.
+- 서버는 이벤트 종류별 5초 창으로 묶어 처음과 마지막 변경을 알린다. 클라이언트는 회신에 새로고침하고, 전달 상태는 열린 대화의 `pending`·`failed` 발신 메시지가 있을 때 갱신한다. 실패에는 나중에 복구될 수 있는 요청 시간 초과가 포함된다.
+- 전달 갱신 간격은 5초에서 시작해 대상 목록이 같으면 최대 60초까지 늘어난다. 이벤트가 없으면 폴링하지 않는다. 최초 연결·재연결이 열리면 목록·확정된 대화를 포함해 모든 화면을 한 번 갱신해 구독 전·단절 중 회신을 보정한다. 이 갱신은 전달 상태의 긴 대기 간격에 묶지 않고 기존 타이머와 합치며, 닫힌 연결의 늦은 이벤트는 무시한다. 대화 이동 중 받은 최근 15초 이내 전달 상태 이벤트도 감시 대상이 있는 새 화면에 한 번 반영한다.
+- 네트워크 단절 시 exponential backoff 재연결 (1s → 2s → 4s → max 30s). 서버는 25초마다 keep-alive를 보내며 이벤트 버스는 단일 uvicorn 워커를 전제로 한다.
 - Korean IME 처리: `isComposing` 상태에서는 Enter 무시.
 
 ---
@@ -594,7 +643,7 @@ kotify/
 │   │   └── audit.py
 │   ├── util/
 │   │   ├── phone.py            # 전화번호 정규화
-│   │   ├── text.py             # byte 길이, UTF-8 검증
+│   │   ├── text.py             # EUC-KR byte 길이·지원 문자 검증
 │   │   └── csv_safe.py         # CSV formula injection 방어
 │   └── routes/
 │       ├── webhook.py          # msghub 웹훅 수신

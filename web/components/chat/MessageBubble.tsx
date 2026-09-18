@@ -14,12 +14,14 @@ export type MessageBubbleProps = {
   /** 발신(us) 전용 — 수신(them) 말풍선에서는 무시한다. */
   status?: MessageStatus;
   timestamp?: string;
+  /** 발신(us) 전용 — 실제 캠페인 작성자의 표시명. */
+  senderName?: string;
   children: ReactNode;
   className?: string;
 };
 
 const BASE =
-  'max-w-[78%] rounded-2xl px-3 py-2 text-[13px] leading-[1.55] break-words whitespace-pre-wrap';
+  'min-w-0 max-w-[78%] rounded-2xl px-3 py-2 text-[13px] leading-[1.55] break-words whitespace-pre-wrap';
 
 // 채널(RCS/SMS)은 색이 아니라 타임스탬프 옆 텍스트 라벨로 표시 — 색맹/프린트
 // 환경에서도 정보 유실 없도록. 발신/수신만 색으로 구분.
@@ -43,7 +45,7 @@ const KIND_LABEL: Record<MessageKind, string> = {
   kakao: '카카오',
 };
 
-// 상태도 채널처럼 텍스트로 붙인다 (`01:38 / RCS · 실패`). 발신 대부분인 전달 성공(sent)은
+// 상태도 메타에 텍스트로 붙인다 (`01:38 / RCS / 담당자 · 실패`). 전달 성공(sent)은
 // 라벨을 늘리지 않고, 실패는 놓치지 않게 메타 라벨을 danger 색으로 — 색은 보조일 뿐.
 // 예약 취소(cancelled)는 사용자가 멈춘 것이라 실패가 아니다 — 대기처럼 기본 색.
 const STATUS_LABEL: Record<MessageStatus, string | null> = {
@@ -58,6 +60,7 @@ export function MessageBubble({
   kind = 'sms',
   status,
   timestamp,
+  senderName,
   children,
   className,
 }: MessageBubbleProps) {
@@ -65,11 +68,16 @@ export function MessageBubble({
   // 수신 말풍선은 status 가 와도 기존 표시 그대로.
   const outStatus = side === 'us' ? status : undefined;
   const statusLabel = outStatus ? STATUS_LABEL[outStatus] : null;
-  // `01:38 / RCS` 형식 — 시간이 없으면 채널만, 채널이 없으면 시간만.
+  // 발신은 `01:38 / RCS / 담당자`, 수신은 `01:38 / RCS`. 시간이 없으면 생략.
   const channelMeta = timestamp ? `${timestamp} / ${KIND_LABEL[kind]}` : KIND_LABEL[kind];
-  const meta = statusLabel ? `${channelMeta} · ${statusLabel}` : channelMeta;
+  const senderMeta =
+    side === 'us' ? `${channelMeta} / ${senderName?.trim() || '알 수 없음'}` : channelMeta;
+  const meta = statusLabel ? `${senderMeta} · ${statusLabel}` : senderMeta;
   const metaClass = cn(
-    'whitespace-nowrap font-mono text-[10px]',
+    'font-mono text-[10px]',
+    side === 'us'
+      ? 'min-w-0 max-w-[40%] break-words whitespace-normal text-right'
+      : 'whitespace-nowrap',
     outStatus === 'failed' ? 'text-danger' : 'text-ink-dim',
   );
 

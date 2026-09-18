@@ -25,8 +25,8 @@ from app.msghub.schemas import (
     MsghubServerError,
     ReportItem,
 )
-from app.routes.campaigns import cancel_campaign
-from app.services.report import process_report
+from app.routes.campaigns import cancel_campaign, get_campaign
+from app.services.report import process_report, process_sent_query
 
 _RESERVED_AT = "2026-06-01T03:00:00+00:00"  # 예약 발송은 예약 시각(UTC)을 sent_at 으로 저장
 
@@ -424,4 +424,49 @@ async def test_reservation_without_any_web_req_id_is_rejected(
 
     assert resp.status_code == 400
     assert json.loads(resp.body)["error"]["code"] == "no_reservation_id"
+    assert msghub.requested == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query_status", [None, "INVALID_KEY", "OVER_DATE"])
+async def test_unknown_request_result_is_not_proof_of_full_cancellation(
+    db_session, sample_user, monkeypatch, query_status,
+):
+    """타임아웃 및 재조회 불가 결과는 접수 거부 증거가 아니다. 콘솔 확인 안내가 유지된다."""
+    campaign = _reserved_campaign(db_session, sample_user.sub, "2026-01-01T00:00:22+00:00")
+    campaign.reserve_time = "2026-06-01 12:00"
+    _add_chunk(db_session, campaign, 0, ["CANCELED"])
+    keys = _add_chunk(db_session, campaign, 1, ["FAILED"])
+    if query_status:
+        process_sent_query(db_session, [{"cliKey": keys[0], "status": query_status}])
+        db_session.commit()
+    msghub = _use_msghub(monkeypatch)
+
+    response = await cancel_campaign(str(campaign.id), user=sample_user, db=db_session)
+
+    assert response.status_code == 409
+    assert json.loads(response.body)["error"]["code"] == "unconfirmed_reservation"
+    assert campaign.state == "RESERVED"
+    detail = get_campaign(str(campaign.id), db=db_session)["data"]
+    assert detail["canCancelReservation"] is False
+    assert "1명" in detail["failureReason"]
+    assert "msghub 웹 콘솔" in detail["failureReason"]
+    assert msghub.requested == []
+
+
+@pytest.mark.asyncio
+async def test_immediate_partial_failure_is_not_a_cancelable_reservation(
+    db_session, sample_user, monkeypatch,
+):
+    campaign = _reserved_campaign(db_session, sample_user.sub, "2026-01-01T00:00:23+00:00")
+    campaign.state = "PARTIAL_FAILED"
+    _add_chunk(db_session, campaign, 0, ["REG"], reserved=False)
+    _add_chunk(db_session, campaign, 1, ["FAILED"])
+    msghub = _use_msghub(monkeypatch)
+
+    response = await cancel_campaign(str(campaign.id), user=sample_user, db=db_session)
+
+    assert response.status_code == 400
+    assert json.loads(response.body)["error"]["code"] == "not_reserved"
+    assert get_campaign(str(campaign.id), db=db_session)["data"]["canCancelReservation"] is False
     assert msghub.requested == []

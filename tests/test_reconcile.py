@@ -250,15 +250,39 @@ def test_reconcile_settles_request_failure_that_msghub_accepted(db_session, samp
     )
 
 
-def test_reconcile_moves_request_failure_back_to_pending_while_msghub_processes_it(db_session, sample_user):
+@pytest.mark.parametrize("query_status", ["REG", "ING"])
+@pytest.mark.parametrize("initial_state", ["FAILED", "RESERVE_FAILED"])
+def test_reconcile_moves_request_failure_back_to_pending_while_msghub_processes_it(
+    db_session, sample_user, query_status, initial_state,
+):
     """조회 결과가 접수·처리 중(ING)이면 실패가 아니라 대기다 — 집계를 실패에서 대기로 옮기고, 그 뒤엔
     미완료 행으로 조회돼 결과가 확정된다."""
     campaign = _make_request_failure(db_session, sample_user.sub, cli_keys=["c-y-0-0"], sent_at=_ago(minutes=30))
+    campaign.state = initial_state
+    if initial_state == "RESERVE_FAILED":
+        # 예약 시각이 지난 뒤 조회되는 실패한 예약 요청도 현재 처리 중이면 발송 중이다.
+        campaign.reserve_time = "2026-01-01 09:00"
+    db_session.commit()
+    original_completed_at = campaign.completed_at
 
-    asyncio.run(reconcile_pending_messages(db_session, _FakeClient([{"cliKey": "c-y-0-0", "status": "ING"}])))
+    total = asyncio.run(reconcile_pending_messages(
+        db_session, _FakeClient([{"cliKey": "c-y-0-0", "status": query_status}]),
+    ))
 
-    assert _status_of(db_session, "c-y-0-0") == "ING"
+    assert total == 0  # 확정(DONE) 건수 API는 실패 → 처리 중 복구와 구분한다.
+    assert _status_of(db_session, "c-y-0-0") == query_status
     assert (campaign.fail_count, campaign.pending_count) == (0, 1)
+    assert campaign.state == "DISPATCHING"
+    assert campaign.completed_at == original_completed_at
+
+    from app.routes.campaigns import _campaign_to_dict
+    from app.routes.notifications import _campaign_notif
+
+    assert _campaign_to_dict(campaign)["status"] == "sending"
+    notification = _campaign_notif(campaign)
+    assert notification["level"] == "info"
+    assert notification["title"].endswith("발송 중")
+    assert notification["_ts_iso"] == original_completed_at
 
     done = _FakeClient([{
         "cliKey": "c-y-0-0", "status": "DONE", "resultCode": "10000", "ch": "RCS", "productCode": "SMS",
@@ -266,6 +290,8 @@ def test_reconcile_moves_request_failure_back_to_pending_while_msghub_processes_
     asyncio.run(reconcile_pending_messages(db_session, done))
 
     assert (campaign.state, campaign.ok_count, campaign.pending_count) == ("COMPLETED", 1, 0)
+    # 첫 결과 시각을 유지해 읽은 알림이 복구/최종 확정 때 새 알림으로 다시 뜨지 않는다.
+    assert campaign.completed_at == original_completed_at
 
 
 @pytest.mark.parametrize("no_result", ["INVALID_KEY", "OVER_DATE"])
