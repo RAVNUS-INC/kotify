@@ -40,6 +40,14 @@ class MsghubServerError(MsghubError):
     """서버 오류 (5xx, 29012 등). 재시도 가능."""
 
 
+class PayloadFormatError(ValueError):
+    """웹훅 페이로드의 JSON 구조가 스키마와 다름 (배열 자리에 문자열 등).
+
+    웹훅 라우트가 메시지를 그대로 로그에 남긴다. 메시지는 필드 경로와 JSON 타입
+    이름으로만 만들고 값(전화번호·본문)은 넣지 않는다.
+    """
+
+
 # ── 공통 스키마 ──────────────────────────────────────────────────────────────
 
 
@@ -164,6 +172,42 @@ class UploadFileResponse:
         )
 
 
+# ── 웹훅 페이로드 구조 검사 ──────────────────────────────────────────────────
+# 구조가 어긋나면 PayloadFormatError 로 경로와 타입만 알린다. 빈 값(null·""·0·{})을
+# 빈 배열로 보는 기존 `or []` 동작은 유지한다 — 받아들이는 페이로드는 그대로다.
+
+
+def json_type(value: object) -> str:
+    """값의 JSON 타입 이름 — 로그용이라 값 자체는 담지 않는다."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int | float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def _object(value: object, path: str) -> dict:
+    if not isinstance(value, dict):
+        raise PayloadFormatError(f"{path}: object 자리에 {json_type(value)}")
+    return value
+
+
+def _array(value: object, path: str) -> list:
+    if not value:
+        return []
+    if not isinstance(value, list):
+        raise PayloadFormatError(f"{path}: array 자리에 {json_type(value)}")
+    return value
+
+
 # ── 리포트 ───────────────────────────────────────────────────────────────────
 
 
@@ -186,8 +230,11 @@ class FbReason:
         )
 
 
-def _parse_fb_reason_lst(raw: list | None) -> list[FbReason]:
-    return [FbReason.from_dict(fb) for fb in raw or []]
+def _parse_fb_reason_lst(raw: object, path: str = "fbReasonLst") -> list[FbReason]:
+    return [
+        FbReason.from_dict(_object(fb, f"{path}[{i}]"))
+        for i, fb in enumerate(_array(raw, path))
+    ]
 
 
 @dataclass
@@ -215,7 +262,8 @@ class ReportItem:
     user_custom_fields: dict | None = None      # 발송 시 심은 커스텀 필드
 
     @staticmethod
-    def from_dict(d: dict) -> ReportItem:
+    def from_dict(d: dict, path: str = "rptLst[]") -> ReportItem:
+        """path 는 구조 오류 메시지에 쓰는 이 항목의 위치 (예: rptLst[3])."""
         raw_ucf = d.get("userCustomFields")
         return ReportItem(
             msg_key=d.get("msgKey", ""),
@@ -226,7 +274,7 @@ class ReportItem:
             product_code=d.get("productCode", ""),
             telco=d.get("telco", ""),
             rpt_dt=d.get("rptDt", ""),
-            fb_reason_lst=_parse_fb_reason_lst(d.get("fbReasonLst")),
+            fb_reason_lst=_parse_fb_reason_lst(d.get("fbReasonLst"), f"{path}.fbReasonLst"),
             is_bi=bool(d.get("isBi", False)),
             phone=d.get("phone", ""),
             rpt_reg_dt=d.get("rptRegDt", ""),
@@ -243,10 +291,15 @@ class WebhookReport:
     items: list[ReportItem] = field(default_factory=list)
 
     @staticmethod
-    def from_dict(data: dict) -> WebhookReport:
-        items = [ReportItem.from_dict(d) for d in data.get("rptLst") or []]
+    def from_dict(data: object) -> WebhookReport:
+        """구조가 스키마와 다르면 PayloadFormatError."""
+        body = _object(data, "body")
+        items = [
+            ReportItem.from_dict(_object(d, f"rptLst[{i}]"), f"rptLst[{i}]")
+            for i, d in enumerate(_array(body.get("rptLst"), "rptLst"))
+        ]
         return WebhookReport(
-            rpt_cnt=data.get("rptCnt", 0),
+            rpt_cnt=body.get("rptCnt", 0),
             items=items,
         )
 
@@ -333,16 +386,23 @@ class MoWebhookPayload:
     items: list[MoItem] = field(default_factory=list)
 
     @staticmethod
-    def from_dict(data: dict) -> MoWebhookPayload:
-        if "rcsBiLst" in data:
-            raw_items = data.get("rcsBiLst") or []
-            count = data.get("rcsBiCnt", 0) or len(raw_items)
+    def from_dict(data: object) -> MoWebhookPayload:
+        """구조가 스키마와 다르면 PayloadFormatError."""
+        body = _object(data, "body")
+        if "rcsBiLst" in body:
+            lst_key = "rcsBiLst"
+            raw_items = _array(body.get(lst_key), lst_key)
+            count = body.get("rcsBiCnt", 0) or len(raw_items)
         else:
-            raw_items = data.get("moLst") or []
-            count = data.get("moCnt", 0) or len(raw_items)
+            lst_key = "moLst"
+            raw_items = _array(body.get(lst_key), lst_key)
+            count = body.get("moCnt", 0) or len(raw_items)
         return MoWebhookPayload(
             mo_cnt=count,
-            items=[MoItem.from_dict(d) for d in raw_items],
+            items=[
+                MoItem.from_dict(_object(d, f"{lst_key}[{i}]"))
+                for i, d in enumerate(raw_items)
+            ],
         )
 
 

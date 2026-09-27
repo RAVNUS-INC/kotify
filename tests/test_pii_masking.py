@@ -3,14 +3,23 @@
 리포트 매칭 경로의 경고 로그가 전화번호를 평문으로 남기지 않고 mask_phone 으로
 가리는지 caplog 로 고정한다. SMS fallback 실패 로그(send_sms_fallback)도 동일 헬퍼를
 쓰며(코드 인스펙션 확인), 본 테스트는 트리거가 쉬운 매칭 경로 2건을 검증한다.
+
+웹훅 파싱 실패 로그는 원문 대신 실패 위치와 구조만 남기는지 모든 로거·레벨에서 확인한다.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.models import Campaign, Message, MsghubRequest
 from app.msghub.codes import SUCCESS_CODE
-from app.msghub.schemas import ReportItem
+from app.msghub.schemas import MoWebhookPayload, ReportItem
+from app.routes.webhook import receive_mo, receive_report
+from app.security.settings_store import SettingsStore
 from app.services.report import process_report
 
 
@@ -62,3 +71,145 @@ def test_ambiguous_match_log_masks_phone(db_session, sample_user, caplog):
     assert phone not in caplog.text
     assert "7777" not in caplog.text
     assert "010****6666" in caplog.text
+
+
+# ── 웹훅 파싱 실패 로그 ──────────────────────────────────────────────────────
+# JSON 은 정상이지만 스키마와 다른 페이로드도 원문을 남기지 않는다 — 리포트에는 수신 번호,
+# MO 에는 고객 번호·회신 본문이 있다. 응답은 그대로고 로그에는 실패 위치와 구조만 남는다.
+
+PHONE = "01047382915"
+PHONE_DASHED = "010-4738-2915"
+REPLY_TEXT = "환불 요청합니다 주소는 강남구 테헤란로"
+_PII_FRAGMENTS = (PHONE, PHONE_DASHED, "4738", "2915", REPLY_TEXT, "환불", "테헤란로")
+
+REPORT_FORMAT_ERROR = {"error": "invalid report format"}
+MO_FORMAT_ERROR = {"code": "20003", "message": "invalid mo format"}
+
+
+def _post(route, body, db):
+    SettingsStore(db).set("msghub.webhook_token", "wtok", is_secret=True, updated_by="test")
+    db.commit()
+    request = MagicMock()
+    request.json = AsyncMock(return_value=body)
+    request.client = MagicMock()
+    request.client.host = "10.0.0.1"
+    return asyncio.run(route("wtok", request, db))
+
+
+def _assert_no_pii(caplog):
+    """모든 로거·레벨의 기록(예외 트레이스백 포함)에 번호·본문 조각이 없다."""
+    for fragment in _PII_FRAGMENTS:
+        assert fragment not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("body", "failure"),
+    [
+        pytest.param(
+            {"rptCnt": 1, "rptLst": [PHONE]}, "rptLst[0]: object 자리에 string", id="item-string",
+        ),
+        pytest.param(
+            {"rptCnt": 1, "rptLst": {"phone": PHONE_DASHED, "resultCodeDesc": REPLY_TEXT}},
+            "rptLst: array 자리에 object", id="list-object",
+        ),
+        pytest.param(
+            {"rptCnt": 1, "rptLst": [
+                {"cliKey": "c1-0-0", "phone": PHONE, "fbReasonLst": {"fbResultDesc": REPLY_TEXT}},
+            ]},
+            "rptLst[0].fbReasonLst: array 자리에 object", id="fb-reason-object",
+        ),
+        pytest.param([{"phone": PHONE}], "body: object 자리에 array", id="body-array"),
+    ],
+)
+def test_report_parse_failure_log_has_no_pii(db_session, caplog, body, failure):
+    caplog.set_level(logging.DEBUG)
+
+    resp = _post(receive_report, body, db_session)
+
+    assert resp.status_code == 400
+    assert json.loads(resp.body) == REPORT_FORMAT_ERROR
+    _assert_no_pii(caplog)
+    assert f"웹훅 리포트 파싱 실패: PayloadFormatError: {failure}" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("body", "failure"),
+    [
+        pytest.param(
+            {"moCnt": 2, "moLst": [
+                PHONE, {"moNumber": "0212345678", "moCallback": PHONE, "moMsg": REPLY_TEXT},
+            ]},
+            "moLst[0]: object 자리에 string", id="sms-item-string",
+        ),
+        pytest.param(
+            {"moCnt": 1, "moLst": {"moCallback": PHONE_DASHED, "moMsg": REPLY_TEXT}},
+            "moLst: array 자리에 object", id="sms-list-object",
+        ),
+        pytest.param(
+            {"rcsBiCnt": 2, "rcsBiLst": [
+                {"msgKey": "k1", "phone": PHONE, "contentInfo": {"textMessage": REPLY_TEXT}},
+                [PHONE, REPLY_TEXT],
+            ]},
+            "rcsBiLst[1]: object 자리에 array", id="rcs-item-array",
+        ),
+        pytest.param(f"{PHONE} {REPLY_TEXT}", "body: object 자리에 string", id="body-string"),
+    ],
+)
+def test_mo_parse_failure_log_has_no_pii(db_session, caplog, body, failure):
+    caplog.set_level(logging.DEBUG)
+
+    resp = _post(receive_mo, body, db_session)
+
+    assert resp.status_code == 400
+    assert json.loads(resp.body) == MO_FORMAT_ERROR
+    _assert_no_pii(caplog)
+    assert f"MO 페이로드 파싱 실패: PayloadFormatError: {failure}" in caplog.text
+
+
+def test_parse_failure_log_keeps_shape_for_schema_drift(db_session, caplog):
+    """스키마 변경 추적용으로 최상위 키 이름, 값의 타입·길이, 항목 수는 남는다."""
+    caplog.set_level(logging.DEBUG)
+    body = {"moCnt": 1, "moList": [{"moCallback": PHONE, "moMsg": REPLY_TEXT}], "moLst": REPLY_TEXT}
+
+    resp = _post(receive_mo, body, db_session)
+
+    assert json.loads(resp.body) == MO_FORMAT_ERROR
+    _assert_no_pii(caplog)
+    assert (
+        "moLst: array 자리에 string — "
+        f"구조 {{moCnt: number, moList: array(1), moLst: string({len(REPLY_TEXT)})}}"
+    ) in caplog.text
+
+
+def test_parse_failure_log_hides_keys_that_are_not_identifiers(db_session, caplog):
+    """번호·문장이 키 자리에 오거나 영문 키에 섞여도 키 이름 대신 길이만 남긴다."""
+    caplog.set_level(logging.DEBUG)
+    phone_key, text_key = f"tel{PHONE}", f"memo {REPLY_TEXT}"
+    body = {PHONE: REPLY_TEXT, REPLY_TEXT: [PHONE], phone_key: 1, text_key: None, "rptLst": 7}
+
+    resp = _post(receive_report, body, db_session)
+
+    assert json.loads(resp.body) == REPORT_FORMAT_ERROR
+    _assert_no_pii(caplog)
+    assert (
+        f"구조 {{<키 {len(PHONE)}자>: string({len(REPLY_TEXT)}), "
+        f"<키 {len(REPLY_TEXT)}자>: array(1), <키 {len(phone_key)}자>: number, "
+        f"<키 {len(text_key)}자>: null, rptLst: number}}"
+    ) in caplog.text
+
+
+def test_unexpected_parse_error_logs_type_and_location_only(db_session, caplog, monkeypatch):
+    """스키마 코드가 값이 든 예외를 던져도(int('010…') 의 ValueError 등) 메시지는 남기지 않는다."""
+
+    def parse_with_value_in_error(data):
+        return int(data["moLst"][0]["moCallback"] + REPLY_TEXT)
+
+    monkeypatch.setattr(MoWebhookPayload, "from_dict", staticmethod(parse_with_value_in_error))
+    caplog.set_level(logging.DEBUG)
+
+    resp = _post(receive_mo, {"moCnt": 1, "moLst": [{"moCallback": PHONE}]}, db_session)
+
+    assert resp.status_code == 400
+    assert json.loads(resp.body) == MO_FORMAT_ERROR
+    _assert_no_pii(caplog)
+    assert "MO 페이로드 파싱 실패: ValueError (test_pii_masking.py:" in caplog.text

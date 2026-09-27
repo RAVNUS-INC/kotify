@@ -307,6 +307,15 @@ RCS MO는 `chatbotId=우리 채널`, `phone=고객 번호`이며 SMS/MMS와 별�
 작업이 지수 간격으로 다시 처리한다. 설정의 `POST /settings/test-n8n`은 로그인 사용자를
 `lastSender`로 넣어 실제 n8n·Telegram 라우팅을 요청한다.
 
+웹훅 원문은 로그에 남기지 않는다. 리포트에는 수신 번호, MO에는 고객 번호·회신 본문이 있다.
+JSON은 정상이지만 구조가 스키마와 다르면 응답은 그대로 400(`invalid report format`, MO
+`20003`)이고, WARNING에는 실패 위치와 최상위 구조만 남긴다. 예:
+`MO 페이로드 파싱 실패: PayloadFormatError: moLst[0]: object 자리에 string — 구조 {moCnt: number, moLst: array(2)}`.
+`PayloadFormatError` 메시지는 필드 경로와 JSON 타입 이름으로만 만든다. 다른 예외는 메시지에
+값이 섞일 수 있어 예외 타입과 발생 위치(파일:줄)만 남긴다. 영문자·밑줄로만 된 키가 아니면(번호·
+문장이 키 자리에 오거나 키에 섞인 경우) 이름 대신 길이만 적는다. 정상 MO는 저장·중복·거부 건수만
+남긴다.
+
 ### 5.4 예약·첨부·세션 제약
 
 - 예약 발송은 현재부터 최소 10분, 최대 30일 이내다.

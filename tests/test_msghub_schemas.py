@@ -10,9 +10,12 @@ CI에서 빨간색으로 잡힌다.
 """
 from __future__ import annotations
 
+import pytest
+
 from app.msghub.schemas import (
     MoItem,
     MoWebhookPayload,
+    PayloadFormatError,
     ReportItem,
     WebhookReport,
 )
@@ -224,3 +227,50 @@ def test_report_item_empty_fb_reason() -> None:
     assert item.fb_reason_lst == []
     assert item.is_bi is False
     assert item.phone == ""
+
+
+# ─── 구조 오류 (PayloadFormatError) ──────────────────────────────────────────
+# 웹훅 라우트가 메시지를 로그에 그대로 남긴다 — 필드 경로와 JSON 타입만 담고 값은 담지 않는다.
+
+
+@pytest.mark.parametrize(
+    ("parse", "body", "message"),
+    [
+        (WebhookReport.from_dict, ["01012345678"], "body: object 자리에 array"),
+        (WebhookReport.from_dict, {"rptLst": "01012345678"}, "rptLst: array 자리에 string"),
+        (WebhookReport.from_dict, {"rptLst": [{}, 1012345678]}, "rptLst[1]: object 자리에 number"),
+        (
+            WebhookReport.from_dict,
+            {"rptLst": [{"phone": "01012345678", "fbReasonLst": [{}, "환불 요청"]}]},
+            "rptLst[0].fbReasonLst[1]: object 자리에 string",
+        ),
+        (MoWebhookPayload.from_dict, None, "body: object 자리에 null"),
+        (MoWebhookPayload.from_dict, {"moLst": True}, "moLst: array 자리에 boolean"),
+        (
+            MoWebhookPayload.from_dict,
+            {"moLst": {"moCallback": "01012345678", "moMsg": "환불 요청"}},
+            "moLst: array 자리에 object",
+        ),
+        (
+            MoWebhookPayload.from_dict,
+            {"rcsBiLst": [{"msgKey": "k"}, "01012345678"]},
+            "rcsBiLst[1]: object 자리에 string",
+        ),
+    ],
+)
+def test_payload_format_error_names_path_and_type_only(parse, body, message) -> None:
+    with pytest.raises(PayloadFormatError) as excinfo:
+        parse(body)
+    assert str(excinfo.value) == message
+
+
+@pytest.mark.parametrize("empty", [None, "", 0, False, {}, []])
+def test_empty_list_fields_still_mean_no_items(empty) -> None:
+    """빈 값은 예전처럼 항목 0건이다 — 구조 검사를 더해도 받아들이는 페이로드는 같다.
+
+    엄격하게 거부하면 heartbeat 같은 빈 페이로드가 400 이 돼 msghub 가 계속 재전송한다.
+    """
+    assert WebhookReport.from_dict({"rptCnt": 0, "rptLst": empty}).items == []
+    assert MoWebhookPayload.from_dict({"moLst": empty}).items == []
+    assert MoWebhookPayload.from_dict({"rcsBiLst": empty}).items == []
+    assert ReportItem.from_dict({"msgKey": "k", "fbReasonLst": empty}).fb_reason_lst == []

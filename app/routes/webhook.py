@@ -24,10 +24,14 @@ msghub 공식 문서(2.8 메시지 리포트 §3)에 따르면 **웹훅 요청�
 """
 from __future__ import annotations
 
+import itertools
 import json
 import logging
+import re
 import secrets as _secrets
+import traceback
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -38,7 +42,12 @@ from starlette.background import BackgroundTask
 from app.config import settings
 from app.db import get_db
 from app.models import MoMessage
-from app.msghub.schemas import MoWebhookPayload, WebhookReport
+from app.msghub.schemas import (
+    MoWebhookPayload,
+    PayloadFormatError,
+    WebhookReport,
+    json_type,
+)
 from app.security.settings_store import SettingsStore
 from app.services import events
 from app.services.report import (
@@ -87,6 +96,51 @@ def _verify_token(token: str, db: Session) -> bool:
     return _secrets.compare_digest(token.strip(), (expected or "").strip())
 
 
+# 영문자·밑줄로만 된 키만 이름을 남긴다(msghub 최상위 키는 모두 이 모양) — 번호·문장이
+# 키 자리에 오거나 키에 섞이면(tel01012345678 등) 값이 새기 때문이다.
+_LOGGABLE_KEY = re.compile(r"[A-Za-z_]{1,64}")
+_SHAPE_MAX_KEYS = 20
+
+
+def _payload_shape(body: object) -> str:
+    """페이로드 구조 요약 — 최상위 키 이름과 값의 JSON 타입·길이 (값은 담지 않는다).
+
+    웹훅 원문에는 전화번호·회신 본문이 있어 로그에 남기지 않는다. 파싱 실패 때 스키마
+    변경을 추적할 단서로 이것만 남긴다. 예: {rptCnt: number, rptLst: array(3)}
+    """
+
+    def describe(value: object) -> str:
+        kind = json_type(value)
+        return f"{kind}({len(value)})" if isinstance(value, str | list | dict) else kind
+
+    def name(key: str) -> str:
+        return key if _LOGGABLE_KEY.fullmatch(key) else f"<키 {len(key)}자>"
+
+    if not isinstance(body, dict):
+        return describe(body)
+    fields = [
+        f"{name(key)}: {describe(value)}"
+        for key, value in itertools.islice(body.items(), _SHAPE_MAX_KEYS)
+    ]
+    if len(body) > _SHAPE_MAX_KEYS:
+        fields.append(f"외 {len(body) - _SHAPE_MAX_KEYS}개")
+    return "{" + ", ".join(fields) + "}"
+
+
+def _parse_failure(exc: Exception) -> str:
+    """파싱 예외의 로그용 설명 — 값이 섞일 수 없는 것만.
+
+    PayloadFormatError 메시지는 필드 경로·타입 이름뿐이라 그대로 쓴다. 그 밖의 예외는
+    메시지에 값이 들어갈 수 있어(int('010…') 의 ValueError, KeyError('010…') 등) 타입과
+    발생 위치만 남긴다.
+    """
+    if isinstance(exc, PayloadFormatError):
+        return f"PayloadFormatError: {exc}"
+    frames = traceback.extract_tb(exc.__traceback__)
+    where = f" ({Path(frames[-1].filename).name}:{frames[-1].lineno})" if frames else ""
+    return f"{type(exc).__name__}{where}"
+
+
 @router.post("/msghub/{token}/report")
 async def receive_report(
     token: str,
@@ -106,8 +160,11 @@ async def receive_report(
 
     try:
         report = WebhookReport.from_dict(body)
-    except Exception:
-        log.warning("웹훅 리포트 파싱 실패: %s", body)
+    except Exception as exc:
+        # 원문에는 수신 번호가 있다 — 실패 위치와 구조만 남긴다.
+        log.warning(
+            "웹훅 리포트 파싱 실패: %s — 구조 %s", _parse_failure(exc), _payload_shape(body)
+        )
         return JSONResponse({"error": "invalid report format"}, status_code=400)
 
     if not report.items:
@@ -239,8 +296,11 @@ async def receive_mo(
 
     try:
         payload = MoWebhookPayload.from_dict(body)
-    except Exception:
-        log.warning("MO 페이로드 파싱 실패: %s", body)
+    except Exception as exc:
+        # 원문에는 고객 번호·회신 본문이 있다 — 실패 위치와 구조만 남긴다.
+        log.warning(
+            "MO 페이로드 파싱 실패: %s — 구조 %s", _parse_failure(exc), _payload_shape(body)
+        )
         return JSONResponse(
             {"code": "20003", "message": "invalid mo format"}, status_code=400
         )
