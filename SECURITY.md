@@ -52,6 +52,6 @@ When deploying kotify:
 - kotify stores all secrets encrypted at rest using Fernet (AES-128-CBC + HMAC-SHA256)
 - Session cookies use `HttpOnly`, `Secure` (in production), and `SameSite=Lax`
 - All state-mutating Next.js server actions and FastAPI POST routes are protected by CSRF tokens (SameSite + explicit token where needed)
-- msghub delivery reports arrive via signed webhooks — verify the signature header before trusting payload
+- msghub sends no authentication headers with webhooks, so delivery reports and MO are authenticated only by a secret token in the URL path (`/api/webhook/msghub/{token}/report`, `/api/webhook/msghub/{token}/mo`); a mismatched token is rejected with HTTP 401. Treat the full webhook URL as a secret, and re-register it in the msghub console after changing the webhook token in `/settings`
 - Setup wizard is restricted to local/private network IPs by default (NPM-level ACL recommended as a second layer)
 - The frontend never talks to FastAPI URLs directly — all backend calls go through the Next.js `/api/*` rewrite, reducing CORS surface to zero

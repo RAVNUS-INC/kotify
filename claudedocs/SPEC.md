@@ -1,7 +1,7 @@
 # kotify — 개발 명세서
 
 > U+ msghub 기반 RCS 우선 단체 공지 발송 시스템
-> 작성일: 2026-04-08 / 최종 갱신: 2026-09-18 / 버전: 0.2
+> 작성일: 2026-04-08 / 최종 갱신: 2026-09-27 / 버전: 0.2
 
 ---
 
@@ -36,7 +36,7 @@
 - 웹 UI를 통한 RCS/SMS/LMS/MMS 공지 작성·발송
 - 전화번호 다양한 형식(`010-1234-5678`, `01012345678`, `+82-10-1234-5678` 등) 일괄 입력 및 정규화
 - 발송 전 byte 길이 검증 및 채널 자동 판정 (RCS/LMS/MMS)
-- msghub 웹훅 기반 결과 수신 (`/webhook/msghub/report`) 및 이력 영구 저장
+- msghub 웹훅 기반 결과 수신 (`/webhook/msghub/{token}/report`) 및 이력 영구 저장
 - 발송 이력 조회·검색 (작성자/기간/상태/채널별 필터)
 - Keycloak OIDC 로그인
 - 역할별 권한 분리 (viewer / sender / admin)
@@ -104,8 +104,8 @@ DB에 반영된다. 매 요청의 외부 권한 조회나 토큰 재검증은 �
 │  │  - REST 라우트 (/api/* 로 노출, 원본은 /*)               │  │
 │  │  - Authlib OIDC (Keycloak)                              │  │
 │  │  - msghub 클라이언트 (JWT, SHA512 이중 해싱)            │  │
-│  │  - /webhook/msghub/report — 결과 수신                   │  │
-│  │  - /webhook/msghub/mo — 수신 메시지 (기록만)            │  │
+│  │  - /webhook/msghub/{token}/report — 결과 수신           │  │
+│  │  - /webhook/msghub/{token}/mo — 수신 메시지 (기록만)    │  │
 │  │  - SSE 엔드포인트 (chat stream)                         │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                               │
@@ -289,9 +289,11 @@ ID 재사용을 막는 별도 순번 또는 `AUTOINCREMENT`를 함께 설계해�
 
 ### 5.3 웹훅 결과 수신
 
-- **Report**: `POST /api/webhook/msghub/report` — 발송 결과 (DELIVERED / FAILED + 실제 도달 채널).
-- **MO**: `POST /api/webhook/msghub/mo` — 수신 메시지 (기록만, 자동 응답 없음).
-- **서명 검증**: msghub가 전송하는 서명 헤더를 HMAC으로 검증. 실패 시 403.
+- **Report**: `POST /webhook/msghub/{token}/report` — 발송 결과 (DELIVERED / FAILED + 실제 도달 채널).
+- **MO**: `POST /webhook/msghub/{token}/mo` — 수신 메시지 (기록만, 자동 응답 없음).
+- **등록 URL**: 위 경로는 FastAPI 기준이다. msghub 콘솔에는 `{app.public_url}/api`를 앞에 붙인 URL(예: `https://sms.example.com/api/webhook/msghub/{token}/report`)을 등록하며, 요청은 NPM → Next.js `/api/*` rewrite를 거쳐 FastAPI에 도달한다. 토큰이 들어간 전체 URL은 설정 → 개발자 탭(`GET /webhooks`)에서 복사한다.
+- **URL 토큰 인증**: msghub는 웹훅에 인증 헤더를 붙이지 않는다(공식 문서 2.8 메시지 리포트 §3). 서명(HMAC) 검증은 적용할 수 없으므로 URL 경로의 `{token}`이 유일한 보호 수단이다. `_verify_token`이 `msghub.webhook_token` 설정값과 `secrets.compare_digest`로 비교한다. 설정값이 비어 있으면 `dev_mode`에서만 통과하고 운영에서는 거부하며, 설정값 조회에 실패해도(복호화 오류 등) 거부한다. 거부 응답은 HTTP 401이다(Report `{"error": "unauthorized"}`, MO `{"code": "20001", "message": "unauthorized"}`).
+- **토큰 발급·교체**: Setup Wizard 완료 시 32자 hex 토큰을 자동 생성한다. 설정 → 메시징의 "웹훅 토큰"을 바꾸면 기존에 등록한 URL은 즉시 401로 거부되므로 msghub 콘솔에 새 URL을 다시 등록한다.
 - 페이로드의 `cliKey` 또는 `msgKey`로 messages 테이블 매칭 → UPDATE.
 
 SMS/MMS MO의 공급자 의미는 `moNumber=우리 MO 수신번호`, `moCallback=고객 발신번호`다.
@@ -590,7 +592,7 @@ web/app/
   msghub.api_password  (encrypted)
   msghub.brand_id      (encrypted)
   msghub.chatbot_id    (encrypted)
-  msghub.webhook_secret (encrypted)
+  msghub.webhook_token (encrypted, 자동 생성)
   keycloak.client_secret (encrypted)
   keycloak.issuer      (plain)
   keycloak.client_id   (plain, = "sms-sys")
@@ -604,7 +606,7 @@ web/app/
 
 - Next.js server actions: SameSite 쿠키 + 명시적 토큰 (필요 시).
 - FastAPI POST 라우트: Starlette `SessionMiddleware` + 자체 토큰.
-- 웹훅: msghub의 서명 헤더 HMAC 검증.
+- 웹훅: CSRF 토큰 대신 URL 경로 토큰(`msghub.webhook_token`) 검증. msghub가 인증 헤더를 보내지 않아 서명 검증은 없다(§5.3).
 
 ### 10.4 기타
 
@@ -791,7 +793,7 @@ kotify/
 - `app/util/csv_safe.py` — formula injection 방어 케이스
 - `app/msghub/auth.py` — TokenManager (JWT 만료/갱신/stampede)
 - `app/msghub/client.py` — respx로 msghub API mock (발송 성공/실패/429/웹훅 매칭)
-- `app/routes/webhook.py` — 서명 검증 통과/실패
+- `app/routes/webhook.py` — URL 토큰 일치·불일치, 토큰 미설정 시 dev 통과·운영 거부, setup이 자동 생성한 토큰의 통과 (`tests/test_webhook_token.py`)
 
 ### 14.2 프론트엔드
 

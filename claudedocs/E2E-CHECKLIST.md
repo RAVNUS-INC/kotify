@@ -114,11 +114,14 @@
 
 msghub는 발송 결과를 웹훅으로 전송합니다. 외부에서 kotify로의 인바운드가 필요합니다.
 
-- [ ] msghub 포털에서 웹훅 URL 등록:
-  - Report: `https://sms.example.com/api/webhook/msghub/report`
-  - MO(수신 메시지, 사용 시): `https://sms.example.com/api/webhook/msghub/mo`
-- [ ] 웹훅 서명 시크릿 저장 (msghub 포털에서 발급받아 Setup Wizard 또는 `/settings`에서 입력)
-- [ ] 테스트 발송 전 webhook endpoint가 200 응답하는지 확인 (단, 서명 검증 때문에 외부 curl로는 403 정상)
+> msghub는 웹훅에 인증 헤더를 붙이지 않아 URL 경로의 토큰(`msghub.webhook_token`)이 유일한 인증 수단입니다.
+> 토큰은 Setup Wizard 완료 시 자동 생성됩니다. `/settings/messaging`의 "웹훅 토큰"을 바꾸면 기존 URL은 401로 거부되므로 새 URL을 다시 등록하세요.
+
+- [ ] `/settings/developers`의 웹훅 상태가 "설정 미완료"가 아닌지 확인 (URL은 웹훅 토큰과 `/settings/security`의 공개 URL이 모두 있어야 만들어짐)
+- [ ] 같은 화면에서 토큰이 포함된 URL을 복사해 msghub 포털에 등록:
+  - Report: `https://sms.example.com/api/webhook/msghub/{token}/report`
+  - MO(수신 메시지, 사용 시): `https://sms.example.com/api/webhook/msghub/{token}/mo`
+- [ ] 테스트 발송 전 외부에서 FastAPI까지 도달하는지 확인: 틀린 토큰으로 `curl -i -d '{}' https://sms.example.com/api/webhook/msghub/wrong-token/report` 호출 시 401 `{"error":"unauthorized"}`이면 정상. 401이 아니면(Next.js 404 등) URL·프록시 설정 점검 (실제 토큰은 명령 기록에 남기지 않음)
 
 ---
 
