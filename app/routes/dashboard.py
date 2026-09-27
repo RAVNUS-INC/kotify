@@ -70,19 +70,6 @@ def _kst_month_range(now_utc: datetime) -> tuple[str, str]:
     return start_kst.astimezone(UTC).isoformat(), end_kst.astimezone(UTC).isoformat()
 
 
-def _hhmm_kst(iso_utc: str | None) -> str:
-    """UTC ISO 문자열을 KST HH:MM 으로 변환. 실패 시 빈 문자열."""
-    if not iso_utc:
-        return ""
-    try:
-        dt = datetime.fromisoformat(iso_utc)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt.astimezone(KST).strftime("%H:%M")
-    except (ValueError, TypeError):
-        return ""
-
-
 def _campaign_label(c: Campaign) -> str:
     """타임라인 이벤트 표시 라벨. subject 우선, 없으면 content 앞 24자."""
     if c.subject:
@@ -125,7 +112,9 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
     events = [
         {
             "id": f"c{c.id}",
-            "time": _hhmm_kst(c.reserve_time or c.created_at),
+            # reserve_time 은 오프셋 없는 KST 'YYYY-MM-DD HH:mm'(compose.parse_reserve_time),
+            # created_at 은 UTC ISO — 오프셋 없는 값을 KST 로 읽는 공용 파서로 둘 다 읽는다.
+            "time": fmt_kst_hhmm(c.reserve_time or c.created_at),
             "label": _campaign_label(c),
             "state": _STATE_MAP.get(c.state, "done"),
         }
@@ -147,7 +136,7 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
             "phone": t.phone,
             "preview": (t.last_body or "")[:48],
             # 대화 시각은 msghub 원본(오프셋 없는 KST)이 섞여 대화방 목록과 같은 혼합 포맷 파서로
-            # 읽는다 — _hhmm_kst 는 오프셋 없는 값을 UTC 로 읽어 9시간 늦게 보였다.
+            # 읽는다 — 예전 로컬 헬퍼(_hhmm_kst, 삭제)는 오프셋 없는 값을 UTC 로 읽어 9시간 늦게 보였다.
             "time": fmt_kst_hhmm(t.last_timestamp),
             "date": fmt_kst_date(t.last_timestamp),
             "unread": t.unread,
