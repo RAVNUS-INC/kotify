@@ -72,6 +72,22 @@ export function withDateDividers(
 }
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'] as const;
+const DAY_MS = 86_400_000;
+
+/**
+ * 서버가 KST 로 자른 "YYYY-MM-DD" → 연·월·일, 요일, 1970-01-01 부터 센 날 수. 형식에 맞지
+ * 않거나 달력에 없는 날짜는 null. Date.UTC 로만 계산해 브라우저 시간대와 무관하다.
+ */
+function parseDate(date: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  if (utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) return null;
+  return { year, month, day, weekday: utc.getUTCDay(), dayNumber: utc.getTime() / DAY_MS };
+}
 
 /**
  * 구분선 문구 — "2026-09-27" → "2026년 9월 27일 일요일"(카카오톡처럼 항상 절대 날짜).
@@ -80,14 +96,29 @@ const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'] as const;
  * 화면도 틀린 날짜를 말하지 않는다. 형식에 맞지 않거나 달력에 없는 날짜는 원문 그대로.
  */
 export function formatChatDate(date: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!match) return date;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const utc = new Date(Date.UTC(year, month - 1, day));
-  if (utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) return date;
-  return `${year}년 ${month}월 ${day}일 ${WEEKDAYS[utc.getUTCDay()]}요일`;
+  const parsed = parseDate(date);
+  if (!parsed) return date;
+  const { year, month, day, weekday } = parsed;
+  return `${year}년 ${month}월 ${day}일 ${WEEKDAYS[weekday]}요일`;
+}
+
+/**
+ * 대화 목록·대시보드 최근 대화의 마지막 메시지 시각(카카오톡 목록 방식) — 오늘 "14:05",
+ * 어제 "어제", 올해 "9월 25일", 그 이전 "2025. 9. 25.". today 는 서버가 응답 시각의 KST 날짜로
+ * 내려 준 값이라 브라우저 시계·시간대를 쓰지 않고, 서버 렌더와 브라우저 렌더가 같다. 대신 응답
+ * 시각 기준이어서 자정을 넘겨 열어 둔 화면은 다시 불러오기 전까지 전날 기준 문구로 남는다.
+ * 날짜나 기준일을 모르면 이전처럼 시각만 보인다. 시계 오차로 오늘보다 늦은 날짜는 날짜로 보인다.
+ */
+export function formatThreadTime(
+  { time, date }: Pick<ChatThread, 'time' | 'date'>,
+  today: string,
+): string {
+  const last = parseDate(date);
+  const base = parseDate(today);
+  if (!last || !base || last.dayNumber === base.dayNumber) return time;
+  if (last.dayNumber === base.dayNumber - 1) return '어제';
+  if (last.year === base.year) return `${last.month}월 ${last.day}일`;
+  return `${last.year}. ${last.month}. ${last.day}.`;
 }
 
 /**

@@ -1,12 +1,15 @@
 import type { InboxThread } from '@/types/dashboard';
+import { formatThreadTime } from '@/lib/chat';
 import { cn } from '@/lib/cn';
 import { formatPhone } from '@/lib/phone';
 
 export type InboxThreadRowProps = {
   thread: InboxThread;
+  /** "YYYY-MM-DD" (KST) — 대시보드 응답의 inbox.today. 시각 문구의 기준일. */
+  today: string;
 };
 
-export function InboxThreadRow({ thread }: InboxThreadRowProps) {
+export function InboxThreadRow({ thread, today }: InboxThreadRowProps) {
   const unread = !!thread.unread;
   return (
     <li
@@ -34,7 +37,7 @@ export function InboxThreadRow({ thread }: InboxThreadRowProps) {
             {unread && <span className="sr-only"> — 읽지 않음</span>}
           </div>
           <div className="shrink-0 font-mono text-[11px] text-ink-dim">
-            {thread.time}
+            {formatThreadTime(thread, today)}
           </div>
         </div>
         <div className="truncate text-[12.5px] text-ink-muted">

@@ -320,8 +320,8 @@ describe('useChatStream 연결', () => {
 describe('ChatLiveRefresh', () => {
   it.each(['thread.updated', 'open'])('실패 메시지만 있는 대화도 %s 에서 갱신한다', (event) => {
     const detail: ChatThreadDetail = {
-      id: T1, name: '테스트', phone: '01011112222', preview: '', time: '10:00', channel: 'rcs',
-      lastInboundMessageId: null,
+      id: T1, name: '테스트', phone: '01011112222', preview: '', time: '10:00', date: '2026-09-27',
+      channel: 'rcs', lastInboundMessageId: null,
       messages: [{
         id: 'm-out-1', side: 'us', kind: 'rcs', text: '응답 타임아웃', time: '10:00', date: '2026-09-27', status: 'failed',
       }],

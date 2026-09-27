@@ -4,7 +4,8 @@ api-contract.md 의 GET /api/dashboard 계약:
     {
       data: {
         timeline: { events: [{id, time, label, state}], now: "HH:MM" },
-        inbox:    { unread: int, threads: [{id, name, preview, time, unread?}] },
+        inbox:    { unread: int, threads: [{id, name, preview, time, date, unread?}],
+                    today: "YYYY-MM-DD" },
         kpis:     { rcsRate, todaySent, scheduled, todayCost, monthCost? }
       }
     }
@@ -28,6 +29,7 @@ from app.db import get_db
 from app.models import Campaign, Message
 from app.msghub.codes import SUCCESS_CODE
 from app.services.chat import list_thread_page
+from app.util.time import fmt_kst_date, fmt_kst_hhmm
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -134,6 +136,9 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
     # 표시할 5개와 전체 미읽음 건수를 같은 집계에서 가져온다.
     thread_page = list_thread_page(db, limit=5)
     unread_count = thread_page.unread_total
+    # threads[].date 와 비교할 기준일(KST) — 대화방 목록 meta.today 처럼 목록을 읽은 뒤에 잰다.
+    # 요청 시작 시각(now_kst)으로 잡으면 읽는 사이 자정을 넘겨 기록된 대화가 내일 날짜로 보인다.
+    inbox_today = datetime.now(UTC).astimezone(KST).strftime("%Y-%m-%d")
 
     inbox_threads = [
         {
@@ -141,7 +146,10 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
             "name": t.phone,  # 연락처 이름이 DB 에 없으니 번호로 표시
             "phone": t.phone,
             "preview": (t.last_body or "")[:48],
-            "time": _hhmm_kst(t.last_timestamp),
+            # 대화 시각은 msghub 원본(오프셋 없는 KST)이 섞여 대화방 목록과 같은 혼합 포맷 파서로
+            # 읽는다 — _hhmm_kst 는 오프셋 없는 값을 UTC 로 읽어 9시간 늦게 보였다.
+            "time": fmt_kst_hhmm(t.last_timestamp),
+            "date": fmt_kst_date(t.last_timestamp),
             "unread": t.unread,
         }
         for t in thread_page.threads
@@ -218,6 +226,7 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
             "inbox": {
                 "unread": unread_count,
                 "threads": inbox_threads,
+                "today": inbox_today,
             },
             "kpis": {
                 "rcsRate": rcs_rate,

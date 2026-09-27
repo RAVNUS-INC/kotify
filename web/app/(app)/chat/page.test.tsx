@@ -21,6 +21,7 @@ const detail: ChatThreadDetail = {
   phone: '01011112222',
   preview: '',
   time: '10:00',
+  date: '2026-09-27',
   channel: 'rcs',
   lastInboundMessageId: 1,
   messages: [
@@ -46,7 +47,7 @@ function findElement(node: ReactNode, type: unknown): ReactElement | null {
 
 beforeEach(() => {
   vi.mocked(fetchThreadPage).mockReset().mockResolvedValue({
-    data: [], meta: { total: 0, unreadTotal: 0, offset: 0, limit: 200, hasMore: false },
+    data: [], meta: { total: 0, unreadTotal: 0, offset: 0, limit: 200, hasMore: false, today: '2026-09-27' },
   });
   vi.mocked(fetchThread).mockResolvedValue(detail);
 });
@@ -103,7 +104,7 @@ describe('대화방 페이지 실시간 갱신 연결', () => {
 
 describe('대화 목록 서버 페이지 정보', () => {
   it('검색·안읽음·offset을 API로 보내고 전체 결과·미읽음 수를 사용한다', async () => {
-    const meta = { total: 450, unreadTotal: 460, offset: 200, limit: 200, hasMore: true };
+    const meta = { total: 450, unreadTotal: 460, offset: 200, limit: 200, hasMore: true, today: '2026-09-27' };
     vi.mocked(fetchThreadPage).mockResolvedValue({ data: [detail], meta });
     const tree = await ChatPage({ searchParams: { filter: 'unread', q: ' 고객 ', selected: TID, offset: '200' } });
     expect(fetchThreadPage).toHaveBeenCalledWith({ unread: true, q: '고객', offset: 200, limit: 200 });

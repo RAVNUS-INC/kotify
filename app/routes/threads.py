@@ -96,6 +96,8 @@ def _service_thread_to_ts(
         "phone": t.phone,
         "preview": (t.last_body or "")[:60],
         "time": fmt_kst_hhmm(t.last_timestamp),
+        # 목록 시각 문구(오늘·어제·날짜)의 재료 — web 이 meta.today 와 비교한다. 해석 실패 시 빈 문자열.
+        "date": fmt_kst_date(t.last_timestamp),
         "channel": last_channel,
     }
     if contact_name:
@@ -281,6 +283,10 @@ def api_list_threads(
     return {"data": rows, "meta": {
         "total": page.total, "limit": limit, "offset": offset,
         "hasMore": offset + len(rows) < page.total, "unreadTotal": page.unread_total,
+        # 행 date 와 비교할 기준일 — 응답 시각의 KST 날짜. 브라우저 시계·시간대를 쓰지 않아야
+        # 서버 렌더와 브라우저 렌더의 문구가 같다. 목록을 읽은 뒤에 재므로 우리 시계로 기록한 시각은
+        # 기준일보다 늦지 않다(msghub 시계가 앞서 늦은 날짜가 오면 web 은 날짜 문구로 보인다).
+        "today": datetime.now(UTC).astimezone(KST).strftime("%Y-%m-%d"),
     }}
 
 
@@ -330,6 +336,7 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         "phone": phone,
         "preview": (last.body or "")[:60],
         "time": fmt_kst_hhmm(last.timestamp),
+        "date": fmt_kst_date(last.timestamp),
         "channel": last_channel,
         "messages": [_service_message_to_ts(m) for m in messages],
         "lastInboundMessageId": last_inbound_id or None,

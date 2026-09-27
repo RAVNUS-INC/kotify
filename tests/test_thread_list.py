@@ -13,6 +13,7 @@ import random
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from unittest.mock import ANY
 
 import pytest
 from sqlalchemy import Engine, event, literal, select
@@ -511,15 +512,16 @@ def test_filters_cover_threads_after_first_200_and_pages_are_complete(db_session
     db_session.commit()
     first = api_list_threads(db=db_session)
     second = api_list_threads(offset=200, db=db_session)
-    assert first["meta"] == {"total": 205, "limit": 200, "offset": 0, "hasMore": True, "unreadTotal": 5}
-    assert second["meta"] == {"total": 205, "limit": 200, "offset": 200, "hasMore": False, "unreadTotal": 5}
+    # today(KST 기준일)는 요청 시각에 따라 달라진다 — 값은 test_thread_list_date 가 고정해 검사한다.
+    assert first["meta"] == {"total": 205, "limit": 200, "offset": 0, "hasMore": True, "unreadTotal": 5, "today": ANY}
+    assert second["meta"] == {"total": 205, "limit": 200, "offset": 200, "hasMore": False, "unreadTotal": 5, "today": ANY}
     assert len(first["data"]) == 200
     assert len(second["data"]) == 5
     assert len({row["id"] for row in first["data"] + second["data"]}) == 205
     assert api_list_threads(offset=205, db=db_session)["data"] == []
     filtered = api_list_threads(unread=True, limit=2, offset=2, db=db_session)
     assert [row["phone"] for row in filtered["data"]] == ["01080000002", "01080000001"]
-    assert filtered["meta"] == {"total": 5, "limit": 2, "offset": 2, "hasMore": True, "unreadTotal": 5}
+    assert filtered["meta"] == {"total": 5, "limit": 2, "offset": 2, "hasMore": True, "unreadTotal": 5, "today": ANY}
     for query in ("01080000000", "유일한 본문"):
         found = api_list_threads(q=query, db=db_session)
         assert [row["phone"] for row in found["data"]] == ["01080000000"]

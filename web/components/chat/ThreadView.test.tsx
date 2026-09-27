@@ -40,6 +40,7 @@ function thread(
     phone,
     preview: '',
     time: '10:00',
+    date: '2026-09-27',
     channel: 'rcs',
     messages: [],
     lastInboundMessageId: null,

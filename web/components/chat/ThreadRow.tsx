@@ -1,11 +1,14 @@
 import Link from 'next/link';
 import type { Route } from 'next';
 import type { ChatThread } from '@/types/chat';
+import { formatThreadTime } from '@/lib/chat';
 import { cn } from '@/lib/cn';
 import { threadDisplayName } from '@/lib/phone';
 
 export type ThreadRowProps = {
   thread: ChatThread;
+  /** "YYYY-MM-DD" (KST) — 목록 응답의 meta.today. 시각 문구(오늘·어제·날짜)의 기준일. */
+  today: string;
   active?: boolean;
   href: Route;
 };
@@ -18,7 +21,7 @@ const CHANNEL_LABEL: Record<ChatThread['channel'], string> = {
   kakao: 'KAKAO',
 };
 
-export function ThreadRow({ thread, active = false, href }: ThreadRowProps) {
+export function ThreadRow({ thread, today, active = false, href }: ThreadRowProps) {
   const unread = !!thread.unread;
   return (
     <Link
@@ -53,7 +56,7 @@ export function ThreadRow({ thread, active = false, href }: ThreadRowProps) {
             {unread && <span className="sr-only"> — 읽지 않음</span>}
           </span>
           <span className="shrink-0 font-mono text-[11px] text-ink-dim">
-            {thread.time}
+            {formatThreadTime(thread, today)}
           </span>
         </div>
         <div className="flex items-center gap-1.5 text-[12.5px]">

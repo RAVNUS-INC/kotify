@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessage, ChatThreadDetail } from '@/types/chat';
 import {
-  fetchThreadPage, fetchThreads, formatChatDate, getDeliveryRefreshIds, markReadClient,
-  sendMessageClient, withDateDividers,
+  fetchThreadPage, fetchThreads, formatChatDate, formatThreadTime, getDeliveryRefreshIds,
+  markReadClient, sendMessageClient, withDateDividers,
 } from './chat';
 import { apiSend } from './csrf-client';
 
@@ -22,6 +22,7 @@ function thread(messages: ChatThreadDetail['messages']): ChatThreadDetail {
     phone: '01011112222',
     preview: '',
     time: '10:00',
+    date: '2026-09-27',
     channel: 'rcs',
     messages,
     lastInboundMessageId: null,
@@ -93,11 +94,57 @@ describe('formatChatDate', () => {
   });
 });
 
+describe('formatThreadTime', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const last = (date: string, time = '14:05') => ({ time, date });
+
+  it.each([
+    ['2026-09-27', '14:05'],
+    ['2026-09-26', '어제'],
+    ['2026-09-25', '9월 25일'],
+    ['2026-01-01', '1월 1일'],
+    ['2025-12-31', '2025. 12. 31.'],
+    // 월·일이 오늘과 같아도 해가 다르면 연도까지 — 오늘로 보이지 않는다.
+    ['2025-09-27', '2025. 9. 27.'],
+    // 시계 오차로 오늘보다 늦은 날짜 — 시각이나 "어제"로 보이지 않는다.
+    ['2026-09-28', '9월 28일'],
+  ])('기준일 2026-09-27 에 %s 대화는 %s', (date, label) => {
+    expect(formatThreadTime(last(date), '2026-09-27')).toBe(label);
+  });
+
+  it.each([
+    ['2027-01-01', '2026-12-31'], // 해가 바뀌어도 전날은 연도 없이 어제
+    ['2026-10-01', '2026-09-30'],
+    ['2024-03-01', '2024-02-29'],
+    ['2026-03-01', '2026-02-28'],
+  ])('기준일 %s 의 전날 %s 는 어제', (today, date) => {
+    expect(formatThreadTime(last(date), today)).toBe('어제');
+  });
+
+  it('날짜나 기준일을 모르면 이전처럼 시각만 보인다', () => {
+    expect(formatThreadTime(last(''), '2026-09-27')).toBe('14:05');
+    expect(formatThreadTime(last('', ''), '2026-09-27')).toBe('');
+    expect(formatThreadTime(last('2026-02-30'), '2026-09-27')).toBe('14:05');
+    expect(formatThreadTime(last('2026-09-20'), '')).toBe('14:05');
+  });
+
+  it.each(['America/Los_Angeles', 'Pacific/Kiritimati'])('브라우저 시간대(%s)와 무관하다', (tz) => {
+    vi.stubEnv('TZ', tz);
+    expect(formatThreadTime(last('2026-09-26'), '2026-09-27')).toBe('어제');
+    expect(formatThreadTime(last('2025-12-31'), '2026-01-01')).toBe('어제');
+    expect(formatThreadTime(last('2026-01-01'), '2026-09-27')).toBe('1월 1일');
+    // 서머타임이 바뀌는 날(LA 2026-03-08·11-01)은 현지 자정 사이가 23·25시간이다.
+    expect(formatThreadTime(last('2026-03-08'), '2026-03-09')).toBe('어제');
+    expect(formatThreadTime(last('2026-11-01'), '2026-11-02')).toBe('어제');
+  });
+});
+
 
 describe('대화 API 페이지와 읽음 계약', () => {
   it('서버 목록 metadata를 보존하고 기존 배열 API도 유지한다', async () => {
     const data = [thread([])];
-    const meta = { total: 450, unreadTotal: 500, offset: 200, limit: 200, hasMore: true };
+    const meta = { total: 450, unreadTotal: 500, offset: 200, limit: 200, hasMore: true, today: '2026-09-27' };
     const fetchMock = vi.fn().mockImplementation(async () => Response.json({ data, meta }));
     vi.stubGlobal('fetch', fetchMock);
     expect(await fetchThreadPage({ q: '고객', unread: true, limit: 200, offset: 200 })).toEqual({ data, meta });

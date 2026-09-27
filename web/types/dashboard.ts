@@ -13,8 +13,10 @@ export type InboxThread = {
   name: string;
   phone?: string;
   preview: string;
-  /** "HH:MM" */
+  /** "HH:MM" (KST) */
   time: string;
+  /** "YYYY-MM-DD" (KST). 시각을 해석하지 못하면 빈 문자열. */
+  date: string;
   unread?: boolean;
 };
 
@@ -36,6 +38,8 @@ export type DashboardData = {
   inbox: {
     unread: number;
     threads: InboxThread[];
+    /** "YYYY-MM-DD" (KST) — 응답 시각의 오늘. threads[].date 와 비교해 시각 문구를 만든다. */
+    today: string;
   };
   kpis: DashboardKpis;
 };

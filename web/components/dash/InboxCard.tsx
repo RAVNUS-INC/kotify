@@ -5,9 +5,11 @@ import { InboxThreadRow } from './InboxThreadRow';
 export type InboxCardProps = {
   threads: ReadonlyArray<InboxThread>;
   unread: number;
+  /** "YYYY-MM-DD" (KST) — 대시보드 응답의 inbox.today. */
+  today: string;
 };
 
-export function InboxCard({ threads, unread }: InboxCardProps) {
+export function InboxCard({ threads, unread, today }: InboxCardProps) {
   return (
     <Card className="flex h-full flex-col">
       <CardHeader
@@ -39,7 +41,7 @@ export function InboxCard({ threads, unread }: InboxCardProps) {
         ) : (
           <ul className="divide-y divide-line">
             {threads.map((t) => (
-              <InboxThreadRow key={t.id} thread={t} />
+              <InboxThreadRow key={t.id} thread={t} today={today} />
             ))}
           </ul>
         )}

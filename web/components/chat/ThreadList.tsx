@@ -68,6 +68,7 @@ export function ThreadList({ threads, activeId, filter, q = '', page }: ThreadLi
               <li key={t.id}>
                 <ThreadRow
                   thread={t}
+                  today={page.today}
                   active={t.id === activeId}
                   href={buildHref(t.id, filter, q, page.offset)}
                 />

@@ -33,8 +33,10 @@ export type ChatThread = {
   /** 하이웍스 CID 주소록 표시명(있으면). 예: "홍길동 부장 (레이븐어스)". */
   contactName?: string;
   preview: string;
-  /** "HH:MM" */
+  /** "HH:MM" (KST) — 마지막 메시지 시각. */
   time: string;
+  /** "YYYY-MM-DD" (KST) — 마지막 메시지 날짜. 시각을 해석하지 못하면 빈 문자열. */
+  date: string;
   unread?: boolean;
   channel: ChatChannel;
   lastCampaign?: string;
@@ -55,6 +57,8 @@ export type ChatThreadPageMeta = {
   hasMore: boolean;
   /** q 검색 결과 전체의 안읽음 수. unread 필터·페이지와는 무관하다. */
   unreadTotal: number;
+  /** "YYYY-MM-DD" (KST) — 응답 시각의 오늘. 행 date 와 비교해 목록 시각 문구를 만든다. */
+  today: string;
 };
 
 export type ChatThreadPage = {

@@ -22,7 +22,11 @@ export default async function Home() {
       <TimelineRibbon events={data.timeline.events} now={data.timeline.now} />
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1.7fr_1fr]">
-        <InboxCard threads={data.inbox.threads} unread={data.inbox.unread} />
+        <InboxCard
+          threads={data.inbox.threads}
+          unread={data.inbox.unread}
+          today={data.inbox.today}
+        />
 
         <div className="flex flex-col gap-4">
           <div className="rounded-lg border border-gray-10 bg-gray-11 p-5 text-white">
