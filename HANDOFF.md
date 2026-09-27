@@ -7,7 +7,8 @@
 - 검증: 커밋마다 백엔드 테스트를 돌렸다(748 → 768, 각 세션 기록과 같은 수). 최종 트리에서 백엔드 768개, Ruff, 웹 typecheck·lint·Vitest 20파일 186개, Next.js 프로덕션 빌드 18/18 페이지가 통과했고 푸시 훅에서도 다시 통과했다. 문서의 설정 키 이름·암호화 여부, 401 응답 본문, 토큰 자동 생성(32자 hex), 설정 탭 위치는 코드와 대조했다.
 - 배포: 마이그레이션·의존성·배포 스크립트 변경은 없다. 운영 CT(호스트 이름 `kotify`)에서 `kotify-update.sh check`로 대기 커밋 5개(기능 2·문서 3)를 확인한 뒤 13:34:27 UTC에 `apply`를 실행했다. `44c2c8e → 837e426`이 66초 만에 `done`까지 진행됐고, 13:35:42 UTC에 `post-restart: 정상 기동 — 837e426`이 기록됐다. worker의 pre-migrate 백업이 생성됐고 alembic은 `0023 (head)`에서 바뀌지 않았다.
 - 운영 확인: API·웹 `/healthz` 모두 `status=ok`·`version=837e426`이었다. 두 서비스는 active이고 `NRestarts=0`·`ExecMainStatus=0`이며, 배포 이후 journal warning 0건, 기동 후 stderr 오류 0줄, DB `quick_check=ok`, 추적 파일 변경 없음을 확인했다. 배포된 파일에 `hide_parameters=True`와 새 로그 헬퍼가 들어 있다. CT 안에서 틀린 토큰으로 report·MO를 API(8080)와 웹 rewrite(3000) 양쪽에 보내 모두 401을 받았다(DB 쓰기·로그가 없는 경로). 실제 msghub 웹훅 수신과 개인정보 로그 재현은 운영에서 하지 않았다.
-- 남은 사항: 이번 통합으로 해결된 아래 항목들의 남은 사항(웹훅 파싱 실패 원문 로그, SPEC HMAC 설명)은 문구를 갱신했다. `리포트 매칭 실패` 경고의 cliKey·msgKey 원값과 alembic 자체 엔진의 `hide_parameters` 미적용은 그대로 남았다. 병합된 세션 4개와 워크트리는 정리하지 않았다.
+- 남은 사항: 이번 통합으로 해결된 아래 항목들의 남은 사항(웹훅 파싱 실패 원문 로그, SPEC HMAC 설명)은 문구를 갱신했다. `리포트 매칭 실패` 경고의 cliKey·msgKey 원값과 alembic 자체 엔진의 `hide_parameters` 미적용은 그대로 남았다.
+- 정리: 병합된 세션 4개를 보관하고, 워크트리 5개(앞 통합 세션이 남긴 `competent-lovelace` 포함)와 로컬 브랜치 5개를 지웠다. 지우기 전에 각 워크트리의 diff가 통합한 패치와 같고, 추가한 줄이 모두 main에 있으며(이후 변경으로 바뀐 줄 제외), HEAD가 main의 조상임을 확인했다. 세션 보관만으로는 미커밋 변경이 있는 워크트리가 지워지지 않아 `git worktree remove --force`로 지웠다. 남은 것은 로컬 `main`, 고정 세션 브랜치, 이 세션 브랜치, 원격 `main`뿐이다. 2026-09-18 스태시(`HANDOFF.md`·`deploy/README.md` 운영 메모)는 main에 없는 줄이 있어 그대로 두었다.
 
 ## 2026-09-27 — 웹훅 저장·처리 실패 로그, 건수 포맷, 거부 경고의 개인정보 제거
 
