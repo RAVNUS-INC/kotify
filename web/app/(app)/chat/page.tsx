@@ -41,7 +41,7 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
   const unreadCount = meta.unreadTotal;
 
   // 선택된 스레드가 있으면 본문까지 로드 — 클릭 즉시 채팅 UI 노출.
-  // 예전엔 ThreadPreview(요약 카드) + "스레드 열기" 버튼을 거쳐 /chat/{id}
+  // 예전엔 요약 카드 + "스레드 열기" 버튼을 거쳐 /chat/{id}
   // 로 이동해야 했는데, 대화방은 선택하자마자 메시지와 입력창이 보이는
   // 것이 자연스러운 UX. 이제 /chat?selected=... 에서 바로 ThreadView 렌더.
   let threadDetail = null;

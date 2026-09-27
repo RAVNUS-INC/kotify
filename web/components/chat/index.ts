@@ -15,9 +15,6 @@ export type { ThreadListProps } from './ThreadList';
 export { ThreadRow } from './ThreadRow';
 export type { ThreadRowProps } from './ThreadRow';
 
-export { ThreadPreview } from './ThreadPreview';
-export type { ThreadPreviewProps } from './ThreadPreview';
-
 export { ThreadView } from './ThreadView';
 export type { ThreadViewProps } from './ThreadView';
 
