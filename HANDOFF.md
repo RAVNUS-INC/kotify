@@ -1,5 +1,14 @@
 # Handoff — 현재 상황 요약
 
+## 2026-09-27 — 웹훅 로그 개인정보 제거·문서 정정 main 통합(`837e426`)·운영 배포
+
+- 열린 PR은 없었다. 미커밋 변경이 있던 워크트리 4개를 확인해 `origin/main` `794bf25` 위에 4개 커밋을 fast-forward로 올렸다: `2fd441f` 웹훅 파싱 실패 로그의 원문 제거(hopeful-chaum), `470bab9` 저장 실패·건수 포맷·거부 경고 로그의 번호·본문 제거(great-pasteur), `a6fcbdd` 웹훅 인증 설명을 URL 경로 토큰으로 정정(busy-chandrasekhar), `837e426` SPEC 설정 키 목록 정정(goofy-noyce).
+- 방법: 각 워크트리의 미커밋 변경을 읽기만 해서(`git --no-optional-locks diff HEAD`) 이 워크트리에 커밋했다. great-pasteur는 hopeful-chaum의 변경을 이미 포함하고 있어(아래 항목의 "기반") 두 커밋으로 나눴다. hopeful-chaum 패치를 먼저 적용하고(이 문서 맨 위만 충돌) 그 위에 great-pasteur 결과를 얹었으며, `794bf25` 대비 누적 diff는 great-pasteur 패치와 같다. 문서 두 건은 SPEC §10.2 설정 키 목록에서 충돌해 합쳤다(`api_pwd`·`env`·평문 `brand_id`·`chatbot_id`와 `webhook_token (encrypted, 자동 생성)`). 원본 워크트리 4개는 그대로라 그 세션에서 다시 커밋하면 중복이다.
+- 검증: 커밋마다 백엔드 테스트를 돌렸다(748 → 768, 각 세션 기록과 같은 수). 최종 트리에서 백엔드 768개, Ruff, 웹 typecheck·lint·Vitest 20파일 186개, Next.js 프로덕션 빌드 18/18 페이지가 통과했고 푸시 훅에서도 다시 통과했다. 문서의 설정 키 이름·암호화 여부, 401 응답 본문, 토큰 자동 생성(32자 hex), 설정 탭 위치는 코드와 대조했다.
+- 배포: 마이그레이션·의존성·배포 스크립트 변경은 없다. 운영 CT(호스트 이름 `kotify`)에서 `kotify-update.sh check`로 대기 커밋 5개(기능 2·문서 3)를 확인한 뒤 13:34:27 UTC에 `apply`를 실행했다. `44c2c8e → 837e426`이 66초 만에 `done`까지 진행됐고, 13:35:42 UTC에 `post-restart: 정상 기동 — 837e426`이 기록됐다. worker의 pre-migrate 백업이 생성됐고 alembic은 `0023 (head)`에서 바뀌지 않았다.
+- 운영 확인: API·웹 `/healthz` 모두 `status=ok`·`version=837e426`이었다. 두 서비스는 active이고 `NRestarts=0`·`ExecMainStatus=0`이며, 배포 이후 journal warning 0건, 기동 후 stderr 오류 0줄, DB `quick_check=ok`, 추적 파일 변경 없음을 확인했다. 배포된 파일에 `hide_parameters=True`와 새 로그 헬퍼가 들어 있다. CT 안에서 틀린 토큰으로 report·MO를 API(8080)와 웹 rewrite(3000) 양쪽에 보내 모두 401을 받았다(DB 쓰기·로그가 없는 경로). 실제 msghub 웹훅 수신과 개인정보 로그 재현은 운영에서 하지 않았다.
+- 남은 사항: 이번 통합으로 해결된 아래 항목들의 남은 사항(웹훅 파싱 실패 원문 로그, SPEC HMAC 설명)은 문구를 갱신했다. `리포트 매칭 실패` 경고의 cliKey·msgKey 원값과 alembic 자체 엔진의 `hide_parameters` 미적용은 그대로 남았다. 병합된 세션 4개와 워크트리는 정리하지 않았다.
+
 ## 2026-09-27 — 웹훅 저장·처리 실패 로그, 건수 포맷, 거부 경고의 개인정보 제거
 
 - 기반: 아래 "웹훅 파싱 실패 로그" 변경은 `origin/main`에 없고 `jj/hopeful-chaum-e52081` 워크트리에 미커밋으로만 있었다. 그 diff를 읽기만 해서 이 워크트리에 적용하고(`git apply --3way`, 이 문서 맨 위만 충돌) 그 위에서 작업했다. 이 워크트리의 `origin/main` 대비 diff는 두 변경을 합친 것이라, 원래 워크트리에서 따로 커밋하면 중복이다.
@@ -7,7 +16,7 @@
 - 수정: ① `app/db.py` `create_db_engine()`에 `hide_parameters=True`를 넣었다(A안). 앱이 쓰는 엔진 하나라 웹훅 두 곳, `app/main.py` 재조정·알림 루프, 앞으로 생길 `log.exception`까지 함께 막는다. SQL 문·DB 오류·트레이스백은 남는다. 대가는 모든 DB 오류 로그에서 값(행 id 등)이 빠지는 것이라 값이 필요한 조사는 DB로 한다. 호출처마다 예외를 걸러 남기는 B안은 새 호출처가 생길 때마다 다시 새고, 트레이스백을 버리거나 따로 걸러야 해서 택하지 않았다. ② `app/msghub/schemas.py` `_count()`가 정수가 아닌 건수(bool 포함)를 항목 수로 바꾼다. 정수는 항목 수와 달라도 그대로 두고(스키마 변경 단서), 빠진 건수는 예전처럼 MO는 항목 수, 리포트는 0이다. 받아들이는 페이로드와 응답은 같다. ③ `app/routes/webhook.py` `_masked_callback()`은 숫자면 `mask_phone`(`010****2915`), 숫자가 없으면 `<숫자 아닌 값 N자>`를 남긴다. `mask_phone`만 쓰면 문장의 앞 3·뒤 4자가 남는다. `mask_phone` 자체는 바꾸지 않았다. 다른 호출처(리포트 매칭 경고)는 페이로드 값을 그대로 받아, 객체가 오면 예외로 응답이 200에서 400으로 바뀔 수 있어서다.
 - 검증: 백엔드 768개(신규 20개), Ruff, 웹 typecheck·lint·Vitest 20파일 186개가 통과했다. `tests/test_pii_masking.py`는 운영 엔진 팩토리(`create_db_engine`)로 연 파일 DB에서 저장 실패 3종(객체 `moMsg`·`postbackData`, 쓰기 잠금)과 리포트 처리 실패를 보내, 모든 로거의 DEBUG 기록에 번호·본문 조각이 없고 응답이 같으며 SQL 문·DB 오류·`[SQL parameters hidden …]`은 남는지 확인한다. conftest 엔진에는 이 설정이 없어서다. 앱 엔진(`app.db.engine`)의 설정값과 SQL 로그(sqlalchemy DEBUG)도 확인한다. 건수는 caplog 검사(포맷이 실패하면 pytest 핸들러가 예외로 만든다)와, 웹훅 로거 전파를 끊어 운영처럼 `logging.lastResort`가 stderr에 쓰게 한 capsys 검사로 확인한다. 거부 경고는 두 형태를 확인한다. `tests/test_msghub_schemas.py`는 정수 아닌 건수 8종, 정수 유지, 빠진 건수를 고정한다. 신규 PII 테스트 11개는 수정 전 코드에서 모두 실패했다. 보호 장치를 하나씩 되돌린 변이 9종도 모두 테스트가 잡았다. 운영처럼 핸들러 없이 stderr로 기록하는 스크래치 스크립트로 페이로드 8종을 수정 전후 비교했다. 수정 전 7종이 번호·본문을 남겼고 수정 후 0종이다(가린 번호 `010****2915`의 뒤 4자리는 기존 마스킹 규칙).
 - 문서: `claudedocs/SPEC.md` §5.3 로그 문단, `deploy/README.md` 로그 확인 주석.
-- 남은 사항: 커밋·푸시·운영 배포는 하지 않았다. `리포트 매칭 실패` 경고(`app/services/report.py`)는 페이로드의 cliKey·msgKey를 그대로, phone은 `mask_phone`(앞 3·뒤 4자)으로 남긴다. 그 자리에 번호·문장이 와야 새는 경우라 이번 범위에서 뺐다. alembic 마이그레이션은 자체 엔진이라 `hide_parameters`가 없다. SPEC 웹훅 HMAC 설명 불일치는 별도 작업이다.
+- 남은 사항: 커밋·푸시·운영 배포는 하지 않았다. `리포트 매칭 실패` 경고(`app/services/report.py`)는 페이로드의 cliKey·msgKey를 그대로, phone은 `mask_phone`(앞 3·뒤 4자)으로 남긴다. 그 자리에 번호·문장이 와야 새는 경우라 이번 범위에서 뺐다. alembic 마이그레이션은 자체 엔진이라 `hide_parameters`가 없다. SPEC 웹훅 HMAC 설명 불일치는 위 통합 항목의 `a6fcbdd`에서 고쳤다.
 
 ## 2026-09-27 — 웹훅 파싱 실패 로그에서 원문(개인정보) 제거
 
@@ -15,7 +24,7 @@
 - 수정: `app/msghub/schemas.py`에 `PayloadFormatError`와 `_object`·`_array` 검사를 추가했다. 리포트·MO 파서는 구조 오류를 필드 경로와 JSON 타입 이름만 담은 메시지(예: `moLst[0]: object 자리에 string`)로 알린다. 빈 값(null·""·0·{})을 빈 배열로 보는 기존 `or []` 동작은 유지해 받아들이는 페이로드는 같다. 라우트는 원문 대신 `_parse_failure`와 `_payload_shape`만 남긴다. `_parse_failure`는 `PayloadFormatError` 메시지를 그대로 쓰고, 그 밖의 예외는 메시지에 값이 섞일 수 있어 타입과 발생 파일:줄만 쓴다. `_payload_shape`는 최상위 키 이름과 값의 JSON 타입·길이를 20개까지 적는다. 영문자·밑줄로만 된 키가 아니면 `<키 N자>`로 적는다. msghub 최상위 키는 모두 이 모양이라 이름이 바뀐 키는 보이고, `tel01012345678`처럼 번호가 섞인 키는 가려진다. 400 응답(`invalid report format`, MO `20003`)은 그대로다.
 - 검증: 백엔드 748개(신규 25개), Ruff, 웹 typecheck·lint·Vitest 20파일 186개가 통과했다. `tests/test_pii_masking.py`는 번호·본문이 든 잘못된 페이로드 10종과 값이 든 예외(`int()`의 ValueError)를 보내 모든 로거의 DEBUG 기록에 번호·본문 조각이 없는지, 응답이 같은지, 구조 요약과 키 가림이 남는지 확인한다. `tests/test_msghub_schemas.py`는 오류 메시지 전문과 "빈 값이면 항목 0건"을 고정한다. 수정 전 코드(`git archive HEAD`)에서 신규 PII 테스트 11개가 모두 실패했다(원문이 로그에 남음). 보호 장치를 하나씩 되돌린 변이 8종도 모두 테스트가 잡았다. HEAD 파서와 새 파서를 1,232가지 모양의 페이로드로 비교해 수락·거부와 파싱 결과가 같음을 확인했다(비교 스크립트는 스크래치패드에서만 돌렸다). 독립 리뷰는 파싱 실패 경로에서 누출·500을 찾지 못했다. 실제 ASGI 경로로 표식이 든 본문 8,000개와 원시 바이트 36종(NaN·BOM·UTF-16·5만 키·5만 단계 중첩 등)을 보내 운영처럼 last-resort 핸들러로 stderr에 기록했다. 약 48만 건의 파서 차등 비교도 같았다. 리뷰가 지적한 키 패턴(숫자 허용)과 테스트 공백(`fullmatch`→`match` 변이 생존)은 반영했다.
 - 문서: `claudedocs/SPEC.md` §5.3 끝에 웹훅 로그 규칙을 추가했다.
-- 남은 사항: 커밋·푸시·운영 배포는 하지 않았다. 같은 라우트의 다른 로그가 스키마가 바뀐 페이로드로 PII를 남기던 세 건(저장 실패의 SQLAlchemy 바인딩 값, 건수 `%d` 포맷 오류, 거부 경고 번호)은 위 항목에서 고쳤다. SPEC의 웹훅 HMAC 서명 설명이 실제 구현(URL 경로 토큰, 401)과 다른 점은 별도 작업으로 남았다.
+- 남은 사항: 커밋·푸시·운영 배포는 하지 않았다. 같은 라우트의 다른 로그가 스키마가 바뀐 페이로드로 PII를 남기던 세 건(저장 실패의 SQLAlchemy 바인딩 값, 건수 `%d` 포맷 오류, 거부 경고 번호)은 위 항목에서 고쳤다. SPEC의 웹훅 HMAC 서명 설명이 실제 구현(URL 경로 토큰, 401)과 다른 점은 위 통합 항목의 `a6fcbdd`에서 고쳤다.
 
 ## 2026-09-27 — 날짜 표시 묶음 main 통합(`c1691d9`)·운영 배포(`44c2c8e`)
 
@@ -26,7 +35,7 @@
 - 배포: 마이그레이션·의존성·배포 스크립트 변경은 없다. 운영 CT(호스트 이름 `kotify`)에 root SSH로 접속해 `kotify-update.sh check`로 대기 커밋 8개(기능 5·문서 3)를 확인한 뒤 10:12:07 UTC에 `apply`를 실행했다. `69c6251 → 44c2c8e`가 71초 만에 `done`까지 진행됐고, 10:13:29 UTC에 `post-restart: 정상 기동 — 44c2c8e`가 기록됐다. worker의 pre-migrate 백업이 생성됐고 alembic은 `0023 (head)`에서 바뀌지 않았다. 처음 받은 SSH 주소는 kotify CT가 아니라 SSO 서버였다. 그 서버에서는 읽기 명령만 실행했다.
 - 운영 확인: API·웹 `/healthz` 모두 `status=ok`·`version=44c2c8e`였다. 두 서비스는 active이고 `NRestarts=0`·`ExecMainStatus=0`이며, 배포 이후 journal warning 0건, 기동 후 stderr 오류 0줄, DB `quick_check=ok`, 추적 파일 변경 없음을 확인했다. 제공 중인 빌드(10:12:54)에 고대비 말풍선 CSS, 날짜 구분선 코드, 목록 날짜 문구 코드가 들어 있고, 삭제한 `ThreadPreview` 문구는 없다. 운영 화면은 브라우저로 보지 않았다. 이미 열어 둔 대화방·대시보드 탭은 새로고침해야 새 화면을 쓴다.
 - 정리: 병합이 끝난 세션 4개를 보관하고 워크트리를 지웠다(미커밋 변경이 main과 같은지 먼저 확인). main에 들어간 로컬 브랜치 42개와 원격 브랜치 18개를 지웠다. main에 없던 커밋은 검토 후 모두 버렸다. `2dca6d1`은 2026-09-17에 채택하지 않은 RCS 대체 설계다. `893973a`는 그 회귀 테스트 7개가 현재 main에서 통과한다(예약 ID 저장 위치만 청크별로 바뀜). 4월 브랜치 3개(`3b95877`·`8650218`·`749665d` 꼭대기)는 main에 다시 구현됐거나, 고객 번호·본문을 남기는 진단 로그이거나, 삭제된 Jinja 화면 수정이었다. 원격에는 `main`만 남았다.
-- 남은 사항: 리포트·MO 웹훅 본문이 스키마 파싱에 실패하면 `app/routes/webhook.py`가 원문 전체(고객 번호·본문 포함)를 WARNING 로그에 남긴다. 이번에 고치지 않았고 별도 작업으로 제안했다.
+- 남은 사항: 리포트·MO 웹훅 본문이 스키마 파싱에 실패하면 원문 전체(고객 번호·본문 포함)를 WARNING 로그에 남기던 문제는 위 통합 항목의 `2fd441f`에서 고쳤다.
 
 ## 2026-09-27 — 대시보드 타임라인 예약 시각 KST 해석
 
