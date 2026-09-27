@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-import { MessageBubble, type MessageStatus } from './MessageBubble';
+import {
+  MessageBubble,
+  type MessageKind,
+  type MessageSide,
+  type MessageStatus,
+} from './MessageBubble';
 
 describe('MessageBubble 발신 전달 상태', () => {
   it('전송 실패한 발신은 메타 라벨과 aria-label 에 실패를 텍스트로 표시한다', () => {
@@ -103,4 +108,26 @@ describe('MessageBubble 발신 작성자', () => {
     expect(screen.getByText(`12:31 / SMS / ${senderName}`)).toBeInTheDocument();
     expect(screen.getByLabelText('보낸 SMS 메시지')).toHaveTextContent('안내 메시지');
   });
+});
+
+describe('MessageBubble 강제 색상 모드', () => {
+  // 고대비 모드는 배경을 Canvas 로 칠해 테두리가 없으면 말풍선 윤곽이 사라진다. jsdom 은 강제
+  // 색상을 그리지 못하므로 그 모드에서만 켜지는 테두리 클래스로 확인한다.
+  const borderless: Array<{ side: MessageSide; kind: MessageKind; label: string }> = [
+    { side: 'us', kind: 'rcs', label: '보낸 RCS 메시지' },
+    { side: 'us', kind: 'kakao', label: '보낸 카카오 메시지' },
+    { side: 'them', kind: 'kakao', label: '받은 카카오 메시지' },
+  ];
+  it.each(borderless)(
+    '테두리 없는 말풍선($label)도 강제 색상 모드에서는 테두리를 그린다',
+    ({ side, kind, label }) => {
+      render(
+        <MessageBubble side={side} kind={kind}>
+          본문
+        </MessageBubble>,
+      );
+
+      expect(screen.getByLabelText(label)).toHaveClass('forced-colors:border');
+    },
+  );
 });

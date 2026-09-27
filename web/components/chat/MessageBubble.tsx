@@ -20,8 +20,11 @@ export type MessageBubbleProps = {
   className?: string;
 };
 
+// 강제 색상 모드(Windows 고대비)는 배경을 Canvas 로 칠해 테두리 없는 말풍선(발신·카카오)이
+// 글자만 남는다 → 그 모드에서만 1px 테두리를 그린다(색은 브라우저가 CanvasText 로 강제).
+// 투명 테두리를 늘 두는 방식과 달리 일반 모드의 크기·모양은 그대로다.
 const BASE =
-  'min-w-0 max-w-[78%] rounded-2xl px-3 py-2 text-[13px] leading-[1.55] break-words whitespace-pre-wrap';
+  'min-w-0 max-w-[78%] rounded-2xl px-3 py-2 text-[13px] leading-[1.55] break-words whitespace-pre-wrap forced-colors:border';
 
 // 채널(RCS/SMS)은 색이 아니라 타임스탬프 옆 텍스트 라벨로 표시 — 색맹/프린트
 // 환경에서도 정보 유실 없도록. 발신/수신만 색으로 구분.
