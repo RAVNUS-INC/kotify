@@ -153,7 +153,7 @@ CREATE TABLE callers (
 
 -- 시스템 설정 (env 대체) — 시크릿은 Fernet ciphertext
 CREATE TABLE settings (
-  key TEXT PRIMARY KEY,       -- msghub.api_key, msghub.api_password, msghub.brand_id,
+  key TEXT PRIMARY KEY,       -- msghub.api_key, msghub.api_pwd, msghub.brand_id,
   value TEXT,                  -- keycloak.issuer, keycloak.client_id, ...
   is_secret INTEGER, updated_by TEXT, updated_at TEXT
 );
@@ -589,9 +589,10 @@ web/app/
         ▼ Fernet (AES-128-CBC + HMAC-SHA256)
 [ DB settings 테이블 ]
   msghub.api_key       (encrypted)
-  msghub.api_password  (encrypted)
-  msghub.brand_id      (encrypted)
-  msghub.chatbot_id    (encrypted)
+  msghub.api_pwd       (encrypted)
+  msghub.env           (plain)
+  msghub.brand_id      (plain)
+  msghub.chatbot_id    (plain)
   msghub.webhook_token (encrypted, 자동 생성)
   keycloak.client_secret (encrypted)
   keycloak.issuer      (plain)
@@ -600,6 +601,8 @@ web/app/
   app.public_url       (plain)
   notify.n8n_enabled   (plain)
   notify.n8n_url       (plain)
+  hiworks.mysql_password (encrypted)
+  hiworks.mysql_{host,port,db,user} (plain)
 ```
 
 ### 10.3 CSRF
