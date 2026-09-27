@@ -28,6 +28,10 @@ def create_db_engine(db_url: str | None = None) -> Engine:
     SQLite 파일의 부모 디렉토리가 없으면 자동 생성한다 (dev mode 첫 실행 시
     ``./var/`` 가 없으면 OperationalError가 발생하는 문제 방지).
 
+    ``hide_parameters=True`` — SQLAlchemy 예외 문구와 SQL 로그에 바인딩 값을 넣지 않는다.
+    값에는 고객 번호·회신 본문·웹훅 원문이 있고, ``log.exception`` 이 예외 문구를 그대로
+    남긴다(운영 stderr.log). SQL 문과 DB 오류 메시지는 그대로 남는다.
+
     Args:
         db_url: 명시하지 않으면 ``settings.db_url`` 사용.
     """
@@ -37,7 +41,9 @@ def create_db_engine(db_url: str | None = None) -> Engine:
         from pathlib import Path
         db_file = Path(url.removeprefix("sqlite:///"))
         db_file.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(url, connect_args={"check_same_thread": False})
+    engine = create_engine(
+        url, connect_args={"check_same_thread": False}, hide_parameters=True
+    )
     event.listen(engine, "connect", _apply_wal)
     return engine
 

@@ -274,3 +274,28 @@ def test_empty_list_fields_still_mean_no_items(empty) -> None:
     assert MoWebhookPayload.from_dict({"moLst": empty}).items == []
     assert MoWebhookPayload.from_dict({"rcsBiLst": empty}).items == []
     assert ReportItem.from_dict({"msgKey": "k", "fbReasonLst": empty}).fb_reason_lst == []
+
+
+# ─── 건수 필드 (rptCnt·moCnt·rcsBiCnt) ───────────────────────────────────────
+# 로그의 %d 에만 쓴다 — 정수가 아니면 거부하지 않고 항목 수로 대신한다(포맷 오류가 원값을 stderr 에 쓴다).
+
+_SMS_MO = {"moKey": "k1", "moNumber": "0212345678", "moCallback": "01012345678", "moMsg": "안녕"}
+
+
+@pytest.mark.parametrize(
+    "declared", ["01012345678 환불", "2", 2.0, float("nan"), True, None, {"n": 1}, [1, 2]],
+)
+def test_count_that_is_not_an_integer_falls_back_to_item_count(declared) -> None:
+    assert MoWebhookPayload.from_dict({"moCnt": declared, "moLst": [_SMS_MO] * 3}).mo_cnt == 3
+    assert MoWebhookPayload.from_dict({"rcsBiCnt": declared, "rcsBiLst": [{"msgKey": "k"}]}).mo_cnt == 1
+    assert WebhookReport.from_dict({"rptCnt": declared, "rptLst": [{}, {}]}).rpt_cnt == 2
+
+
+def test_integer_count_is_kept_even_if_it_differs_from_items() -> None:
+    """msghub 가 적은 건수는 그대로 둔다 — 항목 수와 다르면 로그에서 스키마 변경을 알아챌 단서다."""
+    assert MoWebhookPayload.from_dict({"moCnt": 5, "moLst": [_SMS_MO]}).mo_cnt == 5
+    assert MoWebhookPayload.from_dict({"rcsBiCnt": 4, "rcsBiLst": [{"msgKey": "k"}]}).mo_cnt == 4
+    assert WebhookReport.from_dict({"rptCnt": 7, "rptLst": [{}]}).rpt_cnt == 7
+    # 빠진 건수는 예전 그대로다 — MO 는 항목 수, 리포트는 0.
+    assert MoWebhookPayload.from_dict({"moLst": [_SMS_MO]}).mo_cnt == 1
+    assert WebhookReport.from_dict({"rptLst": [{}]}).rpt_cnt == 0

@@ -56,7 +56,7 @@ from app.services.report import (
     send_sms_fallback,
     split_unrecorded,
 )
-from app.util.phone import normalize_phone
+from app.util.phone import mask_phone, normalize_phone
 
 log = logging.getLogger(__name__)
 
@@ -250,6 +250,17 @@ def _resolve_callback(value: str | None, aliases: dict[str, str]) -> str | None:
     return None
 
 
+def _masked_callback(value: str) -> str:
+    """거부 경고용 MO 수신번호 — 숫자로만 된 값은 mask_phone 으로 가리고, 그 밖의 값은 길이만 적는다.
+
+    보통 우리 번호지만 구형 반대 표기 payload(두 번호 모두 010)에서는 고객 번호다. RCS 는 숫자 없는
+    chatbotId 를 그대로 쓰는데 그 자리에 문장이 오면 mask_phone 이 남기는 앞 3·뒤 4자도 본문 조각이다.
+    """
+    if not value or value.isdigit():
+        return mask_phone(value)
+    return f"<숫자 아닌 값 {len(value)}자>"
+
+
 def _synth_mo_key(
     number: str, recv_dt: str | None, msg: str | None, callback: str | None
 ) -> str:
@@ -361,7 +372,7 @@ async def receive_mo(
             # 확인한다. 발신번호 미등록 환경에서는 검증 불가하므로 통과시킨다.
             if active_callbacks and not callback_registered:
                 log.warning(
-                    "MO 수신번호 미등록 — 거부(위변조 의심): %s", our_callback
+                    "MO 수신번호 미등록 — 거부(위변조 의심): %s", _masked_callback(our_callback)
                 )
                 rejected += 1
                 continue

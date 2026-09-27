@@ -208,6 +208,17 @@ def _array(value: object, path: str) -> list:
     return value
 
 
+def _count(value: object, item_count: int) -> int:
+    """건수 필드(rptCnt·moCnt·rcsBiCnt) — 정수가 아니면 항목 수로 대신한다.
+
+    로그의 %d 에만 쓰는 값이라 페이로드는 거부하지 않는다. 문자열 등이 그대로 가면 logging 이
+    포맷에 실패하고, 오류 처리기가 원값이 든 인자(`Arguments: …`)를 stderr 에 쓴다.
+    """
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return item_count
+
+
 # ── 리포트 ───────────────────────────────────────────────────────────────────
 
 
@@ -299,7 +310,7 @@ class WebhookReport:
             for i, d in enumerate(_array(body.get("rptLst"), "rptLst"))
         ]
         return WebhookReport(
-            rpt_cnt=body.get("rptCnt", 0),
+            rpt_cnt=_count(body.get("rptCnt", 0), len(items)),
             items=items,
         )
 
@@ -398,7 +409,7 @@ class MoWebhookPayload:
             raw_items = _array(body.get(lst_key), lst_key)
             count = body.get("moCnt", 0) or len(raw_items)
         return MoWebhookPayload(
-            mo_cnt=count,
+            mo_cnt=_count(count, len(raw_items)),
             items=[
                 MoItem.from_dict(_object(d, f"{lst_key}[{i}]"))
                 for i, d in enumerate(raw_items)

@@ -313,8 +313,17 @@ JSON은 정상이지만 구조가 스키마와 다르면 응답은 그대로 400
 `MO 페이로드 파싱 실패: PayloadFormatError: moLst[0]: object 자리에 string — 구조 {moCnt: number, moLst: array(2)}`.
 `PayloadFormatError` 메시지는 필드 경로와 JSON 타입 이름으로만 만든다. 다른 예외는 메시지에
 값이 섞일 수 있어 예외 타입과 발생 위치(파일:줄)만 남긴다. 영문자·밑줄로만 된 키가 아니면(번호·
-문장이 키 자리에 오거나 키에 섞인 경우) 이름 대신 길이만 적는다. 정상 MO는 저장·중복·거부 건수만
-남긴다.
+문장이 키 자리에 오거나 키에 섞인 경우) 이름 대신 길이만 적는다.
+
+파싱은 통과했지만 저장·처리에서 실패해도(값이 객체라 바인딩 실패, SQLite 쓰기 잠금 등) 응답은
+그대로 400(MO `20004`, 리포트 `processing failed`)이고 ERROR에 예외와 트레이스백이 남는다. 앱
+엔진(`app/db.py` `create_db_engine`)은 `hide_parameters=True`라 SQLAlchemy 예외 문구의 바인딩 값
+자리에 `[SQL parameters hidden due to hide_parameters=True]`가 들어간다. SQL 문과 DB 오류는 남는다.
+예: `database is locked`, `Error binding parameter 10: type 'dict' is not supported`(번호는 SQL 문의
+몇 번째 값인지). 앱 전체(재조정·알림 루프 포함)에 적용되므로 값이 필요한 조사는 로그 대신 DB로 한다.
+정상 MO는 저장·중복·거부·페이로드 건수만 남긴다. 건수 필드(`rptCnt`·`moCnt`·`rcsBiCnt`)는 로그에만
+쓰며 정수가 아니면 항목 수로 대신한다(받아들이는 페이로드는 같다). 거부 경고의 MO 수신번호는 숫자면
+`mask_phone`(`010****5678`)으로 가리고, 숫자가 없으면(RCS chatbotId) 길이만 적는다.
 
 ### 5.4 예약·첨부·세션 제약
 

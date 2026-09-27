@@ -175,6 +175,8 @@ systemctl status kotify-web    # Next.js
 journalctl -u kotify -f
 journalctl -u kotify-web -f
 # FastAPI 애플리케이션·접근 로그 (유닛의 StandardOutput/StandardError 대상)
+# 고객 번호·회신 본문은 남기지 않는다 — 웹훅 원문 대신 구조 요약, DB 오류는 SQL 문과 오류만
+# ([SQL parameters hidden …]). 값이 필요하면 DB 를 본다 (claudedocs/SPEC.md §5.3)
 tail -f /var/log/kotify/stdout.log
 tail -f /var/log/kotify/stderr.log
 
