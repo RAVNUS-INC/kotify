@@ -155,4 +155,5 @@ def test_inbound_message_shape_is_unchanged(db_session, sample_user):
     messages = api_get_thread(_TID, db=db_session)["data"]["messages"]
     inbound = [m for m in messages if m["side"] == "them"]
     assert len(inbound) == 1
-    assert set(inbound[0]) == {"id", "side", "kind", "text", "time"}
+    # date 는 발신·수신 공통(날짜 구분선). 발신 전용 status·senderName 은 수신에 붙지 않는다.
+    assert set(inbound[0]) == {"id", "side", "kind", "text", "time", "date"}

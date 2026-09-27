@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import type { ChatThreadDetail } from '@/types/chat';
+import type { ChatMessage, ChatThreadDetail } from '@/types/chat';
 import { ThreadView } from './ThreadView';
 import { markReadClient } from '@/lib/chat';
 
@@ -12,10 +12,14 @@ vi.mock('next/navigation', () => {
   const router = { refresh: mocks.refresh };
   return { useRouter: () => router };
 });
-vi.mock('@/lib/chat', () => ({
-  markReadClient: vi.fn().mockResolvedValue(undefined),
-  sendMessageClient: vi.fn(),
-}));
+vi.mock('@/lib/chat', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/chat')>();
+  return {
+    ...actual,
+    markReadClient: vi.fn().mockResolvedValue(undefined),
+    sendMessageClient: vi.fn(),
+  };
+});
 vi.mock('@/lib/reply-validation', () => ({
   validateReplyClient: vi.fn().mockResolvedValue({
     byteLength: 0,
@@ -87,6 +91,7 @@ describe('ThreadView 발신 작성자와 전달 상태', () => {
               kind: 'rcs',
               text: '전달된 답장',
               time: '01:30',
+              date: '2026-09-27',
               status: 'sent',
               senderName: '가상 담당가',
             },
@@ -96,6 +101,7 @@ describe('ThreadView 발신 작성자와 전달 상태', () => {
               kind: 'rcs',
               text: '실패한 답장',
               time: '01:38',
+              date: '2026-09-27',
               status: 'failed',
               senderName: '가상 담당나',
             },
@@ -105,6 +111,7 @@ describe('ThreadView 발신 작성자와 전달 상태', () => {
               kind: 'sms',
               text: '작성자 정보 없는 과거 발송',
               time: '01:40',
+              date: '2026-09-27',
             },
             {
               id: 'm-in-4',
@@ -112,6 +119,7 @@ describe('ThreadView 발신 작성자와 전달 상태', () => {
               kind: 'rcs',
               text: '고객 회신',
               time: '01:42',
+              date: '2026-09-27',
               senderName: '잘못 전달된 가상 작성자',
             },
           ],
@@ -124,6 +132,50 @@ describe('ThreadView 발신 작성자와 전달 상태', () => {
     expect(screen.getByText('01:40 / SMS / 알 수 없음')).toBeInTheDocument();
     expect(screen.getByText('01:42 / RCS')).toBeInTheDocument();
     expect(screen.queryByText(/잘못 전달된 가상 작성자/)).not.toBeInTheDocument();
+  });
+});
+
+describe('ThreadView 날짜 구분선', () => {
+  const base = thread('0212345678:01011112222');
+  const lateNight: ChatMessage = {
+    id: 'm-in-1', side: 'them', kind: 'rcs', text: '밤늦은 회신', time: '23:59', date: '2026-09-26',
+  };
+  const sameNight: ChatMessage = { ...lateNight, id: 'm-in-2', text: '이어진 회신' };
+  const afterMidnight: ChatMessage = {
+    id: 'm-out-3', side: 'us', kind: 'rcs', text: '자정 넘은 답장', time: '00:00', date: '2026-09-27',
+    status: 'sent', senderName: '가상 담당자',
+  };
+
+  // 대화 영역의 줄을 화면 순서대로 — 구분선은 날짜 문구, 말풍선은 본문.
+  function rows(): string[] {
+    const log = screen.getByRole('log', { name: '대화 메시지' });
+    return Array.from(log.children, (row) =>
+      (row.querySelector('time') ?? row.querySelector('[aria-label]'))?.textContent ?? '',
+    );
+  }
+
+  it('날짜가 바뀌는 첫 메시지 앞에 날짜와 요일을 표시한다', () => {
+    render(<ThreadView thread={{ ...base, messages: [lateNight, sameNight, afterMidnight] }} />);
+
+    expect(rows()).toEqual([
+      '2026년 9월 26일 토요일', '밤늦은 회신', '이어진 회신', '2026년 9월 27일 일요일', '자정 넘은 답장',
+    ]);
+    expect(screen.getByText('2026년 9월 27일 일요일')).toHaveAttribute('datetime', '2026-09-27');
+  });
+
+  it('열어 둔 대화에 새 메시지가 오면 날짜가 바뀔 때만 구분선이 늘고 기존 구분선은 그대로다', () => {
+    const { rerender } = render(<ThreadView thread={{ ...base, messages: [lateNight] }} />);
+    const firstDivider = screen.getByText('2026년 9월 26일 토요일');
+
+    rerender(<ThreadView thread={{ ...base, messages: [lateNight, sameNight] }} />);
+    expect(rows()).toEqual(['2026년 9월 26일 토요일', '밤늦은 회신', '이어진 회신']);
+
+    rerender(<ThreadView thread={{ ...base, messages: [lateNight, sameNight, afterMidnight] }} />);
+    expect(rows()).toEqual([
+      '2026년 9월 26일 토요일', '밤늦은 회신', '이어진 회신', '2026년 9월 27일 일요일', '자정 넘은 답장',
+    ]);
+    // 같은 노드 — aria-live 대화 영역이 이미 읽은 날짜를 다시 알리지 않는다.
+    expect(screen.getByText('2026년 9월 26일 토요일')).toBe(firstDivider);
   });
 });
 

@@ -24,9 +24,9 @@ const detail: ChatThreadDetail = {
   channel: 'rcs',
   lastInboundMessageId: 1,
   messages: [
-    { id: 'm-in-1', side: 'them', kind: 'rcs', text: '배송 언제 오나요?', time: '09:58' },
-    { id: 'm-out-2', side: 'us', kind: 'rcs', text: '내일 도착 예정입니다.', time: '10:00', status: 'pending' },
-    { id: 'm-out-3', side: 'us', kind: 'sms', text: '안내드립니다', time: '09:00', status: 'sent' },
+    { id: 'm-in-1', side: 'them', kind: 'rcs', text: '배송 언제 오나요?', time: '09:58', date: '2026-09-27' },
+    { id: 'm-out-2', side: 'us', kind: 'rcs', text: '내일 도착 예정입니다.', time: '10:00', date: '2026-09-27', status: 'pending' },
+    { id: 'm-out-3', side: 'us', kind: 'sms', text: '안내드립니다', time: '09:00', date: '2026-09-27', status: 'sent' },
   ],
 };
 
@@ -57,7 +57,7 @@ describe('대화방 페이지 실시간 갱신 연결', () => {
       ...detail,
       lastInboundMessageId: 1,
   messages: [{
-        id: 'm-out-4', side: 'us', kind: 'rcs', text: '응답 타임아웃', time: '10:00', status: 'failed',
+        id: 'm-out-4', side: 'us', kind: 'rcs', text: '응답 타임아웃', time: '10:00', date: '2026-09-27', status: 'failed',
       }],
     });
     const pages = [

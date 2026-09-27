@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ChatThreadDetail } from '@/types/chat';
-import { markReadClient } from '@/lib/chat';
+import { markReadClient, withDateDividers } from '@/lib/chat';
+import { ChatDateDivider } from './ChatDateDivider';
 import { MessageBubble } from './MessageBubble';
 import { ThreadComposer } from './ThreadComposer';
 
@@ -55,17 +56,21 @@ export function ThreadView({ thread }: ThreadViewProps) {
             아직 주고받은 메시지가 없습니다.
           </div>
         ) : (
-          thread.messages.map((m) => (
-            <MessageBubble
-              key={m.id}
-              side={m.side}
-              kind={m.kind}
-              status={m.status}
-              timestamp={m.time}
-              senderName={m.senderName}
-            >
-              {m.text}
-            </MessageBubble>
+          // 구분선은 그날 첫 메시지의 key 에 묶는다. 같은 날 메시지가 끝에 붙으면 구분선 노드가
+          // 그대로라 aria-live 대화 영역이 이미 읽은 날짜를 다시 알리지 않는다.
+          withDateDividers(thread.messages).map(({ message: m, dividerDate }) => (
+            <Fragment key={m.id}>
+              {dividerDate && <ChatDateDivider date={dividerDate} />}
+              <MessageBubble
+                side={m.side}
+                kind={m.kind}
+                status={m.status}
+                timestamp={m.time}
+                senderName={m.senderName}
+              >
+                {m.text}
+              </MessageBubble>
+            </Fragment>
           ))
         )}
       </div>

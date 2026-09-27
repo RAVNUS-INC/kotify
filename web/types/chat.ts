@@ -18,6 +18,8 @@ export type ChatMessage = {
   text: string;
   /** "HH:MM" */
   time: string;
+  /** "YYYY-MM-DD" (KST) — 날짜 구분선 기준. 시각을 해석하지 못한 메시지는 빈 문자열. */
+  date: string;
   /** 발신(us) 전용. 결과를 알 수 없는 과거 발송은 없음. */
   status?: DeliveryStatus;
   /** 발신(us) 전용. 캠페인 작성자의 현재 표시명. */

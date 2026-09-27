@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ChatThreadDetail } from '@/types/chat';
-import { fetchThreadPage, fetchThreads, getDeliveryRefreshIds, markReadClient, sendMessageClient } from './chat';
+import type { ChatMessage, ChatThreadDetail } from '@/types/chat';
+import {
+  fetchThreadPage, fetchThreads, formatChatDate, getDeliveryRefreshIds, markReadClient,
+  sendMessageClient, withDateDividers,
+} from './chat';
 import { apiSend } from './csrf-client';
 
 vi.mock('./csrf-client', () => ({ apiSend: vi.fn() }));
@@ -28,12 +31,12 @@ function thread(messages: ChatThreadDetail['messages']): ChatThreadDetail {
 describe('getDeliveryRefreshIds', () => {
   it('전달 대기와 늦은 리포트로 복구될 수 있는 실패를 고른다', () => {
     const detail = thread([
-      { id: 'm-out-1', side: 'us', kind: 'rcs', text: '대기', time: '10:00', status: 'pending' },
-      { id: 'm-out-2', side: 'us', kind: 'sms', text: '전달', time: '10:01', status: 'sent' },
-      { id: 'm-out-3', side: 'us', kind: 'rcs', text: '실패', time: '10:02', status: 'failed' },
-      { id: 'm-out-4', side: 'us', kind: 'sms', text: '결과를 알 수 없는 과거 발송', time: '10:03' },
-      { id: 'm-in-5', side: 'them', kind: 'rcs', text: '회신', time: '10:04' },
-      { id: 'm-out-6', side: 'us', kind: 'sms', text: '취소', time: '10:05', status: 'cancelled' },
+      { id: 'm-out-1', side: 'us', kind: 'rcs', text: '대기', time: '10:00', date: '2026-09-27', status: 'pending' },
+      { id: 'm-out-2', side: 'us', kind: 'sms', text: '전달', time: '10:01', date: '2026-09-27', status: 'sent' },
+      { id: 'm-out-3', side: 'us', kind: 'rcs', text: '실패', time: '10:02', date: '2026-09-27', status: 'failed' },
+      { id: 'm-out-4', side: 'us', kind: 'sms', text: '결과를 알 수 없는 과거 발송', time: '10:03', date: '2026-09-27' },
+      { id: 'm-in-5', side: 'them', kind: 'rcs', text: '회신', time: '10:04', date: '2026-09-27' },
+      { id: 'm-out-6', side: 'us', kind: 'sms', text: '취소', time: '10:05', date: '2026-09-27', status: 'cancelled' },
     ]);
 
     expect(getDeliveryRefreshIds(detail)).toEqual(['m-out-1', 'm-out-3']);
@@ -41,6 +44,52 @@ describe('getDeliveryRefreshIds', () => {
 
   it('열린 대화가 없으면 빈 목록', () => {
     expect(getDeliveryRefreshIds(null)).toEqual([]);
+  });
+});
+
+describe('withDateDividers', () => {
+  const message = (id: string, date: string): ChatMessage => ({
+    id, side: 'them', kind: 'rcs', text: id, time: '10:00', date,
+  });
+
+  it('대화의 첫 메시지와 날짜가 바뀌는 첫 메시지 앞에만 구분선을 둔다', () => {
+    const items = withDateDividers([
+      message('a', '2026-09-26'), message('b', '2026-09-26'),
+      message('c', '2026-09-27'), message('d', '2026-09-27'),
+    ]);
+    expect(items.map((item) => [item.message.id, item.dividerDate])).toEqual([
+      ['a', '2026-09-26'], ['b', null], ['c', '2026-09-27'], ['d', null],
+    ]);
+  });
+
+  it('날짜를 모르는 메시지는 구분선을 만들지 않고 비교 기준 날짜도 바꾸지 않는다', () => {
+    const items = withDateDividers([
+      message('a', ''), message('b', '2026-09-26'), message('c', ''),
+      message('d', '2026-09-26'), message('e', '2026-09-27'),
+    ]);
+    expect(items.map((item) => item.dividerDate)).toEqual([null, '2026-09-26', null, null, '2026-09-27']);
+  });
+});
+
+describe('formatChatDate', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    ['2026-09-27', '2026년 9월 27일 일요일'],
+    ['2026-09-26', '2026년 9월 26일 토요일'],
+    ['2026-01-01', '2026년 1월 1일 목요일'],
+    ['2024-02-29', '2024년 2월 29일 목요일'],
+  ])('%s → %s', (date, label) => {
+    expect(formatChatDate(date)).toBe(label);
+  });
+
+  it('브라우저 시간대와 무관하다 — UTC 보다 늦은 시간대에서도 요일이 하루 밀리지 않는다', () => {
+    vi.stubEnv('TZ', 'America/Los_Angeles');
+    expect(formatChatDate('2026-09-27')).toBe('2026년 9월 27일 일요일');
+  });
+
+  it.each(['', '2026-9-27', '2026-02-30', '날짜 없음'])('형식에 맞지 않거나 달력에 없는 %j 는 그대로 둔다', (date) => {
+    expect(formatChatDate(date)).toBe(date);
   });
 });
 

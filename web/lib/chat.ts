@@ -56,6 +56,41 @@ export function getDeliveryRefreshIds(
 }
 
 /**
+ * 날짜가 바뀌는 첫 메시지마다 그 앞에 둘 구분선 날짜를 붙인다(대화의 첫 메시지 포함).
+ * 날짜를 모르는 메시지(빈 문자열)는 구분선을 만들지 않고 비교 기준 날짜도 바꾸지 않는다.
+ */
+export function withDateDividers(
+  messages: readonly ChatMessage[],
+): Array<{ message: ChatMessage; dividerDate: string | null }> {
+  let previous = '';
+  return messages.map((message) => {
+    const { date } = message;
+    const dividerDate = date && date !== previous ? date : null;
+    if (date) previous = date;
+    return { message, dividerDate };
+  });
+}
+
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'] as const;
+
+/**
+ * 구분선 문구 — "2026-09-27" → "2026년 9월 27일 일요일"(카카오톡처럼 항상 절대 날짜).
+ * 서버가 KST 로 자른 날짜만 보고 브라우저 시간대·현재 시각은 쓰지 않는다. 그래서 서버 렌더와
+ * 브라우저 렌더가 같은 문구를 내고, "오늘·어제" 같은 상대 표현이 없어 자정을 넘겨 열어 둔
+ * 화면도 틀린 날짜를 말하지 않는다. 형식에 맞지 않거나 달력에 없는 날짜는 원문 그대로.
+ */
+export function formatChatDate(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return date;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  if (utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) return date;
+  return `${year}년 ${month}월 ${day}일 ${WEEKDAYS[utc.getUTCDay()]}요일`;
+}
+
+/**
  * Client-side fetch. Next rewrite(/api/* → FastAPI)를 경유하므로 상대 경로.
  */
 export async function sendMessageClient(

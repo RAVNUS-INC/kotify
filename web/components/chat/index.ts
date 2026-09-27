@@ -21,6 +21,9 @@ export type { ThreadPreviewProps } from './ThreadPreview';
 export { ThreadView } from './ThreadView';
 export type { ThreadViewProps } from './ThreadView';
 
+export { ChatDateDivider } from './ChatDateDivider';
+export type { ChatDateDividerProps } from './ChatDateDivider';
+
 export { ThreadComposer } from './ThreadComposer';
 export type { ThreadComposerProps } from './ThreadComposer';
 

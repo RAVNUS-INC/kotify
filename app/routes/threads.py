@@ -42,7 +42,7 @@ from app.services.chat import (
     validate_reply_content,
 )
 from app.util.text import measure_bytes
-from app.util.time import fmt_kst_hhmm
+from app.util.time import fmt_kst_date, fmt_kst_hhmm
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -179,6 +179,8 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
         "kind": kind,
         "text": m.body or "",
         "time": fmt_kst_hhmm(m.timestamp),
+        # 날짜 구분선 기준 — time 과 같은 KST 시각에서 자른다. 해석 실패 시 빈 문자열.
+        "date": fmt_kst_date(m.timestamp),
     }
     # 발신 전달 상태(services.chat.delivery_status) — 수신(IN)엔 없고, 알 수 없는 과거
     # 발송(None)도 생략해 대기·실패로 단정하지 않는다.
@@ -475,6 +477,7 @@ async def api_post_message(
                 "kind": body.sendChannel,  # 요청한 전송 방식 — 실제 도달 채널은 리포트 후 확정
                 "text": body.text,
                 "time": now_kst.strftime("%H:%M"),
+                "date": now_kst.strftime("%Y-%m-%d"),
                 "senderName": sender_display_name(user),
             }
         }
