@@ -48,15 +48,15 @@ export function FaxInboxTable({ items, canRefetch = false }: FaxInboxTableProps)
               const number = formatPhone(item.senderNumber) || item.senderNumber || '번호 없음';
               return (
                 <tr key={item.id} className={unread ? 'font-medium' : undefined}>
-                  <td className="mono">{fmtKstDateTime(item.receivedAt)}</td>
+                  <td className="tabular-nums">{fmtKstDateTime(item.receivedAt)}</td>
                   <td>
                     {item.senderName ? (
                       <div className="flex flex-col">
                         <span className="truncate text-ink">{item.senderName}</span>
-                        <span className="mono text-[12px] text-ink-muted">{number}</span>
+                        <span className="tabular-nums text-sm text-ink-muted">{number}</span>
                       </div>
                     ) : (
-                      <span className="mono text-ink">{number}</span>
+                      <span className="tabular-nums text-ink">{number}</span>
                     )}
                   </td>
                   <td>
@@ -64,10 +64,10 @@ export function FaxInboxTable({ items, canRefetch = false }: FaxInboxTableProps)
                       <Badge kind={status.kind} dot>
                         {status.label}
                       </Badge>
-                      {item.error ? <span className="text-[12px] text-ink-muted">{item.error}</span> : null}
+                      {item.error ? <span className="text-sm text-ink-muted">{item.error}</span> : null}
                     </div>
                   </td>
-                  <td className="text-[12.5px] text-ink-muted">
+                  <td className="text-md text-ink-muted">
                     {unread ? (
                       <Badge kind="brand">새 팩스</Badge>
                     ) : item.firstViewedAt ? (

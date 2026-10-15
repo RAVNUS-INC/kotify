@@ -38,7 +38,7 @@ export function FaxRefetchButton({ id }: { id: number }) {
         다시 가져오기
       </Button>
       {error ? (
-        <span role="alert" className="text-[12px] text-danger">
+        <span role="alert" className="text-sm text-danger">
           {error}
         </span>
       ) : null}
