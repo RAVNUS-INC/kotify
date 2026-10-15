@@ -1,6 +1,6 @@
 /** Client-side PBX 요청 — 팩스 발송·다시 보내기, 연결 테스트. CSRF 토큰은 apiSend 가 붙인다. */
 import { apiSend } from './csrf-client';
-import type { FaxJob, FaxResolution } from '@/types/pbx';
+import type { FaxInboxItem, FaxJob, FaxResolution } from '@/types/pbx';
 
 type Envelope<T> = { data?: T; error?: { code: string; message: string } };
 
@@ -39,4 +39,9 @@ export async function testPbxConnection(): Promise<{ ok: true; message: string }
   return readData<{ ok: true; message: string }>(
     await apiSend('/api/pbx/test', { method: 'POST' }),
   );
+}
+
+/** 받은 팩스 PDF 를 PBX 에서 다시 가져온다 (admin). */
+export async function refetchInboxClient(id: number): Promise<FaxInboxItem> {
+  return readData<FaxInboxItem>(await apiSend(`/api/fax/inbox/${id}/refetch`, { method: 'POST' }));
 }

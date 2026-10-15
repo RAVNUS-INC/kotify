@@ -87,3 +87,15 @@ export function fmtKstDateTime(iso: string | null | undefined): string {
     d.getUTCHours(),
   )}:${pad(d.getUTCMinutes())}`;
 }
+
+/** 받은 팩스 상태 문구 — 수신 실패, PDF 가져오기 대기·실패를 구분한다. */
+export function inboxStatusLabel(item: {
+  status: 'RECEIVED' | 'FAILED';
+  fetchStatus: 'PENDING' | 'FETCHED' | 'FETCH_FAILED' | 'NONE';
+}): { label: string; kind: 'success' | 'danger' | 'warning' | 'neutral' } {
+  if (item.status === 'FAILED') return { label: '수신 실패', kind: 'danger' };
+  if (item.fetchStatus === 'FETCHED') return { label: '받음', kind: 'success' };
+  if (item.fetchStatus === 'PENDING') return { label: 'PDF 가져오는 중', kind: 'neutral' };
+  if (item.fetchStatus === 'FETCH_FAILED') return { label: 'PDF 못 가져옴', kind: 'warning' };
+  return { label: 'PBX 에서 삭제됨', kind: 'neutral' };
+}

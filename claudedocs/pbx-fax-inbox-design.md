@@ -1,6 +1,6 @@
 # 받은 팩스 보기 — 설계안
 
-> 상태: **결정 완료(2026-10-16)** — 열람 sender 이상, 실패 수신도 표시, PDF 영구 보관, PBX 에 남은 기존 수신도 모두 가져오기(커서 이전 로그를 한 번 훑는 backfill)
+> 상태: **구현(로컬, 2026-10-16)·결정 완료** — 열람 sender 이상, 실패 수신도 표시, PDF 영구 보관, PBX 에 남은 기존 수신도 모두 가져오기(커서 이전 로그를 한 번 훑는 backfill)
 > 선행: [`pbx-integration-design.md`](./pbx-integration-design.md)(팩스 발송·로그 추적), SPEC §8.6
 
 ## 0. 전제 (PBX 세션 실측 + kotify CT 확인)
