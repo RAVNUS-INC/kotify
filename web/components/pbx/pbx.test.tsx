@@ -7,6 +7,7 @@ import { CallsTable } from './CallsTable';
 import { FaxInboxTable } from './FaxInboxTable';
 import { validateFaxInput } from './FaxComposer';
 import { RecentCalls } from './RecentCalls';
+import { formatDateTime } from '@/lib/datetime';
 
 vi.mock('next/link', () => ({
   default: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
@@ -90,7 +91,8 @@ const inboxItem = (overrides: Partial<FaxInboxItem> = {}): FaxInboxItem => ({
 describe('FaxInboxTable', () => {
   it('새 팩스·PDF 보기 링크·KST 시각·이름을 보여 준다', () => {
     render(<FaxInboxTable items={[inboxItem({ senderName: '가상 거래처' })]} />);
-    expect(screen.getByText('2026-10-16 01:06')).toBeInTheDocument();
+    // UTC 16:06 → KST 01:06(다음 날). 표는 올해면 '10월 16일 01:06' 처럼 줄여 보인다.
+    expect(screen.getByText(formatDateTime('2026-10-16 01:06'))).toBeInTheDocument();
     expect(screen.getByText('가상 거래처')).toBeInTheDocument();
     expect(screen.getByText('새 팩스')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /PDF 보기 25KB/ })).toHaveAttribute('href', '/api/fax/inbox/7/pdf');
@@ -109,5 +111,26 @@ describe('FaxInboxTable', () => {
     expect(screen.queryByRole('button', { name: /다시 가져오기/ })).toBeNull();
     rerender(<FaxInboxTable items={items} canRefetch />);
     expect(screen.getByRole('button', { name: /다시 가져오기/ })).toBeInTheDocument();
+  });
+});
+
+describe('RecordingPlayer', () => {
+  it('펼치면 재생 버튼·끌 수 있는 막대·시간을 직접 그리고, 막대를 옮기면 그 위치로 간다', () => {
+    const { container } = render(<CallsTable calls={[call()]} />);
+    fireEvent.click(screen.getByRole('button', { name: /녹음 재생/ }));
+    const audio = container.querySelector('audio')!;
+    // 브라우저 기본 재생기는 쓰지 않는다(표 칸에서 찌그러져 끌 수 없었다)
+    expect(audio.hasAttribute('controls')).toBe(false);
+
+    const slider = screen.getByRole('slider', { name: /재생 위치/ });
+    expect(slider).toBeDisabled(); // 길이를 알기 전에는 끌 수 없다
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 62 });
+    fireEvent(audio, new Event('loadedmetadata'));
+    expect(slider).toBeEnabled();
+    expect(screen.getByText('0:00 / 1:02')).toBeInTheDocument();
+
+    fireEvent.change(slider, { target: { value: '30' } });
+    expect(audio.currentTime).toBe(30);
+    expect(screen.getByText('0:30 / 1:02')).toBeInTheDocument();
   });
 });

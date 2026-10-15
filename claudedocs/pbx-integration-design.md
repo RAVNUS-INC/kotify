@@ -23,7 +23,7 @@
 | 단건 CDR | `search=<uniqueid>&search_fields=uniqueid` 1건(위 500 과 달리 동작) | 사용 안 함 |
 | 응답 `tenant` | 전부 `dipcast-50` (테넌트 2) | — |
 | `recording_url` | 호스트 `time.ravnus.com:4430`, 경로 `/vrecordings/<테넌트 해시>/YYYY/MM/DD/<시각>-OUT-NONE-…wav` — kotify 경로 검사 통과 | — |
-| 녹음 내려받기(키 없이) | 200, `audio/x-wav`, `Accept-Ranges: bytes` 이지만 Range 요청에도 **200 전체 본문** | 중계는 그대로 동작(탐색은 브라우저가 받은 범위 안에서만) |
+| 녹음 내려받기(키 없이) | 200, `audio/x-wav`, `Accept-Ranges: bytes` 이지만 Range 요청에도 **200 전체 본문** | 그대로 중계하면 길이를 몰라 재생 바를 끌 수 없음 → 2026-10-16 부터 kotify 가 전부 받아 길이·Range 를 직접 응답(§5) |
 | 팩스 장치 | id 2 "RAVNUS", `tenant_id` 2, 발신 번호 10자리 | — |
 | 팩스 로그 | 실제 ID 는 74~85(수신 6·발신 6). **없는 ID 도 200** 에 자리표시(`status "fax_viewer.status."`, `file "File Removed"`, `unix_date`·`device_id` null) | 자리표시 = 없음, 첫 추적은 빈 ID 300개까지 건너뜀 |
 | 팩스 로그 상태 | 발신 `Sent`/수신 `Received`·`Failed`, `error` 는 `OK` 또는 사유 문구 | `map_log_status` 그대로 |
@@ -111,7 +111,7 @@ G.711 팩스라 실패가 잦을 수 있다 → PBX 자체 재시도(`retries`·
 
 - 목록 응답의 `recordingToken` = `Fernet(마스터 키)` 로 암호화한 `{path, user_sub, exp(30분)}`. 브라우저는 경로를 알 수 없다(암호문).
 - `GET /pbx/recordings/{token}` (권한: §6): 복호화 → `user_sub` 가 현재 사용자와 같은지, 만료, 경로가 `^/vrecordings/<tenant>/\d{4}/\d{2}/\d{2}/[\w.-]+\.wav$` 인지 검사 → 내부 주소 `{api_base_url}{path}` 를 스트리밍 프록시.
-  - `Range` 헤더를 그대로 전달해 206 응답을 중계(오디오 탐색 지원), `Content-Type: audio/wav`, `Cache-Control: no-store`, `Content-Disposition: inline`.
+  - (2026-10-16 변경) PBX 가 Range 를 무시하고 길이 없이 주므로 녹음을 끝까지 받아(64MB 상한) 최근 몇 건을 메모리에 두고, 브라우저 Range 에 맞춰 206·`Content-Length`·`Content-Range`·416 을 kotify 가 만든다. `Content-Type: audio/wav`, `Cache-Control: no-store`, `Content-Disposition: inline`.
   - 감사 로그 `RECORDING_PLAY`(CDR id 만). 같은 녹음의 Range 요청 반복은 첫 요청만 기록.
 - PBX 프록시 차단(`/vrecordings`·`/api` 내부 IP 만) 이후에도 kotify 는 10.0.5.204 → 10.0.5.10 직결이라 영향 없음.
 
@@ -129,7 +129,7 @@ G.711 팩스라 실패가 잦을 수 있다 → PBX 자체 재시도(`retries`·
 ## 7. 화면 (Next.js)
 
 - **`/fax`** (사이드바 "팩스", sender 이상): 위 발송 폼(받는 번호·PDF·해상도) + 아래 이력 표(상태 배지, 실패 사유, 다시 보내기). `SUBMITTED` 가 있으면 15초 간격으로 새로고침(`router.refresh`).
-- **`/calls`** (사이드바 "통화 기록"): 번호·기간·유형 필터(URL state), 표 + 녹음 있는 행에 재생 버튼(`<audio controls preload="none" src="/api/pbx/recordings/{token}">`, sender 이상).
+- **`/calls`** (사이드바 "통화 기록"): 번호·기간·유형 필터(URL state), 표 + 녹음 있는 행에 재생 버튼(누르면 `/api/pbx/recordings/{token}` 을 여는 재생/멈춤·끌 수 있는 막대·시간 재생기, sender 이상).
 - **대화방 오른쪽 카드**(`ThreadRecipientCard`): "최근 통화" 5건 + `/calls?phone=…` 링크. PBX 미설정·오류면 섹션 숨김(하이웍스와 같이 실패 격리 — 대화방은 계속 동작).
 - `web/lib/access.ts` 에 `/fax`·`/calls` 규칙 추가(백엔드와 동일 조건).
 

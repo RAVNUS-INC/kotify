@@ -3,6 +3,7 @@ import type { Route } from 'next';
 import { Icon } from '@/components/ui';
 import { DIRECTION_LABEL, dispositionLabel, formatCallTime, formatDuration } from '@/lib/pbx-format';
 import type { RecentCallsResult } from '@/lib/pbx';
+import { formatDateTime } from '@/lib/datetime';
 import { RecordingPlayer } from './RecordingPlayer';
 
 /**
@@ -25,22 +26,23 @@ export function RecentCalls({ phone, result }: { phone: string; result: RecentCa
       ) : (
         <ul className="flex flex-col gap-1.5">
           {result.calls.map((call) => {
-            const time = formatCallTime(call.at);
+            const time = formatDateTime(formatCallTime(call.at));
             return (
-              <li key={call.id} className="rounded border border-line bg-gray-1 px-3 py-2 text-sm">
+              <li key={call.id} className="rounded border border-line bg-surface-subtle px-3 py-2 text-md">
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1.5">
-                    <Icon name="phone" size={11} />
+                    <Icon name="phone" size={12} />
                     {DIRECTION_LABEL[call.direction]} · {dispositionLabel(call.disposition)}
                   </span>
                   <span className="tabular-nums text-sm text-ink-muted">{formatDuration(call.billSec)}</span>
                 </div>
-                <div className="mt-0.5 flex items-center justify-between gap-2">
-                  <span className="tabular-nums text-xs text-ink-dim">{time}</span>
-                  {call.recordingToken ? (
+                <div className="mt-0.5 tabular-nums text-xs text-ink-dim">{time}</div>
+                {/* 재생기는 펼치면 칸 폭을 다 쓰므로 시각과 같은 줄에 두지 않는다 */}
+                {call.recordingToken ? (
+                  <div className="mt-1.5 -ml-2">
                     <RecordingPlayer token={call.recordingToken} label={`${time} 통화`} />
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </li>
             );
           })}

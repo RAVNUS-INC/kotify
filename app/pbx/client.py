@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +33,8 @@ DEFAULT_API_BASE_URL = "https://10.0.5.10:4430"
 _TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 # 녹음 파일은 수 MB 라 읽기 시간을 넉넉히 둔다.
 _STREAM_TIMEOUT = httpx.Timeout(30.0, connect=3.0)
+# 녹음 한 건의 상한 — 8kHz 모노 WAV 기준 약 70분. 넘으면 재생하지 않는다.
+MAX_RECORDING_BYTES = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -224,46 +225,36 @@ class PbxClient:
 
     # ── 녹음 ───────────────────────────────────────────────────────────────
 
-    async def open_recording(
-        self, path: str, range_header: str | None
-    ) -> tuple[httpx.Response, AsyncIterator[bytes]]:
-        """녹음 파일을 스트리밍으로 연다.
+    async def fetch_recording(self, path: str) -> tuple[str, bytes]:
+        """녹음 파일을 끝까지 받아 (content-type, 본문) 으로 돌려준다.
 
-        Returns:
-            (응답 헤더용 Response, 본문 바이트 이터레이터). 이터레이터가 끝나거나
-            닫히면 연결도 닫힌다.
+        운영 PBX 는 Range 를 무시하고 늘 전체를 200 으로, 길이 헤더 없이 보낸다(2026-10-15
+        실측). 그대로 브라우저에 넘기면 재생 시간을 몰라 재생 바를 끌 수 없으므로 kotify 가
+        전부 받아 길이와 Range 응답을 직접 만든다. 통화 녹음은 수 MB 라 상한을 둔다.
 
         Raises:
-            PbxError: 연결 실패 또는 200/206 이 아닌 응답.
+            PbxError: 연결 실패, 200/206 이 아닌 응답, 또는 상한 초과(``too_large``).
         """
         # 녹음 경로는 앱 키를 요구하지 않는다 — 필요 없는 곳에 키를 보내지 않는다.
-        client = self._client(_STREAM_TIMEOUT, with_key=False)
-        headers = {"Range": range_header} if range_header else {}
-        try:
-            request = client.build_request("GET", path, headers=headers)
-            resp = await client.send(request, stream=True)
-        except httpx.TimeoutException:
-            await client.aclose()
-            log.warning("PBX 녹음 시간 초과")
-            raise PbxError("timeout", uncertain=True) from None
-        except httpx.HTTPError as exc:
-            await client.aclose()
-            log.warning("PBX 녹음 연결 실패: %s", type(exc).__name__)
-            raise PbxError("network", uncertain=True) from None
-
-        if resp.status_code not in (200, 206):
-            status = resp.status_code
-            await resp.aclose()
-            await client.aclose()
-            log.warning("PBX 녹음 응답 HTTP %s", status)
-            raise PbxError(f"http_{status}", status_code=status)
-
-        async def _body() -> AsyncIterator[bytes]:
+        async with self._client(_STREAM_TIMEOUT, with_key=False) as client:
             try:
-                async for chunk in resp.aiter_bytes():
-                    yield chunk
-            finally:
-                await resp.aclose()
-                await client.aclose()
-
-        return resp, _body()
+                async with client.stream("GET", path) as resp:
+                    if resp.status_code not in (200, 206):
+                        log.warning("PBX 녹음 응답 HTTP %s", resp.status_code)
+                        raise PbxError(f"http_{resp.status_code}", status_code=resp.status_code)
+                    content_type = resp.headers.get("content-type", "")
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in resp.aiter_bytes():
+                        size += len(chunk)
+                        if size > MAX_RECORDING_BYTES:
+                            log.warning("PBX 녹음이 상한(%d bytes)을 넘음", MAX_RECORDING_BYTES)
+                            raise PbxError("too_large")
+                        chunks.append(chunk)
+            except httpx.TimeoutException:
+                log.warning("PBX 녹음 시간 초과")
+                raise PbxError("timeout", uncertain=True) from None
+            except httpx.HTTPError as exc:
+                log.warning("PBX 녹음 연결 실패: %s", type(exc).__name__)
+                raise PbxError("network", uncertain=True) from None
+        return content_type, b"".join(chunks)

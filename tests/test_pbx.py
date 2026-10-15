@@ -322,34 +322,94 @@ def _recording_token(client, login_as, sub="sub-sender") -> str:
     return res.json()["data"][0]["recordingToken"]
 
 
-def test_recording_streams_from_internal_host_with_range(client, configure, login_as, db_factory):
+@pytest.fixture(autouse=True)
+def _empty_recording_cache():
+    """녹음 보관본은 프로세스 전역이라 테스트끼리 섞이지 않게 매번 비운다."""
+    from app.routes.pbx import recording_cache
+
+    recording_cache.clear()
+    yield
+    recording_cache.clear()
+
+
+def test_recording_serves_ranges_itself_when_pbx_ignores_range(client, configure, login_as, db_factory):
+    """운영 PBX 는 Range 를 무시하고 길이 없이 전체를 준다 — kotify 가 받아 두고 206·길이를 직접 만든다."""
     configure()
     token = _recording_token(client, login_as)
-    audio = b"RIFF" + b"\0" * 60
+    audio = b"RIFF" + bytes(range(60))
     with respx.mock(base_url=BASE) as mock:
         route = mock.get(REC_PATH).mock(
-            return_value=httpx.Response(
-                206,
-                content=audio[:10],
-                headers={"content-type": "audio/x-wav", "content-range": f"bytes 0-9/{len(audio)}"},
-            )
+            # 길이 헤더 없이 스트림으로(Transfer-Encoding: chunked) 주는 PBX 를 흉내낸다
+            return_value=httpx.Response(200, stream=httpx.ByteStream(audio), headers={"content-type": "audio/x-wav"})
         )
-        res = client.get(f"/pbx/recordings/{token}", headers={"Range": "bytes=0-9"})
-        assert res.status_code == 206
-        assert res.content == audio[:10]
-        assert res.headers["content-range"] == f"bytes 0-9/{len(audio)}"
-        assert res.headers["content-type"] == "audio/x-wav"
-        assert res.headers["cache-control"] == "private, no-store"
+        first = client.get(f"/pbx/recordings/{token}", headers={"Range": "bytes=0-"})
+        assert first.status_code == 206
+        assert first.content == audio
+        assert first.headers["content-length"] == str(len(audio))
+        assert first.headers["content-range"] == f"bytes 0-{len(audio) - 1}/{len(audio)}"
+        assert first.headers["accept-ranges"] == "bytes"
+        assert first.headers["content-type"] == "audio/x-wav"
+        assert first.headers["cache-control"] == "private, no-store"
         sent = route.calls.last.request
-        assert sent.headers["range"] == "bytes=0-9"
+        assert "range" not in sent.headers  # PBX 가 무시하므로 보내지 않는다
         assert "app-key" not in sent.headers  # 녹음 경로에는 키를 보내지 않는다
 
-        # 탐색 요청은 감사 로그를 다시 남기지 않는다.
-        client.get(f"/pbx/recordings/{token}", headers={"Range": "bytes=30-"})
+        # 재생 바를 끌면 그 위치부터 — PBX 에 다시 가지 않고 받아 둔 본문에서 자른다.
+        seek = client.get(f"/pbx/recordings/{token}", headers={"Range": "bytes=30-39"})
+        assert seek.status_code == 206
+        assert seek.content == audio[30:40]
+        assert seek.headers["content-range"] == f"bytes 30-39/{len(audio)}"
+        tail = client.get(f"/pbx/recordings/{token}", headers={"Range": "bytes=-4"})
+        assert tail.content == audio[-4:]
+        whole = client.get(f"/pbx/recordings/{token}")
+        assert whole.status_code == 200
+        assert whole.headers["content-length"] == str(len(audio))
+        assert route.call_count == 1
+
+        # 파일 밖을 가리키면 416 과 전체 길이
+        out = client.get(f"/pbx/recordings/{token}", headers={"Range": f"bytes={len(audio)}-"})
+        assert out.status_code == 416
+        assert out.headers["content-range"] == f"bytes */{len(audio)}"
     db = db_factory()
     logs = list(db.execute(select(AuditLog).where(AuditLog.action == "RECORDING_PLAY")).scalars())
-    assert [entry.target for entry in logs] == ["cdr:544"]
+    # 재생 시작(bytes=0-)과 Range 없는 전체 요청만 남고, 탐색 요청은 남지 않는다.
+    assert [entry.target for entry in logs] == ["cdr:544", "cdr:544"]
     db.close()
+
+
+def test_recording_over_limit_is_refused(client, configure, login_as, monkeypatch):
+    from app.pbx import client as pbx_client
+
+    configure()
+    token = _recording_token(client, login_as)
+    monkeypatch.setattr(pbx_client, "MAX_RECORDING_BYTES", 10)
+    with respx.mock(base_url=BASE) as mock:
+        mock.get(REC_PATH).mock(return_value=httpx.Response(200, content=b"x" * 11))
+        res = client.get(f"/pbx/recordings/{token}")
+    assert res.status_code == 502
+    assert res.json()["error"]["code"] == "too_large"
+
+
+@pytest.mark.parametrize(
+    ("header", "size", "expected"),
+    [
+        (None, 10, None),
+        ("bytes=0-", 10, (0, 9)),
+        ("bytes=2-5", 10, (2, 5)),
+        ("bytes=8-100", 10, (8, 9)),
+        ("bytes=-3", 10, (7, 9)),
+        ("bytes=-30", 10, (0, 9)),
+        ("bytes=10-", 10, "invalid"),
+        ("bytes=5-2", 10, "invalid"),
+        ("bytes=0-1,4-5", 10, None),
+        ("items=0-1", 10, None),
+        ("bytes=a-b", 10, None),
+    ],
+)
+def test_parse_range(header, size, expected):
+    from app.routes.pbx import parse_range
+
+    assert parse_range(header, size) == expected
 
 
 def test_recording_token_is_bound_to_user_and_expires(client, configure, login_as):

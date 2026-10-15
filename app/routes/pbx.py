@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import UTC, date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -394,6 +395,75 @@ def _is_first_range(range_header: str | None) -> bool:
     return range_header.replace(" ", "").lower().startswith("bytes=0-")
 
 
+def parse_range(range_header: str | None, size: int) -> tuple[int, int] | None | Literal["invalid"]:
+    """단일 ``bytes=`` Range 를 (시작, 끝) 포함 구간으로. 없거나 여러 구간이면 None(전체 응답).
+
+    ``bytes=a-b``·``bytes=a-``·``bytes=-n`` 을 지원한다. 파일 밖을 가리키면 ``"invalid"``(416).
+    """
+    if not range_header:
+        return None
+    spec = range_header.replace(" ", "").lower()
+    if not spec.startswith("bytes=") or "," in spec:
+        return None
+    first, _, last = spec[len("bytes="):].partition("-")
+    try:
+        if first == "":
+            if not last:
+                return "invalid"
+            length = int(last)
+            if length <= 0:
+                return "invalid"
+            return (max(size - length, 0), size - 1) if size else "invalid"
+        start = int(first)
+        end = int(last) if last else size - 1
+    except ValueError:
+        return None
+    if start >= size or start > end:
+        return "invalid"
+    return start, min(end, size - 1)
+
+
+class _RecordingCache:
+    """최근 재생한 녹음 몇 개를 메모리에 잠깐 둔다 — 재생 바를 끌 때마다 PBX 에서 다시 받지 않게.
+
+    서버는 워커 1개(--workers 1) 전제라 프로세스 안 캐시로 충분하다. 항목·전체 크기·보관 시간에
+    상한을 둔다. 녹음 토큰이 사용자에 묶여 있으므로 캐시 키(PBX 경로)는 권한 확인 뒤에만 쓴다.
+    """
+
+    def __init__(self, max_items: int = 8, max_bytes: int = 128 * 1024 * 1024, ttl_sec: float = 600.0):
+        self.max_items = max_items
+        self.max_bytes = max_bytes
+        self.ttl_sec = ttl_sec
+        self._items: dict[str, tuple[float, str, bytes]] = {}
+
+    def get(self, key: str) -> tuple[str, bytes] | None:
+        hit = self._items.get(key)
+        if hit is None:
+            return None
+        stored_at, content_type, body = hit
+        if time.monotonic() - stored_at > self.ttl_sec:
+            del self._items[key]
+            return None
+        # 최근 사용으로 갱신(끝으로 이동)
+        del self._items[key]
+        self._items[key] = hit
+        return content_type, body
+
+    def put(self, key: str, content_type: str, body: bytes) -> None:
+        self._items.pop(key, None)
+        self._items[key] = (time.monotonic(), content_type, body)
+        while len(self._items) > self.max_items or (
+            len(self._items) > 1 and sum(len(v[2]) for v in self._items.values()) > self.max_bytes
+        ):
+            del self._items[next(iter(self._items))]
+
+    def clear(self) -> None:
+        self._items.clear()
+
+
+recording_cache = _RecordingCache()
+
+
 @router.get(
     "/pbx/recordings/{token}",
     dependencies=[Depends(require_role(*SEND_ROLES))],
@@ -413,14 +483,21 @@ async def play_recording(
     except PbxNotConfigured:
         return _not_configured()
 
-    range_header = request.headers.get("range")
-    try:
-        upstream, body = await PbxClient(config).open_recording(ref.path, range_header)
-    except PbxError as exc:
-        if exc.status_code == 404:
-            return _error("not_found", "녹음 파일이 PBX 에 없습니다", 404)
-        return _pbx_failed(exc)
+    cached = recording_cache.get(ref.path)
+    if cached is None:
+        try:
+            content_type, body = await PbxClient(config).fetch_recording(ref.path)
+        except PbxError as exc:
+            if exc.status_code == 404:
+                return _error("not_found", "녹음 파일이 PBX 에 없습니다", 404)
+            if exc.code == "too_large":
+                return _error("too_large", "녹음 파일이 너무 커서 재생할 수 없습니다", 502)
+            return _pbx_failed(exc)
+        recording_cache.put(ref.path, content_type, body)
+    else:
+        content_type, body = cached
 
+    range_header = request.headers.get("range")
     if _is_first_range(range_header):
         audit.log(
             db,
@@ -431,7 +508,6 @@ async def play_recording(
         )
         db.commit()
 
-    content_type = upstream.headers.get("content-type", "")
     if not content_type.startswith("audio/"):
         content_type = "audio/wav" if ref.path.lower().endswith(".wav") else "application/octet-stream"
     headers = {
@@ -439,12 +515,15 @@ async def play_recording(
         "Content-Disposition": "inline",
         "Accept-Ranges": "bytes",
     }
-    for name in ("content-length", "content-range"):
-        if name in upstream.headers:
-            headers[name.title()] = upstream.headers[name]
-    return StreamingResponse(
-        body, status_code=upstream.status_code, media_type=content_type, headers=headers,
-    )
+    size = len(body)
+    span = parse_range(range_header, size)
+    if span == "invalid":
+        return Response(status_code=416, headers={**headers, "Content-Range": f"bytes */{size}"})
+    if span is None:
+        return Response(content=body, status_code=200, media_type=content_type, headers=headers)
+    start, end = span
+    headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return Response(content=body[start : end + 1], status_code=206, media_type=content_type, headers=headers)
 
 
 # ── 설정 ───────────────────────────────────────────────────────────────────
