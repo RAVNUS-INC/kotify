@@ -1,7 +1,7 @@
 # kotify — 개발 명세서
 
 > U+ msghub 기반 RCS 우선 단체 공지 발송 시스템
-> 작성일: 2026-04-08 / 최종 갱신: 2026-09-27 / 버전: 0.2
+> 작성일: 2026-04-08 / 최종 갱신: 2026-10-15 / 버전: 0.2
 
 ---
 
@@ -45,6 +45,7 @@
 - 실시간 채팅(SSE) — RCS 양방향 대화
 - 감사 로그 (모든 민감 작업)
 - 알림 센터, 통합 검색, 리포트(차트/KPI)
+- 사내 전화 교환기(PBX, VitalPBX) 연동 — 팩스 발송, 고객별 통화 기록 조회, 통화 녹음 재생 (§8.6)
 
 ### 1.2 비범위 (Out of Scope)
 
@@ -200,6 +201,19 @@ CREATE TABLE notification_deliveries (
   status TEXT NOT NULL,        -- PENDING | SENDING | DELIVERED | FAILED
   attempts INTEGER NOT NULL, next_attempt_at TEXT NOT NULL,
   locked_at TEXT, last_error TEXT, created_at TEXT NOT NULL, delivered_at TEXT
+);
+
+-- PBX 가상 팩스 발송 작업 (스키마 0024) — 받는 번호 1개당 1행, PDF 원본 영구 보관
+CREATE TABLE fax_jobs (
+  id INTEGER PRIMARY KEY, created_by TEXT NOT NULL REFERENCES users(sub),
+  recipient TEXT NOT NULL,      -- 숫자만 (0 으로 시작 9~11자리)
+  original_filename TEXT NOT NULL, pdf_blob BLOB NOT NULL, file_size_bytes INTEGER NOT NULL,
+  resolution TEXT NOT NULL,     -- standard | medium | high
+  retries INTEGER NOT NULL, retry_time INTEGER NOT NULL,   -- PBX 재시도 (기본 2회·300초)
+  status TEXT NOT NULL,         -- QUEUED | SUBMITTED | SENT | FAILED | UNKNOWN
+  pbx_file TEXT, pbx_log_id INTEGER, error TEXT,
+  fetch_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL, submitted_at TEXT, completed_at TEXT
 );
 
 -- 감사 로그
@@ -457,6 +471,8 @@ web/app/
 │   ├── notifications/page.tsx  — S15 알림 센터
 │   ├── reports/page.tsx        — S16 리포트/통계
 │   ├── search/page.tsx         — S17 통합 검색
+│   ├── fax/page.tsx            — 팩스 발송·이력 (sender 이상)
+│   ├── calls/page.tsx          — 통화 기록·녹음 재생 (sender 이상)
 │   └── error/                  — S18 에러 3종 (not-found/error/global-error)
 ├── offline/page.tsx            — PWA 폴백
 ├── setup/                      — Setup Wizard (bootstrap 모드만)
@@ -542,6 +558,28 @@ web/app/
 - 입력 문자열 4000자 초과 또는 EUC-KR 미지원 문자는 `byteLength=null`이다. 본문 초과·미지원·빈 본문은 HTTP 200의 `valid=false`, 비용 null로 응답한다. 빈 본문은 오류 문구 없이 0바이트다. 수신자가 없으면 `valid=false`와 수신자 입력 안내를 반환한다. 요청 형식 오류·허용하지 않은 채널·수신자 배열 상한 초과는 HTTP 422다.
 - `ComposeForm`은 입력 후 300ms에 견적을 요청한다. 본문·수신자·채널·첨부가 바뀌면 이전 응답을 무효화하며, 현재 검증 성공 전에는 발송 버튼을 비활성화한다. 통신 실패 시 `다시 확인`으로 재시도한다. 최종 발송은 기존 `POST /campaigns`의 발신번호·예약·첨부 등 검증을 다시 거친다.
 
+### 8.6 사내 PBX 연동 (팩스·통화 기록·녹음)
+
+설계 근거와 실측 상태는 [`pbx-integration-design.md`](./pbx-integration-design.md). 대상은 DIPCAST(VitalPBX 4.5) API v2이며 `app/pbx/client.py`가 사내 주소(`pbx.api_base_url`, 기본 `https://10.0.5.10:4430`)로만 요청한다. 앱 키·테넌트가 없으면 모든 PBX API가 HTTP 409 `pbx_not_configured`이다. PBX 오류는 HTTP 502 `pbx_error`이며 로그와 응답에 전화번호·녹음 경로·키를 넣지 않는다.
+
+| API | 권한 | 동작 |
+|---|---|---|
+| `GET /fax` | sender 이상 | 팩스 이력. sender 는 본인 것, admin 은 전체 |
+| `POST /fax` (multipart `recipient`, `resolution`, `file`) | sender 이상 + CSRF | PDF(≤10MB, `%PDF-` 시그니처) 검증 → `QUEUED` 커밋 → PBX `POST /virtual_faxes/{id}/send` |
+| `POST /fax/{id}/resend` | 본인 또는 admin | 같은 PDF·번호로 새 작업 |
+| `GET /fax/{id}/pdf` | 본인 또는 admin | 보낸 PDF 보기 |
+| `GET /pbx/fax-files/{token}.pdf` | 없음(PBX 전용) | HMAC 서명·10분 만료·열린 작업·5회 상한. 실패는 모두 404 |
+| `GET /pbx/calls?phone=&from=&to=&type=&limit=&offset=` | sender 이상, 번호 없는 조회는 admin | PBX CDR 을 조회 시점에 읽어 축약 반환. 기본 최근 30일 |
+| `GET /pbx/recordings/{token}` | sender 이상, 토큰 발급 사용자만 | PBX 녹음을 서버가 스트리밍 중계(Range → 206) |
+| `POST /pbx/test` | admin + CSRF | CDR 1건·팩스 장치 조회. 장치 secret·번호는 버림 |
+
+- **팩스 상태**: 접수되면 `SUBMITTED`, 명시적 거부는 `FAILED`, 시간 초과·5xx·연결 끊김처럼 접수 여부를 모르면 `UNKNOWN`이며 **자동 재전송하지 않는다**(이중 발송 방지). 회선 1개를 쓰는 G.711 팩스라 `QUEUED`·`SUBMITTED`가 3건이면 새 발송은 409 `fax_busy`. 재시도는 PBX 의 `retries`·`retry_time`에 맡긴다.
+- **결과 추적**: 60초 주기 루프(`_reconcile_loop`)가 PBX 팩스 로그(`GET /virtual_faxes/log/{id}`)를 마지막으로 확인한 ID(`pbx.fax_log_cursor`)부터 앞으로 한 주기 최대 20건 읽고, 빈 ID 가 3개 이어지면 멈춘다. 발송 응답의 임시 파일 이름(`pbx_file`)으로 맞추고, 없으면 번호 끝 8자리+시각(발송 −5분~+2시간)이 유일할 때만 맞춘다. 찾은 로그는 최종 상태가 될 때까지 그 ID 만 다시 읽는다. 2시간 안에 못 찾은 `SUBMITTED`와 10분 넘게 남은 `QUEUED`는 `UNKNOWN`, 24시간이 지나면 추적을 그만둔다. **이 방식은 PBX 실제 응답으로 아직 확인하지 않았다**(설계 문서 §0).
+- **통화 기록**: kotify DB 에 복제하지 않는다. 고객 번호는 `0` 포함·`0` 제외·`82` 접두 표기를 `extensions` 로 함께 넘긴다(실측 전 가정). 응답은 `{id, at(KST ISO), direction, from, to, durationSec, billSec, disposition, recordingToken}`이고 `recording_url`·`recfile`·채널 정보는 넣지 않는다. 다음 페이지 여부는 `limit+1`건 조회로 판단한다.
+- **녹음**: PBX `/vrecordings/...`는 인증 없이 열리므로 원본 주소를 브라우저에 주지 않는다. `recordingToken`은 `{경로, 사용자, CDR id}`를 마스터 키 Fernet 으로 암호화한 30분 토큰이며(파일 이름에 고객 번호가 들어 있어 서명만으로는 노출된다), 재생 시 경로를 `/vrecordings/<테넌트>/YYYY/MM/DD/<파일>.wav` 형식으로 다시 검사한다. 녹음 요청에는 앱 키를 보내지 않는다. 재생 시작(Range 없음·`bytes=0-`)마다 `RECORDING_PLAY` 감사 로그를 남긴다.
+- **화면**: `/fax`(발송 폼·이력, 보내는 중이면 15초 갱신·실패/확인 필요 다시 보내기), `/calls`(GET 폼 조건, 녹음은 버튼을 누른 뒤에만 `<audio>` 생성), 대화방 오른쪽 카드의 최근 통화 5건(PBX 를 쓸 수 없으면 섹션만 숨김). `web/lib/access.ts`가 `/fax`·`/calls`를 sender 이상으로 막는다.
+- **감사**: `FAX_SEND`(target `fax:{id}`, detail 은 상태만), `RECORDING_PLAY`(target `cdr:{id}`).
+
 ---
 
 ## 9. 모션 디자인 시스템
@@ -603,6 +641,10 @@ web/app/
   notify.n8n_url       (plain)
   hiworks.mysql_password (encrypted)
   hiworks.mysql_{host,port,db,user} (plain)
+  pbx.app_key          (encrypted)
+  pbx.{api_base_url,tenant,tls_verify,fax_device_id,fax_fetch_base_url} (plain)
+  pbx.fax_url_secret   (encrypted, 자동 생성 — 팩스 PDF 내려받기 URL 서명)
+  pbx.fax_log_cursor   (plain, 자동 — 마지막으로 확인한 PBX 팩스 로그 ID)
 ```
 
 ### 10.3 CSRF
@@ -627,7 +669,8 @@ web/app/
 - **OS**: Debian 12 (Bookworm) 또는 13 (Trixie)
 - **Resources**: 1 vCPU / 1 GB RAM / 8 GB disk
 - **Network**: 사내망 only, 외부 인바운드 차단 (NPM이 프록시)
-- **Outbound**: msghub API, Keycloak, NTP, GitHub
+- **Outbound**: msghub API, Keycloak, NTP, GitHub, 사내 PBX `10.0.5.10:4430`
+- **Inbound(사내)**: PBX 가 팩스 PDF 를 받으러 `pbx.fax_fetch_base_url`(Next.js 3000)로 접속
 
 ### 11.2 디렉토리 구조
 
@@ -881,6 +924,7 @@ kotify/
 - [`msghub-api-guide.md`](./msghub-api-guide.md) — msghub API 전체
 - [`msghub-migration-spec.md`](./msghub-migration-spec.md) — 마이그레이션 기획
 - [`msghub-error-codes.md`](./msghub-error-codes.md) — 에러 코드 매핑
+- [`pbx-integration-design.md`](./pbx-integration-design.md) — 사내 PBX 연동 설계·실측 상태
 - [`motion-timing.md`](./motion-timing.md) — 모션 타이밍 매트릭스
 - [`web-bundle-snapshot.md`](./web-bundle-snapshot.md) — 번들 스냅샷
 - [`phase-10d-runtime-audit.md`](./phase-10d-runtime-audit.md) — 런타임 감사 체크리스트

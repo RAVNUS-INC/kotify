@@ -1,5 +1,15 @@
 # Handoff — 현재 상황 요약
 
+## 2026-10-15 — 사내 PBX 연동(팩스·통화 기록·녹음 재생) 구현, 실측·배포 전
+
+- 목표: kotify 에 DIPCAST(VitalPBX 4.5) 연동 ① 팩스 발송 ② 고객별 통화 기록 ③ 통화 녹음 재생. 설계는 사용자 승인을 받았다(녹음 재생 sender 이상, 팩스 PDF 영구 보관). 근거·실측 상태는 `claudedocs/pbx-integration-design.md`, 확정 동작은 SPEC §8.6.
+- 상태: 브랜치 `jj/pbx-integration-1f8e12` 에 커밋(`63d830e` 백엔드, `0e576b2` 화면, `fc07ab4` WAL 동시성 테스트, 문서 커밋). **푸시·main 병합·운영 배포는 하지 않았다.** 배포 시 alembic `0024`(`fax_jobs` 테이블 추가)가 적용된다.
+- 변경 파일: `app/pbx/client.py`, `app/services/{fax,calls}.py`, `app/routes/pbx.py`, `app/models.py`(`FaxJob`), `alembic/versions/0024_fax_jobs.py`, `app/main.py`(라우터·60초 루프에 팩스 추적), `app/routes/settings.py`(`pbx.*` 키), `app/services/audit.py`(`FAX_SEND`·`RECORDING_PLAY`), `web/app/(app)/{fax,calls}/`, `web/components/pbx/`, `web/lib/pbx*.ts`, `web/types/pbx.ts`, 대화방 상세·`ThreadRecipientCard`(최근 통화), 설정 폼, 사이드바, `web/lib/access.ts`.
+- 검증(로컬): 백엔드 815개(768 → +47, PBX 는 respx 목), Ruff, 웹 typecheck·lint·Vitest 22파일 209개, Next.js 프로덕션 빌드 20/20 페이지 통과. 운영 CT(`kotify`)에서 `https://10.0.5.10:4430/api/v2/cdr` 가 키 없이 401 로 응답하는 것만 확인했다(연결 가능). **실제 PBX 응답·실제 팩스·브라우저 화면 확인은 하지 않았다.**
+- 막힌 점: kotify 전용 PBX 앱 키가 아직 없다. 사용자가 PBX `admin` → Admin → Application Keys(테넌트 2)에서 만들어 운영 CT `/root/pbx-app-key`(600)에 두기로 했다(2026-10-15 확인 시 없음). 키 값은 채팅·저장소·로그에 남기지 않는다.
+- 다음 단계: ① 키 파일이 생기면 CT 에서 읽기 전용 GET 으로 설계 문서 §0 미확인 항목 실측(CDR 고객 번호 형식·`extensions` 매칭, 팩스 발송 응답 `file` 과 로그 `file` 일치 여부, 로그 ID 연속성, 단건 CDR) — 값은 출력하지 않고 필드 이름·건수·형식만 → 필요하면 `cdr_number_variants`·`_match_job`·`map_log_status` 보정 ② main 병합·배포 후 설정 → 메시징 → 전화 교환기에 테넌트·앱 키·팩스 장치 2·내려받기 주소(`http://10.0.5.204:3000`) 입력, PBX 연결 테스트 ③ PBX(10.0.5.10) → `10.0.5.204:3000` 도달 확인 ④ **사용자 승인 후** 실제 팩스 1건 → 로그 매칭·상태 반영 확인 ⑤ `/root/pbx-app-key` 삭제.
+- 남은 한계: 팩스 로그 목록 API 가 없어 ID 를 앞으로 훑는다(빈 ID 3개 연속이면 멈춤 — 로그 삭제로 큰 공백이 생기면 추적이 멈출 수 있음). TLS 는 자체 서명이라 기본 검증 끔(사내 직결 전제). PBX `/vrecordings`·`/api` 외부 노출 차단은 PBX 쪽 작업으로 이 범위 밖이다.
+
 ## 2026-09-27 — 웹훅 로그 개인정보 제거·문서 정정 main 통합(`837e426`)·운영 배포
 
 - 열린 PR은 없었다. 미커밋 변경이 있던 워크트리 4개를 확인해 `origin/main` `794bf25` 위에 4개 커밋을 fast-forward로 올렸다: `2fd441f` 웹훅 파싱 실패 로그의 원문 제거(hopeful-chaum), `470bab9` 저장 실패·건수 포맷·거부 경고 로그의 번호·본문 제거(great-pasteur), `a6fcbdd` 웹훅 인증 설명을 URL 경로 토큰으로 정정(busy-chandrasekhar), `837e426` SPEC 설정 키 목록 정정(goofy-noyce).
