@@ -1,5 +1,13 @@
 # Handoff — 현재 상황 요약
 
+## 2026-10-16 — 통화 녹음 재생 바 수정·통화 기록/팩스 화면 정리 운영 배포(`e056dfe`)
+
+- 사용자 보고: 통화 기록·팩스 메뉴에 덜 다듬어진 곳이 있고, 녹음 재생 바가 이상해 넘겨 들을 수 없다.
+- 원인(로컬 실측): 운영 PBX 는 녹음 Range 를 무시하고 길이 헤더 없이 전체를 200 으로 주는데, kotify 가 그대로 중계하며 `Accept-Ranges` 를 붙였다 → 브라우저 `duration = Infinity`, 재생 바에 전체 길이가 없고 끌 수 없음. 게다가 기본 `<audio controls>` 를 표 칸에서 높이 28px 로 눌러 막대가 찌그러졌다.
+- 수정 `04ec18e`: `PbxClient.fetch_recording` 이 녹음을 끝까지 받고(64MB 상한 → 502 `too_large`), `GET /pbx/recordings/{token}` 이 최근 8건·128MB·10분 메모리 보관본으로 `Content-Length`·206 `Content-Range`·416 을 직접 만든다(`parse_range`, `--workers 1` 전제). PBX 에는 Range 를 보내지 않는다. 감사 로그는 재생 시작 때만. 화면 재생기는 재생/멈춤·끌 수 있는 막대·"지금/전체" 시간을 직접 그린다. `e056dfe`: 통화 기록·팩스 표 머리글 정렬, "10월 16일 02:12" 시각, "—" 빈칸, BUSY → "상대 통화 중", 조회 조건 라벨·높이, 파일 선택·PDF 보기 버튼 모양.
+- 검증(로컬): 가짜 PBX(길이 없이·Range 무시)로 재생 시간 40초 인식·막대 75% 클릭 시 32초 이동, 대화방 최근 통화 재생기 넘침 없음. 백엔드 847개·ruff, 웹 Vitest 226개, `next build` 20/20.
+- 배포: 2026-10-15 17:30:50 UTC `apply`(대기 3커밋) → 17:33:39 `post-restart: 정상 기동 — e056dfe`. 두 서비스 active·`NRestarts=0`, healthz `e056dfe`, DB `quick_check=ok`, 마이그레이션 없음. 재시작 중 `kotify-web` 이 SIGTERM 에 제때 끝나지 않아 systemd 가 강제 종료한 경고 1회(이전 배포에는 없었음, 새 버전은 정상 기동). 운영 코드로 실제 PBX 녹음 1건을 받아 확인: `audio/x-wav` 469KB RIFF, 0.04초, Range 계산 정상(번호·경로 미출력). **로그인 화면에서 재생해 보는 확인은 하지 않았다.**
+
 ## 2026-10-16 — UI 리뉴얼 1~3단계 main 통합·운영 배포(`07f6d1d`)
 
 - 통합: `origin/main` 에 받은 팩스 3커밋(`0849ead`·`fbd89aa`·`38ebdb9`)이 먼저 올라와 있어 브랜치에 병합했다(`bd081de`, 충돌은 이 문서 맨 위뿐 — 양쪽 항목 모두 유지). 병합으로 들어온 받은 팩스 표·다시 가져오기 버튼에 v2 글자 규칙을 적용(`07f6d1d`)한 뒤 `main` 에 fast-forward 푸시(`38ebdb9..07f6d1d`, 푸시 훅 pytest·ruff·typecheck·lint·vitest 통과). 병합 후 로컬: 백엔드 835개·ruff, 웹 Vitest 25파일 225개, `next build` 20/20.
