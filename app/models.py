@@ -398,3 +398,41 @@ class ThreadRead(Base):
         UniqueConstraint("caller", "phone", name="uq_thread_reads_caller_phone"),
         Index("idx_thread_reads_phone", "phone"),
     )
+
+
+class FaxJob(Base):
+    """PBX(VitalPBX) 가상 팩스로 보낸 팩스 1건 — 받는 번호 1개당 1행.
+
+    PBX 발송 API 는 파일 업로드가 아니라 URL 을 받아 PBX 가 내려받는 방식이라,
+    PDF 원본을 여기 보관하고 서명된 짧은 수명 URL 로 내준다. 원본은 영구 보관한다.
+    """
+
+    __tablename__ = "fax_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_by: Mapped[str] = mapped_column(Text, ForeignKey("users.sub"), nullable=False)
+    # 숫자만 저장 (국내 유선·휴대 0으로 시작 9~11자리)
+    recipient: Mapped[str] = mapped_column(Text, nullable=False)
+    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    pdf_blob: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # standard | medium | high
+    resolution: Mapped[str] = mapped_column(Text, nullable=False)
+    retries: Mapped[int] = mapped_column(Integer, nullable=False)
+    retry_time: Mapped[int] = mapped_column(Integer, nullable=False)
+    # QUEUED | SUBMITTED | SENT | FAILED | UNKNOWN
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="QUEUED")
+    # 발송 응답의 PBX 임시 파일 이름(basename) — 팩스 로그와 맞추는 키
+    pbx_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pbx_log_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # PBX 가 알려 준 실패 사유 또는 kotify 판단 사유 (번호·URL 미포함)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fetch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    submitted_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_fax_jobs_status", "status"),
+        Index("idx_fax_jobs_created_by", "created_by", "id"),
+    )

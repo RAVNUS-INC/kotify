@@ -101,6 +101,16 @@ async def reset_msghub_client():
 _RECONCILE_INTERVAL_SECONDS = 60
 
 
+async def _track_fax(db) -> None:
+    """PBX 가 설정돼 있으면 열린 팩스 작업의 결과를 PBX 로그에서 찾는다."""
+    from app.pbx.client import load_pbx_config
+    from app.services.fax import track_fax_jobs
+
+    config = load_pbx_config(db)
+    if config is not None:
+        await track_fax_jobs(db, config)
+
+
 async def _reconcile_loop() -> None:
     """미완료 메시지를 재조정하고 실패한 알림을 다시 보내는 주기 루프.
 
@@ -119,6 +129,11 @@ async def _reconcile_loop() -> None:
                     await process_n8n_outbox(db)
                 except Exception:  # noqa: BLE001
                     logger.exception("n8n 알림 outbox 처리 실패")
+
+                try:
+                    await _track_fax(db)
+                except Exception:  # noqa: BLE001
+                    logger.exception("PBX 팩스 결과 추적 실패")
 
                 client = await aget_msghub_client()
                 if client is not None:
@@ -223,6 +238,8 @@ from app.routes.health import router as health_router
 from app.routes.hiworks import router as hiworks_router
 from app.routes.notifications import router as notifications_router
 from app.routes.numbers import router as numbers_router
+from app.routes.pbx import public_router as pbx_public_router
+from app.routes.pbx import router as pbx_router
 from app.routes.reports import router as reports_router
 from app.routes.search import router as search_router
 from app.routes.settings import router as settings_router
@@ -232,6 +249,7 @@ from app.routes.webhook import router as webhook_router
 
 app.include_router(health_router)
 app.include_router(webhook_router)
+app.include_router(pbx_public_router)  # PBX 가 팩스 PDF 를 받아 가는 경로 — 서명 토큰으로만 보호
 app.include_router(setup_router)  # require_setup_mode 가 자체 보호 — fresh install 전용
 app.include_router(auth_router)
 app.include_router(dashboard_router)
@@ -246,6 +264,7 @@ app.include_router(notifications_router)
 app.include_router(reports_router)
 app.include_router(search_router)
 app.include_router(hiworks_router)
+app.include_router(pbx_router)
 
 
 # ── 미들웨어: 사용자 컨텍스트 주입 ───────────────────────────────────────────

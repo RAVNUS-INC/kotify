@@ -28,7 +28,8 @@ def _run(conn, direction):
 
 def test_migration_chain_has_single_head_after_0019():
     scripts = ScriptDirectory.from_config(_config())
-    assert scripts.get_heads() == ["0023"]
+    assert scripts.get_heads() == ["0024"]
+    assert scripts.get_revision("0024").down_revision == "0023"
     assert scripts.get_revision("0023").down_revision == "0022"
     assert scripts.get_revision("0022").down_revision == "0021"
     assert scripts.get_revision("0021").down_revision == "0020"
@@ -87,13 +88,13 @@ def test_full_migration_chain_upgrades_and_downgrades_on_temporary_database(tmp_
     command.upgrade(cfg, "head")
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.connect() as conn:
-        assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0023"
-        assert "notification_deliveries" in [
+        assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0024"
+        assert {"notification_deliveries", "fax_jobs"} <= {
             row[0]
             for row in conn.exec_driver_sql(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
-        ]
+        }
         assert "last_read_mo_id" in [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(thread_reads)")]
         attachment_columns = {
             row[1] for row in conn.exec_driver_sql("PRAGMA table_info(attachments)")
@@ -108,5 +109,9 @@ def test_full_migration_chain_upgrades_and_downgrades_on_temporary_database(tmp_
         }
         assert "msghub_rcs_file_id" not in attachment_columns
         assert "rcs_file_expires_at" not in attachment_columns
+        assert "fax_jobs" not in [
+            row[0]
+            for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type = 'table'")
+        ]
     command.upgrade(cfg, "head")
     engine.dispose()

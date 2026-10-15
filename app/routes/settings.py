@@ -396,6 +396,12 @@ _PROVIDER_PUBLIC_KEYS: dict[str, str] = {
     "hiworksMysqlPort": "hiworks.mysql_port",
     "hiworksMysqlDb": "hiworks.mysql_db",
     "hiworksMysqlUser": "hiworks.mysql_user",
+    # 사내 PBX(VitalPBX) — 앱 키만 시크릿. 내려받기 주소는 PBX 가 닿는 kotify 사내 주소.
+    "pbxApiBaseUrl": "pbx.api_base_url",
+    "pbxTenant": "pbx.tenant",
+    "pbxTlsVerify": "pbx.tls_verify",
+    "pbxFaxDeviceId": "pbx.fax_device_id",
+    "pbxFaxFetchBaseUrl": "pbx.fax_fetch_base_url",
 }
 _PROVIDER_SECRET_KEYS: dict[str, str] = {
     "keycloakClientSecret": "keycloak.client_secret",
@@ -403,6 +409,7 @@ _PROVIDER_SECRET_KEYS: dict[str, str] = {
     "msghubApiPwd": "msghub.api_pwd",
     "sessionSecret": "session.secret",
     "hiworksMysqlPassword": "hiworks.mysql_password",
+    "pbxAppKey": "pbx.app_key",
     # msghub 가 우리 서버로 report/MO 를 POST 할 때 path 에 포함하는 공유
     # 시크릿. msghub 콘솔에 등록하는 URL 에 같이 들어가고, 수신 시 우리가
     # 일치 여부를 검증. 새로 쓰면 기존 콘솔 등록 URL 이 즉시 무효화됨.
@@ -428,12 +435,19 @@ class ProviderPatchBody(BaseModel):
     hiworksMysqlPort: str | None = None
     hiworksMysqlDb: str | None = None
     hiworksMysqlUser: str | None = None
+    # 사내 PBX 접속정보 (공개 필드). 앱 키는 아래 시크릿에.
+    pbxApiBaseUrl: str | None = None
+    pbxTenant: str | None = None
+    pbxTlsVerify: Literal["true", "false"] | None = None
+    pbxFaxDeviceId: str | None = None
+    pbxFaxFetchBaseUrl: str | None = None
     # 시크릿 (Fernet 암호화 저장) — 빈 값/미제공 시 기존 값 보존
     keycloakClientSecret: str | None = None
     msghubApiKey: str | None = None
     msghubApiPwd: str | None = None
     sessionSecret: str | None = None
     hiworksMysqlPassword: str | None = None
+    pbxAppKey: str | None = None
     # msghub 웹훅 토큰 — msghub 콘솔의 report/MO 수신 URL 에 포함된다. 새 값
     # 저장 시 기존 msghub 등록 URL 이 무효화되니 콘솔 URL 도 같이 교체 필요.
     msghubWebhookToken: str | None = None
