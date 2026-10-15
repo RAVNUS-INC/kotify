@@ -19,6 +19,7 @@ from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -253,7 +254,7 @@ async def list_calls(
     except PbxNotConfigured:
         return _not_configured()
     try:
-        return await calls_service.list_calls(
+        result = await calls_service.list_calls(
             config,
             user_sub=user.sub,
             phone=digits or None,
@@ -267,6 +268,9 @@ async def list_calls(
         return _error("invalid_cursor", "페이지 정보가 올바르지 않습니다. 처음부터 다시 조회하세요", 400)
     except PbxError as exc:
         return _pbx_failed(exc)
+    # 하이웍스 조회는 동기 MySQL(최대 수 초) — 이벤트 루프를 막지 않게 스레드에서.
+    await run_in_threadpool(calls_service.attach_names, db, result["data"])
+    return result
 
 
 def _is_first_range(range_header: str | None) -> bool:

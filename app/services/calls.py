@@ -20,7 +20,10 @@ from datetime import time as dt_time
 from urllib.parse import urlsplit
 
 from cryptography.fernet import InvalidToken
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from app.models import Contact
 from app.pbx.client import PbxClient, PbxConfig
 from app.security.crypto import get_fernet
 from app.util.time import KST
@@ -151,6 +154,41 @@ def summarize_cdr(row: dict, user_sub: str) -> dict:
             else None
         ),
     }
+
+
+def customer_number(call: dict) -> str:
+    """고객 쪽 번호 — 수신은 건 번호, 발신은 받은 번호. 내선끼리(4자리 이하)는 빈 문자열."""
+    number = call["to"] if call["direction"] == "out" else call["from"]
+    return number if len(number) > 4 else ""
+
+
+def attach_names(db: Session, calls: list[dict]) -> None:
+    """고객 번호에 이름을 붙인다(``name``). 하이웍스 CID 주소록 우선, 없으면 kotify 주소록.
+
+    대화방과 같은 하이웍스 조회(실패는 격리되어 빈 결과)를 한 번에 하고, kotify 주소록도
+    번호 목록으로 한 번만 조회한다. 이름이 없으면 ``None`` — 화면은 번호만 보인다.
+    """
+    from app.services.hiworks import lookup_names
+
+    numbers = sorted({n for call in calls if (n := customer_number(call))})
+    names: dict[str, str] = {}
+    if numbers:
+        names = {
+            phone: str(row.get("display") or "")
+            for phone, row in lookup_names(db, numbers).items()
+            if row.get("display")
+        }
+        missing = [n for n in numbers if n not in names]
+        if missing:
+            for phone, name in db.execute(
+                select(Contact.phone, Contact.name).where(
+                    Contact.phone.in_(missing), Contact.active == 1
+                )
+            ).all():
+                if phone and name and phone not in names:
+                    names[phone] = name
+    for call in calls:
+        call["name"] = names.get(customer_number(call))
 
 
 def _kst_today() -> datetime:

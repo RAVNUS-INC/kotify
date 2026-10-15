@@ -59,6 +59,8 @@ export default async function CallsPage({ searchParams }: PageProps) {
   } else {
     try {
       const res = await fetchCalls(query);
+      const name = query.phone ? res.data.find((c) => c.name)?.name : null;
+      if (name && query.phone) sub = `${name} · ${formatPhone(query.phone)} 통화 기록`;
       sub = `${sub} · ${res.meta.from} ~ ${res.meta.to}`;
       // PBX 가 offset 을 지원하지 않아 앞쪽으로만 넘긴다(처음으로 = 커서 없이).
       body = (

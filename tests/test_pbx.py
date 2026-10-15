@@ -786,3 +786,46 @@ async def test_track_skips_placeholder_ids_then_uses_short_gap(db_factory, confi
     assert (job.status, job.pbx_log_id) == ("SENT", 77)
     assert calls[0] == 76  # 커서 다음부터 읽는다
     db.close()
+
+
+def test_calls_attach_names_from_hiworks_then_contacts(client, configure, login_as, db_factory, monkeypatch):
+    """고객 번호에 하이웍스 CID 이름, 없으면 kotify 주소록 이름. 내선끼리는 이름 없음."""
+    from app.models import Contact
+    from app.services import hiworks
+
+    configure()
+    login_as("sub-admin", "admin")
+    other = "01000000002"
+    gone = "01000000003"
+    db = db_factory()
+    for phone, name, active in ((other, "주소록 고객", 1), (gone, "삭제된 고객", 0)):
+        db.add(Contact(name=name, phone=phone, active=active, created_by="sub-admin",
+                       created_at=_now_iso(), updated_at=_now_iso()))
+    db.commit()
+    db.close()
+    asked: list[list[str]] = []
+
+    def _lookup(_db, phones):
+        asked.append(sorted(phones))
+        return {CUSTOMER: {"name": "가상", "display": "가상 고객 (가상회사)"}}
+
+    monkeypatch.setattr(hiworks, "lookup_names", _lookup)
+    rows = [
+        _cdr_row(cdr_id=1),  # 수신: source 가 고객
+        _cdr_row(cdr_id=2, calltype="3", source="101", destination=other),  # 발신: destination 이 고객
+        _cdr_row(cdr_id=3, calltype="3", source="101", destination=gone),
+        _cdr_row(cdr_id=4, calltype="1", source="101", destination="102"),  # 내선
+    ]
+    with respx.mock(base_url=BASE) as mock:
+        mock.get("/api/v2/cdr").mock(return_value=_ok({"result": rows}))
+        res = client.get("/pbx/calls")
+    names = {c["id"]: c["name"] for c in res.json()["data"]}
+    assert names == {1: "가상 고객 (가상회사)", 2: "주소록 고객", 3: None, 4: None}
+    assert asked == [sorted([CUSTOMER, other, gone])]  # 한 번에 조회, 내선 제외
+
+    monkeypatch.setattr(hiworks, "lookup_names", lambda _db, phones: {})  # 하이웍스 장애·미설정
+    with respx.mock(base_url=BASE) as mock:
+        mock.get("/api/v2/cdr").mock(return_value=_ok({"result": rows[:1]}))
+        res = client.get("/pbx/calls")
+    assert res.status_code == 200
+    assert res.json()["data"][0]["name"] is None

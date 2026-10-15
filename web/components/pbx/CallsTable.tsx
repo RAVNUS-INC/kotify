@@ -46,7 +46,16 @@ export function CallsTable({ calls }: { calls: ReadonlyArray<CallRecord> }) {
                       {DIRECTION_LABEL[call.direction]}
                     </Pill>
                   </td>
-                  <td className="mono text-ink">{formatPhone(other) || other || '-'}</td>
+                  <td>
+                    {call.name ? (
+                      <div className="flex flex-col">
+                        <span className="truncate text-ink">{call.name}</span>
+                        <span className="mono text-[12px] text-ink-muted">{formatPhone(other) || other}</span>
+                      </div>
+                    ) : (
+                      <span className="mono text-ink">{formatPhone(other) || other || '-'}</span>
+                    )}
+                  </td>
                   <td className="mono text-ink-muted">{formatPhone(ours) || ours || '-'}</td>
                   <td>{dispositionLabel(call.disposition)}</td>
                   <td className="num mono">{formatDuration(call.billSec)}</td>

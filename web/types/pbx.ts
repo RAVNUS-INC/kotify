@@ -37,6 +37,8 @@ export type CallRecord = {
   disposition: string;
   /** 녹음이 있으면 재생용 불투명 토큰(30분 유효), 없으면 null */
   recordingToken: string | null;
+  /** 고객 번호의 이름 — 하이웍스 CID 주소록, 없으면 kotify 주소록. 모르면 null */
+  name?: string | null;
 };
 
 export type CallListMeta = {

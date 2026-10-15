@@ -51,6 +51,14 @@ describe('CallsTable', () => {
   });
 });
 
+describe('CallsTable 이름', () => {
+  it('주소록 이름이 있으면 이름 아래에 번호를 보인다', () => {
+    render(<CallsTable calls={[call({ name: '가상 고객 (가상회사)' })]} />);
+    expect(screen.getByText('가상 고객 (가상회사)')).toBeInTheDocument();
+    expect(screen.getByText('010-0000-0001')).toBeInTheDocument();
+  });
+});
+
 describe('RecentCalls', () => {
   it('PBX 를 쓸 수 없으면 섹션을 숨긴다', () => {
     const { container } = render(<RecentCalls phone="01000000001" result={{ status: 'unavailable' }} />);
