@@ -6,6 +6,8 @@
  *   /settings → app/routes/settings.py   require_role("admin")
  *   /audit    → app/routes/audit_api.py  require_role("admin")
  *   /send     → POST /campaigns          require_sender (sender/admin/owner)
+ *   /fax      → app/routes/pbx.py        require_sender
+ *   /calls    → app/routes/pbx.py        require_sender (번호 없는 조회만 admin, 페이지에서 분기)
  *
  * Edge runtime(middleware)에서도 import 되므로 순수 TS 만 둔다.
  */
@@ -20,6 +22,8 @@ const ROUTE_ROLES: ReadonlyArray<{
   { prefix: '/settings', roles: ADMIN_ROLES },
   { prefix: '/audit', roles: ADMIN_ROLES },
   { prefix: '/send', roles: SEND_ROLES },
+  { prefix: '/fax', roles: SEND_ROLES },
+  { prefix: '/calls', roles: SEND_ROLES },
 ];
 
 function withinPrefix(pathname: string, prefix: string): boolean {

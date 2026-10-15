@@ -1,9 +1,11 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ChatFilters, ChatLiveRefresh, ThreadList } from '@/components/chat';
+import { ChatFilters, ChatLiveRefresh, ThreadList, ThreadRecipientCard } from '@/components/chat';
 import { PageHeader } from '@/components/shell';
+import { RecentCalls } from '@/components/pbx';
 import { fetchThread, fetchThreadPage } from '@/lib/chat';
+import { fetchRecentCalls } from '@/lib/pbx';
 import type { ChatThreadDetail } from '@/types/chat';
 import ThreadDetailPage from './[id]/page';
 import ChatPage from './page';
@@ -12,6 +14,10 @@ vi.mock('@/lib/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/chat')>();
   return { ...actual, fetchThreadPage: vi.fn(), fetchThread: vi.fn() };
 });
+
+vi.mock('@/lib/pbx', () => ({
+  fetchRecentCalls: vi.fn(async () => ({ status: 'unavailable' })),
+}));
 
 const TID = '0212345678:01011112222';
 
@@ -97,6 +103,17 @@ describe('대화방 페이지 실시간 갱신 연결', () => {
     expect(findElement(tree, ChatLiveRefresh)?.props).toEqual({
       threadId: TID,
       deliveryRefreshIds: ['m-out-2'],
+    });
+  });
+
+  it('/chat/[id] 는 고객 번호의 최근 통화를 오른쪽 카드에 넘긴다', async () => {
+    vi.mocked(fetchRecentCalls).mockResolvedValueOnce({ status: 'ok', calls: [] });
+    const tree = await ThreadDetailPage({ params: { id: encodeURIComponent(TID) } });
+    expect(fetchRecentCalls).toHaveBeenCalledWith('01011112222');
+    const card = findElement(tree, ThreadRecipientCard);
+    expect(findElement(card?.props.extra, RecentCalls)?.props).toEqual({
+      phone: '01011112222',
+      result: { status: 'ok', calls: [] },
     });
   });
 });

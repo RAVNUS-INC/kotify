@@ -8,6 +8,8 @@ describe('requiredRoles', () => {
     ['/settings/org', ['admin']],
     ['/audit', ['admin']],
     ['/send/new', ['sender', 'admin', 'owner']],
+    ['/fax', ['sender', 'admin', 'owner']],
+    ['/calls', ['sender', 'admin', 'owner']],
   ])('%s 는 역할 제한이 있다', (path, roles) => {
     expect(requiredRoles(path)).toEqual(roles);
   });

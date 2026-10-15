@@ -10,6 +10,7 @@ import {
   type ProviderSettings,
 } from '@/lib/settings';
 import { testHiworksConnection } from '@/lib/hiworks-client';
+import { testPbxConnection } from '@/lib/pbx-client';
 import { Button, Check, Field, Icon, Input } from '@/components/ui';
 
 type MsghubEnv = 'production' | 'qa';
@@ -52,6 +53,14 @@ export function ProviderSettingsForm({
   const [hiworksPort, setHiworksPort] = useState(initial.public.hiworksMysqlPort || '3306');
   const [hiworksDb, setHiworksDb] = useState(initial.public.hiworksMysqlDb || 'asterisk');
   const [hiworksUser, setHiworksUser] = useState(initial.public.hiworksMysqlUser);
+  // 사내 PBX(VitalPBX) — 앱 키 제외. 기본값은 사내 직결 주소.
+  const [pbxApiBaseUrl, setPbxApiBaseUrl] = useState(
+    initial.public.pbxApiBaseUrl || 'https://10.0.5.10:4430',
+  );
+  const [pbxTenant, setPbxTenant] = useState(initial.public.pbxTenant);
+  const [pbxTlsVerify, setPbxTlsVerify] = useState(initial.public.pbxTlsVerify === 'true');
+  const [pbxFaxDeviceId, setPbxFaxDeviceId] = useState(initial.public.pbxFaxDeviceId);
+  const [pbxFaxFetchBaseUrl, setPbxFaxFetchBaseUrl] = useState(initial.public.pbxFaxFetchBaseUrl);
 
   // 시크릿 state — 항상 빈 문자열 시작.
   const [keycloakClientSecret, setKeycloakClientSecret] = useState('');
@@ -60,11 +69,13 @@ export function ProviderSettingsForm({
   const [sessionSecret, setSessionSecret] = useState('');
   const [msghubWebhookToken, setMsghubWebhookToken] = useState('');
   const [hiworksPassword, setHiworksPassword] = useState('');
+  const [pbxAppKey, setPbxAppKey] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingN8n, setTestingN8n] = useState(false);
   const [testingHiworks, setTestingHiworks] = useState(false);
+  const [testingPbx, setTestingPbx] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const onSubmit = async (e: FormEvent) => {
@@ -92,6 +103,13 @@ export function ProviderSettingsForm({
       if (hiworksDb.trim()) payload.hiworksMysqlDb = hiworksDb.trim();
       if (hiworksUser.trim()) payload.hiworksMysqlUser = hiworksUser.trim();
       if (hiworksPassword) payload.hiworksMysqlPassword = hiworksPassword;
+      // 사내 PBX — 값 있을 때만 전송. TLS 검증 여부는 끄기도 가능하도록 항상 명시.
+      if (pbxApiBaseUrl.trim()) payload.pbxApiBaseUrl = pbxApiBaseUrl.trim();
+      if (pbxTenant.trim()) payload.pbxTenant = pbxTenant.trim();
+      payload.pbxTlsVerify = pbxTlsVerify ? 'true' : 'false';
+      if (pbxFaxDeviceId.trim()) payload.pbxFaxDeviceId = pbxFaxDeviceId.trim();
+      if (pbxFaxFetchBaseUrl.trim()) payload.pbxFaxFetchBaseUrl = pbxFaxFetchBaseUrl.trim();
+      if (pbxAppKey) payload.pbxAppKey = pbxAppKey;
     } else {
       if (keycloakIssuer.trim()) payload.keycloakIssuer = keycloakIssuer.trim();
       if (keycloakClientId.trim()) payload.keycloakClientId = keycloakClientId.trim();
@@ -109,6 +127,7 @@ export function ProviderSettingsForm({
       setSessionSecret('');
       setMsghubWebhookToken('');
       setHiworksPassword('');
+      setPbxAppKey('');
       setMsg({ kind: 'ok', text: '저장됨' });
       router.refresh();
     } catch (err) {
@@ -171,6 +190,23 @@ export function ProviderSettingsForm({
       });
     } finally {
       setTestingHiworks(false);
+    }
+  };
+
+  const onTestPbx = async () => {
+    if (testingPbx) return;
+    setTestingPbx(true);
+    setMsg(null);
+    try {
+      const r = await testPbxConnection();
+      setMsg({ kind: 'ok', text: `✓ ${r.message}` });
+    } catch (err) {
+      setMsg({
+        kind: 'err',
+        text: err instanceof Error ? err.message : 'PBX 연결 실패',
+      });
+    } finally {
+      setTestingPbx(false);
     }
   };
 
@@ -410,6 +446,81 @@ export function ProviderSettingsForm({
         </section>
       ) : null}
 
+      {section === 'messaging' ? (
+        <section
+          aria-label="전화 교환기 설정"
+          className="rounded-lg border border-line bg-surface p-5"
+        >
+          <header className="mb-4">
+            <h2 className="text-base font-semibold text-ink">
+              전화 교환기 (PBX)
+            </h2>
+            <p className="mt-0.5 text-[12.5px] text-ink-muted">
+              사내 VitalPBX API 로 통화 기록·녹음을 조회하고 팩스를 보냅니다.
+              공인 도메인이 아니라 사내 주소로 직접 연결하세요.
+            </p>
+          </header>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="API 주소">
+              <Input
+                value={pbxApiBaseUrl}
+                onChange={(e) => setPbxApiBaseUrl(e.target.value)}
+                placeholder="https://10.0.5.10:4430"
+                disabled={submitting}
+              />
+            </Field>
+            <Field label="테넌트">
+              <Input
+                value={pbxTenant}
+                onChange={(e) => setPbxTenant(e.target.value)}
+                placeholder="테넌트 헤더 값"
+                disabled={submitting}
+              />
+            </Field>
+            <Field label="앱 키" hint={secretHint(initial.secrets.pbxAppKey)}>
+              <Input
+                type="password"
+                value={pbxAppKey}
+                onChange={(e) => setPbxAppKey(e.target.value)}
+                placeholder={
+                  initial.secrets.pbxAppKey.configured ? '변경 시에만 입력' : '미설정'
+                }
+                autoComplete="new-password"
+                disabled={submitting}
+              />
+            </Field>
+            <Field label="팩스 장치 ID">
+              <Input
+                value={pbxFaxDeviceId}
+                onChange={(e) => setPbxFaxDeviceId(e.target.value)}
+                placeholder="2"
+                disabled={submitting}
+              />
+            </Field>
+            <Field
+              label="팩스 PDF 내려받기 주소"
+              hint="PBX 가 팩스 PDF 를 받아 갈 kotify 사내 주소 (예: http://10.0.5.204:3000)"
+            >
+              <Input
+                value={pbxFaxFetchBaseUrl}
+                onChange={(e) => setPbxFaxFetchBaseUrl(e.target.value)}
+                placeholder="http://10.0.5.204:3000"
+                disabled={submitting}
+              />
+            </Field>
+            <div className="flex items-end">
+              <Check
+                checked={pbxTlsVerify}
+                onChange={(e) => setPbxTlsVerify(e.target.checked)}
+                disabled={submitting}
+                label="TLS 인증서 검증 (자체 서명 인증서면 끔)"
+              />
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {section === 'security' ? (
         <>
           <section
@@ -552,6 +663,16 @@ export function ProviderSettingsForm({
                 icon={<Icon name="database" size={12} />}
               >
                 {testingHiworks ? '테스트 중…' : '연결 테스트'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                onClick={onTestPbx}
+                disabled={submitting || testingPbx}
+                icon={<Icon name="phone" size={12} />}
+              >
+                {testingPbx ? 'PBX 테스트 중…' : 'PBX 연결 테스트'}
               </Button>
             </>
           ) : null}

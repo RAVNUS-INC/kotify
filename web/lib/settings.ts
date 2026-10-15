@@ -23,6 +23,12 @@ export type ProviderPublicFields = {
   hiworksMysqlPort: string;
   hiworksMysqlDb: string;
   hiworksMysqlUser: string;
+  /** 사내 PBX(VitalPBX) 접속정보 — 앱 키 제외. tlsVerify 는 "true"/"false". */
+  pbxApiBaseUrl: string;
+  pbxTenant: string;
+  pbxTlsVerify: string;
+  pbxFaxDeviceId: string;
+  pbxFaxFetchBaseUrl: string;
 };
 
 export type ProviderSecretInfo = {
@@ -39,6 +45,7 @@ export type ProviderSettings = {
     sessionSecret: ProviderSecretInfo;
     msghubWebhookToken: ProviderSecretInfo;
     hiworksMysqlPassword: ProviderSecretInfo;
+    pbxAppKey: ProviderSecretInfo;
   };
 };
 
@@ -50,6 +57,7 @@ export type ProviderPatchInput = Partial<
     sessionSecret: string;
     msghubWebhookToken: string;
     hiworksMysqlPassword: string;
+    pbxAppKey: string;
   }
 >;
 

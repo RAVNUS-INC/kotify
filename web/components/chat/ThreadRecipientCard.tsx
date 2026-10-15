@@ -1,9 +1,12 @@
+import type { ReactNode } from 'react';
 import type { ChatThreadDetail } from '@/types/chat';
 import { Badge, Button, Icon } from '@/components/ui';
 import { formatPhone, threadDisplayName } from '@/lib/phone';
 
 export type ThreadRecipientCardProps = {
   thread: ChatThreadDetail;
+  /** 캠페인 아래에 붙는 추가 정보(예: 최근 통화). 서버 페이지가 채운다. */
+  extra?: ReactNode;
 };
 
 const CHANNEL_BADGE: Record<
@@ -17,7 +20,7 @@ const CHANNEL_BADGE: Record<
   kakao: { label: '카카오', kind: 'neutral' },
 };
 
-export function ThreadRecipientCard({ thread }: ThreadRecipientCardProps) {
+export function ThreadRecipientCard({ thread, extra }: ThreadRecipientCardProps) {
   const channel = CHANNEL_BADGE[thread.channel];
 
   return (
@@ -65,6 +68,8 @@ export function ThreadRecipientCard({ thread }: ThreadRecipientCardProps) {
           </div>
         </div>
       )}
+
+      {extra}
 
       <div>
         <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-dim">

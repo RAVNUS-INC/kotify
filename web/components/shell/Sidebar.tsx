@@ -39,6 +39,13 @@ const GROUPS: ReadonlyArray<NavGroup> = [
     ],
   },
   {
+    label: 'Phone',
+    items: [
+      { href: '/calls', label: '통화 기록', icon: 'phone' },
+      { href: '/fax', label: '팩스', icon: 'file' },
+    ],
+  },
+  {
     label: 'People',
     items: [
       { href: '/contacts', label: '주소록', icon: 'users' },

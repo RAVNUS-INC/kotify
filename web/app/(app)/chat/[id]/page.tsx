@@ -6,8 +6,10 @@ import {
   ThreadRecipientCard,
   ThreadView,
 } from '@/components/chat';
-import { Button, Icon } from '@/components/ui';
+import { RecentCalls } from '@/components/pbx';
+import { Icon } from '@/components/ui';
 import { fetchThread, getDeliveryRefreshIds } from '@/lib/chat';
+import { fetchRecentCalls } from '@/lib/pbx';
 import { ApiError } from '@/lib/api';
 import { formatPhone } from '@/lib/phone';
 
@@ -26,6 +28,8 @@ export default async function ThreadDetailPage({ params }: PageProps) {
     }
     throw err;
   }
+  // 최근 통화 — 권한 없음(viewer 403)·PBX 미설정·장애는 섹션만 숨긴다.
+  const recentCalls = await fetchRecentCalls(thread.phone);
 
   return (
     <div className="k-page">
@@ -53,7 +57,10 @@ export default async function ThreadDetailPage({ params }: PageProps) {
         style={{ gridTemplateColumns: '1fr 320px' }}
       >
         <ThreadView thread={thread} />
-        <ThreadRecipientCard thread={thread} />
+        <ThreadRecipientCard
+          thread={thread}
+          extra={<RecentCalls phone={thread.phone} result={recentCalls} />}
+        />
       </div>
     </div>
   );

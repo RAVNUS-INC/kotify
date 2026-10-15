@@ -1,0 +1,49 @@
+/** 사내 PBX 연동 — 팩스 작업, 통화 기록. 백엔드 app/routes/pbx.py 응답과 같은 모양. */
+
+export type FaxStatus = 'QUEUED' | 'SUBMITTED' | 'SENT' | 'FAILED' | 'UNKNOWN';
+
+export type FaxResolution = 'standard' | 'medium' | 'high';
+
+export type FaxJob = {
+  id: number;
+  /** 숫자만 */
+  recipient: string;
+  filename: string;
+  sizeBytes: number;
+  resolution: FaxResolution;
+  status: FaxStatus;
+  error: string | null;
+  /** UTC ISO */
+  createdAt: string;
+  submittedAt: string | null;
+  completedAt: string | null;
+  createdBy: string | null;
+};
+
+export type FaxListMeta = { limit: number; offset: number; hasMore: boolean };
+
+export type CallDirection = 'in' | 'out' | 'internal' | 'transit' | 'unknown';
+
+export type CallRecord = {
+  id: number;
+  /** KST ISO (+09:00). 해석 못 하면 빈 문자열 */
+  at: string;
+  direction: CallDirection;
+  from: string;
+  to: string;
+  durationSec: number;
+  billSec: number;
+  /** ANSWERED | NO ANSWER | BUSY | FAILED | Answered Elsewhere … (PBX 원문) */
+  disposition: string;
+  /** 녹음이 있으면 재생용 불투명 토큰(30분 유효), 없으면 null */
+  recordingToken: string | null;
+};
+
+export type CallListMeta = {
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  /** 실제 조회 기간 (YYYY-MM-DD, KST) */
+  from: string;
+  to: string;
+};
