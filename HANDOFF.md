@@ -1,6 +1,6 @@
 # Handoff — 현재 상황 요약
 
-## 2026-10-16 — UI 리뉴얼 1단계: 토큰·`components/ui` 를 디자인 시스템 v2 로 교체 (브랜치 `jj/ui-renewal-b5ebb8`, 미커밋)
+## 2026-10-16 — UI 리뉴얼 1단계: 토큰·`components/ui` 를 디자인 시스템 v2 로 교체 (브랜치 `jj/ui-renewal-b5ebb8` `4077691`, 원격 푸시·main 미머지)
 
 - 목표: 화면 전체 리뉴얼. 사용자가 Claude Design 시안 중 **v2** 를 확정했다(v3 "어두운 사이드바" 안은 기각). 기준 자료는 디자인 시스템 아티팩트 "Kotify"(v2 토큰·사용 규칙·컴포넌트 9종)와 시안 캔버스 "Kotify 리뉴얼 시안"(홈·대화방·새 발송) — 둘 다 사용자 claude.ai 계정의 비공개 아티팩트다.
 - 변경(1단계 = 토큰과 공용 컴포넌트):
@@ -10,7 +10,7 @@
   - `web/tailwind.config.ts`: `brand`·`brand.soft`·`danger`·`success`·`warning`·`info` 를 `rgb(var(--x-rgb) / <alpha-value>)` 로 바꿔 그동안 CSS 가 생성되지 않던 투명도 클래스(`bg-danger/5`, `border-danger/30` 등 12종)가 이제 생성된다 — 대시보드 안읽은 행 연보라 배경 등 원래 의도한 색이 보이기 시작한다. `text-xs` 를 11px → 12px(최소 글자). `rounded-xl`·`shadow-pop`·`surface.hover`·`ink.disabled`·`brand.pressed` 추가.
   - `components/ui`: Button(높이 30/36/44px 고정, 비활성은 회색, `danger` = 빨간 글자 보조 버튼, 확인 다이얼로그용 `danger-solid` 추가, 자체 포커스 그림자 제거), Badge·Pill(고정폭 제거, 12px), Card(그림자·제목 15px·eyebrow 한글 라벨), EmptyState·Kbd·Check·Radio·Field·LinkSegmented·Drawer·ConfirmDialog(오버레이 색·`shadow-pop`·제목 크기).
   - `components/shell/Sidebar.tsx`: 그룹 이름을 한국어로(발송·전화·연락처·분석·관리). 대문자 변환을 없애자 영어 원문이 드러나서다.
-- 검증(로컬): 웹 typecheck·lint·Vitest 22파일 210개, `next build` 성공, 빌드 CSS 에 투명도 클래스가 생성됨을 확인. 가상 데이터 스크래치 DB 로 API·web 을 띄워 10개 화면 전후 캡처 비교(세그먼트 여백 복구, 비활성 버튼 회색, 사이드바 한글 라벨). 헤드리스 Chrome 실측: 일반 모드 버튼 outline 2px rgb(59,0,139), 입력칸 outline 없음 + 테두리 brand + 3px brand-soft 링, 강제 색상 모드는 둘 다 Highlight 2px outline. 커밋·푸시·배포는 하지 않았다.
+- 검증(로컬): 웹 typecheck·lint·Vitest 22파일 210개, `next build` 성공, 빌드 CSS 에 투명도 클래스가 생성됨을 확인. 가상 데이터 스크래치 DB 로 API·web 을 띄워 10개 화면 전후 캡처 비교(세그먼트 여백 복구, 비활성 버튼 회색, 사이드바 한글 라벨). 헤드리스 Chrome 실측: 일반 모드 버튼 outline 2px rgb(59,0,139), 입력칸 outline 없음 + 테두리 brand + 3px brand-soft 링, 강제 색상 모드는 둘 다 Highlight 2px outline. `4077691` 로 커밋해 원격 브랜치에 푸시했다(푸시 훅 pytest·ruff·typecheck·lint·vitest 통과). main 머지·운영 배포는 하지 않았다.
 - 다음 단계(2단계 이후): ① 셸 — 본문 배경 `--bg-subtle`, 상단 바·사이드바 v2 비율. ② 화면별로 남은 임의 px 글자(`text-[10.5px]` 등 약 150곳)·`font-mono` 한글 라벨·ISO 날짜(발송 이력 예약 행 `2026-10-16T20:22:02`)·대화방 경로의 인코딩된 id·"Phase 7에서 연결됩니다" 같은 개발 문구 정리. ③ 시안 기준으로 홈·대화방·새 발송 레이아웃 재구성.
 
 ## 2026-10-16 — 사내 PBX 연동(팩스·통화 기록·녹음 재생) 운영 배포(`bc66590`)·실제 팩스 전송 성공
