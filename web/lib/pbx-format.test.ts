@@ -49,7 +49,7 @@ describe('dispositionLabel', () => {
     expect(dispositionLabel('ANSWERED')).toBe('통화');
     expect(dispositionLabel('Answered Elsewhere')).toBe('다른 곳에서 받음');
     expect(dispositionLabel('WEIRD')).toBe('WEIRD');
-    expect(dispositionLabel('')).toBe('-');
+    expect(dispositionLabel('')).toBe('—');
   });
 });
 

@@ -69,12 +69,12 @@ export default async function CallsPage({ searchParams }: PageProps) {
           {query.cursor || res.meta.nextCursor ? (
             <nav aria-label="페이지" className="mt-3 flex justify-end gap-3">
               {query.cursor ? (
-                <Link href={pageHref(query)} className="text-sm text-ink-muted hover:text-ink">
+                <Link href={pageHref(query)} className="k-link text-md">
                   ← 처음으로
                 </Link>
               ) : null}
               {res.meta.nextCursor ? (
-                <Link href={pageHref(query, res.meta.nextCursor)} className="text-sm text-ink-muted hover:text-ink">
+                <Link href={pageHref(query, res.meta.nextCursor)} className="k-link text-md">
                   더 이전 통화 →
                 </Link>
               ) : null}
@@ -94,29 +94,29 @@ export default async function CallsPage({ searchParams }: PageProps) {
         action="/calls"
         method="get"
         aria-label="통화 기록 조건"
-        className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-line bg-surface p-4"
+        className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-line bg-surface p-5 shadow-sm"
       >
-        <label className="flex flex-col gap-1 text-sm text-ink-muted">
+        <label className="flex flex-col gap-1.5 text-md font-semibold text-ink">
           고객 번호
           <input
             name="phone"
             defaultValue={query.phone ? formatPhone(query.phone) : ''}
             placeholder="010-0000-0000"
             inputMode="tel"
-            className="k-input w-[180px]"
+            className="k-input h-[38px] w-[180px] py-0 font-normal"
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-ink-muted">
+        <label className="flex flex-col gap-1.5 text-md font-semibold text-ink">
           시작일
-          <input type="date" name="from" defaultValue={query.from ?? ''} className="k-input" />
+          <input type="date" name="from" defaultValue={query.from ?? ''} className="k-input h-[38px] py-0 font-normal" />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-ink-muted">
+        <label className="flex flex-col gap-1.5 text-md font-semibold text-ink">
           종료일
-          <input type="date" name="to" defaultValue={query.to ?? ''} className="k-input" />
+          <input type="date" name="to" defaultValue={query.to ?? ''} className="k-input h-[38px] py-0 font-normal" />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-ink-muted">
+        <label className="flex flex-col gap-1.5 text-md font-semibold text-ink">
           구분
-          <select name="type" defaultValue={query.type ?? ''} className="k-input">
+          <select name="type" defaultValue={query.type ?? ''} className="k-input h-[38px] w-[120px] py-0 font-normal">
             <option value="">전체</option>
             <option value="in">수신</option>
             <option value="out">발신</option>
@@ -124,10 +124,10 @@ export default async function CallsPage({ searchParams }: PageProps) {
             <option value="transit">경유</option>
           </select>
         </label>
-        <Button type="submit" variant="secondary" size="md" icon={<Icon name="search" size={12} />}>
+        <Button type="submit" variant="secondary" size="md" className="h-[38px]" icon={<Icon name="search" size={12} />}>
           조회
         </Button>
-        <p className="w-full text-sm text-ink-dim">기간을 비우면 최근 30일입니다. 녹음 재생은 감사 로그에 남습니다.</p>
+        <p className="w-full text-xs text-ink-dim">기간을 비우면 최근 30일입니다. 녹음 재생은 감사 로그에 남습니다.</p>
       </form>
       {body}
     </div>

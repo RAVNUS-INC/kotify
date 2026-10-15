@@ -1,5 +1,6 @@
 import { Badge, EmptyState } from '@/components/ui';
 import { formatPhone } from '@/lib/phone';
+import { formatDateTime } from '@/lib/datetime';
 import { FAX_STATUS_KIND, FAX_STATUS_LABEL, fmtKstDateTime } from '@/lib/pbx-format';
 import type { FaxJob } from '@/types/pbx';
 import { FaxResendButton } from './FaxResendButton';
@@ -29,20 +30,20 @@ export function FaxJobsTable({ jobs, showCreator = false }: FaxJobsTableProps) {
               <th>파일</th>
               <th>상태</th>
               {showCreator ? <th>보낸 사람</th> : null}
-              <th className="text-right">작업</th>
+              <th className="num">작업</th>
             </tr>
           </thead>
           <tbody>
             {jobs.map((job) => (
               <tr key={job.id}>
-                <td className="tabular-nums">{fmtKstDateTime(job.createdAt)}</td>
+                <td className="whitespace-nowrap tabular-nums">{formatDateTime(fmtKstDateTime(job.createdAt))}</td>
                 <td className="tabular-nums text-ink">{formatPhone(job.recipient)}</td>
                 <td className="max-w-[240px] truncate">
                   <a
                     href={`/api/fax/${job.id}/pdf`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-ink hover:underline"
+                    className="text-brand hover:underline"
                   >
                     {job.filename}
                   </a>
@@ -57,8 +58,8 @@ export function FaxJobsTable({ jobs, showCreator = false }: FaxJobsTableProps) {
                     ) : null}
                   </div>
                 </td>
-                {showCreator ? <td className="truncate">{job.createdBy ?? '-'}</td> : null}
-                <td className="text-right">
+                {showCreator ? <td className="truncate">{job.createdBy ?? '—'}</td> : null}
+                <td className="num">
                   {job.status === 'FAILED' || job.status === 'UNKNOWN' ? (
                     <FaxResendButton job={job} />
                   ) : null}

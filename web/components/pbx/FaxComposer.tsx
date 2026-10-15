@@ -91,7 +91,7 @@ export function FaxComposer() {
             accept="application/pdf,.pdf"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             disabled={submitting}
-            className="block w-full text-sm text-ink-muted file:mr-3 file:rounded file:border file:border-gray-4 file:bg-surface file:px-2.5 file:py-1 file:text-sm file:text-ink"
+            className="block w-full text-md text-ink-muted file:mr-3 file:h-[36px] file:cursor-pointer file:rounded file:border file:border-solid file:border-line-strong file:bg-surface file:px-[14px] file:text-md file:font-semibold file:text-ink hover:file:bg-surface-hover"
           />
         </Field>
         <Field label="해상도">

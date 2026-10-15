@@ -1,4 +1,5 @@
 import { EmptyState, Pill } from '@/components/ui';
+import { formatDateTime } from '@/lib/datetime';
 import { formatPhone } from '@/lib/phone';
 import {
   counterpart,
@@ -30,17 +31,17 @@ export function CallsTable({ calls }: { calls: ReadonlyArray<CallRecord> }) {
               <th>내선·번호</th>
               <th>결과</th>
               <th className="num">통화 시간</th>
-              <th className="text-right">녹음</th>
+              <th className="num">녹음</th>
             </tr>
           </thead>
           <tbody>
             {calls.map((call) => {
               const other = counterpart(call);
               const ours = call.direction === 'out' ? call.from : call.to;
-              const time = formatCallTime(call.at);
+              const time = formatDateTime(formatCallTime(call.at));
               return (
                 <tr key={call.id}>
-                  <td className="tabular-nums">{time || '-'}</td>
+                  <td className="whitespace-nowrap tabular-nums">{time || '—'}</td>
                   <td>
                     <Pill tone={call.direction === 'in' ? 'brand' : 'neutral'}>
                       {DIRECTION_LABEL[call.direction]}
@@ -53,17 +54,19 @@ export function CallsTable({ calls }: { calls: ReadonlyArray<CallRecord> }) {
                         <span className="tabular-nums text-sm text-ink-muted">{formatPhone(other) || other}</span>
                       </div>
                     ) : (
-                      <span className="tabular-nums text-ink">{formatPhone(other) || other || '-'}</span>
+                      <span className="tabular-nums text-ink">{formatPhone(other) || other || '—'}</span>
                     )}
                   </td>
-                  <td className="tabular-nums text-ink-muted">{formatPhone(ours) || ours || '-'}</td>
-                  <td>{dispositionLabel(call.disposition)}</td>
+                  <td className="tabular-nums text-ink-muted">{formatPhone(ours) || ours || '—'}</td>
+                  <td className={call.disposition.trim().toUpperCase() === 'ANSWERED' ? 'text-ink' : 'text-ink-muted'}>
+                    {dispositionLabel(call.disposition)}
+                  </td>
                   <td className="num tabular-nums">{formatDuration(call.billSec)}</td>
-                  <td className="text-right">
+                  <td className="num">
                     {call.recordingToken ? (
                       <RecordingPlayer token={call.recordingToken} label={`${time} 통화`} />
                     ) : (
-                      <span className="text-ink-dim">-</span>
+                      <span className="text-ink-dim">—</span>
                     )}
                   </td>
                 </tr>

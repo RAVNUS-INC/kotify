@@ -27,7 +27,7 @@ export const DIRECTION_LABEL: Record<CallDirection, string> = {
   out: '발신',
   internal: '내선',
   transit: '경유',
-  unknown: '-',
+  unknown: '—',
 };
 
 /** 고객 쪽 번호 — 수신은 건 사람, 발신은 받은 사람. */
@@ -54,14 +54,15 @@ export function formatCallTime(iso: string): string {
 const DISPOSITION_LABEL: Record<string, string> = {
   ANSWERED: '통화',
   'NO ANSWER': '부재',
-  BUSY: '통화 중',
+  // 상대가 통화 중이라 연결되지 않음 — '통화'(연결됨)와 헷갈리지 않게
+  BUSY: '상대 통화 중',
   FAILED: '실패',
   CONGESTION: '회선 혼잡',
   'ANSWERED ELSEWHERE': '다른 곳에서 받음',
 };
 
 export function dispositionLabel(raw: string): string {
-  return DISPOSITION_LABEL[raw.trim().toUpperCase()] ?? (raw || '-');
+  return DISPOSITION_LABEL[raw.trim().toUpperCase()] ?? (raw || '—');
 }
 
 /** 받는 팩스 번호 — 숫자 9~11자리, 0 으로 시작(국내 번호). 서버도 같은 규칙으로 검사한다. */

@@ -1,5 +1,6 @@
 import { Badge, EmptyState } from '@/components/ui';
 import { formatPhone } from '@/lib/phone';
+import { formatDateTime } from '@/lib/datetime';
 import { fmtKstDateTime, inboxStatusLabel } from '@/lib/pbx-format';
 import type { FaxInboxItem } from '@/types/pbx';
 import { FaxRefetchButton } from './FaxRefetchButton';
@@ -38,7 +39,7 @@ export function FaxInboxTable({ items, canRefetch = false }: FaxInboxTableProps)
               <th>보낸 곳</th>
               <th>상태</th>
               <th>열람</th>
-              <th className="text-right">보기</th>
+              <th className="num">보기</th>
             </tr>
           </thead>
           <tbody>
@@ -48,7 +49,7 @@ export function FaxInboxTable({ items, canRefetch = false }: FaxInboxTableProps)
               const number = formatPhone(item.senderNumber) || item.senderNumber || '번호 없음';
               return (
                 <tr key={item.id} className={unread ? 'font-medium' : undefined}>
-                  <td className="tabular-nums">{fmtKstDateTime(item.receivedAt)}</td>
+                  <td className="whitespace-nowrap tabular-nums">{formatDateTime(fmtKstDateTime(item.receivedAt))}</td>
                   <td>
                     {item.senderName ? (
                       <div className="flex flex-col">
@@ -71,25 +72,25 @@ export function FaxInboxTable({ items, canRefetch = false }: FaxInboxTableProps)
                     {unread ? (
                       <Badge kind="brand">새 팩스</Badge>
                     ) : item.firstViewedAt ? (
-                      `${fmtKstDateTime(item.firstViewedAt)} · ${item.firstViewedBy ?? '-'}`
+                      `${formatDateTime(fmtKstDateTime(item.firstViewedAt))} · ${item.firstViewedBy ?? '—'}`
                     ) : (
-                      '-'
+                      '—'
                     )}
                   </td>
-                  <td className="text-right">
+                  <td className="num">
                     {item.fetchStatus === 'FETCHED' ? (
                       <a
                         href={`/api/fax/inbox/${item.id}/pdf`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm text-ink hover:underline"
+                        className="k-btn k-btn-sm no-underline"
                       >
                         PDF 보기 {sizeLabel(item.sizeBytes)}
                       </a>
                     ) : canRefetch && item.fetchStatus === 'FETCH_FAILED' ? (
                       <FaxRefetchButton id={item.id} />
                     ) : (
-                      <span className="text-ink-dim">-</span>
+                      <span className="text-ink-dim">—</span>
                     )}
                   </td>
                 </tr>
