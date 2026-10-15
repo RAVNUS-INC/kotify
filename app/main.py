@@ -102,13 +102,16 @@ _RECONCILE_INTERVAL_SECONDS = 60
 
 
 async def _track_fax(db) -> None:
-    """PBX 가 설정돼 있으면 열린 팩스 작업의 결과를 PBX 로그에서 찾는다."""
+    """PBX 가 설정돼 있으면 팩스 로그를 읽어 발송 결과·받은 팩스를 반영하고 PDF 를 가져온다."""
     from app.pbx.client import load_pbx_config
+    from app.pbx.sftp import load_sftp_config
     from app.services.fax import track_fax_jobs
+    from app.services.fax_inbox import fetch_pending
 
     config = load_pbx_config(db)
     if config is not None:
         await track_fax_jobs(db, config)
+        await fetch_pending(db, load_sftp_config(db))
 
 
 async def _reconcile_loop() -> None:

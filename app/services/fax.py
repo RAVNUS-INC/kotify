@@ -299,7 +299,14 @@ def _match_job(entry: dict, jobs: list[FaxJob]) -> FaxJob | None:
 
 
 async def track_fax_jobs(db: Session, config: PbxConfig) -> int:
-    """열린 작업의 PBX 로그를 찾아 상태를 갱신한다. 갱신한 작업 수를 반환."""
+    """PBX 팩스 로그를 커서부터 앞으로 읽어 발송 작업 결과와 받은 팩스를 반영한다.
+
+    발신 로그는 열린 발송 작업과 맞추고, 수신 로그는 받은 팩스(``fax_inbox``)로
+    기록한다. 받은 팩스를 놓치지 않도록 열린 작업이 없어도 매 주기 돈다. 갱신한
+    발송 작업 수를 반환한다.
+    """
+    from app.services import fax_inbox
+
     now = _now()
     # 0) 발송 요청 도중 프로세스가 멈춰 QUEUED 로 남은 작업 — 접수 여부를 모른다.
     stale = list(
@@ -324,8 +331,6 @@ async def track_fax_jobs(db: Session, config: PbxConfig) -> int:
             )
         ).scalars()
     )
-    if not jobs:
-        return len(stale)
     client = PbxClient(config)
     changed = len(stale)
 
@@ -349,7 +354,7 @@ async def track_fax_jobs(db: Session, config: PbxConfig) -> int:
     # 읽기 상한은 시작할 때 한 번 정한다(첫 추적은 앞쪽 빈 ID 만큼 더 읽는다).
     budget = LOG_SCAN_BATCH + (LOG_DISCOVERY_MISSES if cursor == 0 else 0)
     reads = 0
-    while unmatched and reads < budget:
+    while reads < budget:
         reads += 1
         entry = await client.get_fax_log(next_id)
         if entry is None:
@@ -361,13 +366,21 @@ async def track_fax_jobs(db: Session, config: PbxConfig) -> int:
         misses = 0
         cursor = next_id
         max_misses = LOG_SCAN_MISSES  # 실제 로그를 찾은 뒤에는 짧은 빈칸만 건너뛴다.
-        job = _match_job(entry, unmatched)
+        if fax_inbox.is_incoming(entry):
+            fax_inbox.record_incoming(db, next_id, entry)
+            next_id += 1
+            continue
+        job = _match_job(entry, unmatched) if unmatched else None
         if job is not None:
             _apply_log(job, next_id, entry)
             unmatched.remove(job)
             changed += 1
         next_id += 1
     store.set(_CURSOR_KEY, str(cursor), is_secret=False, updated_by=None)
+    db.commit()
+
+    # 커서 이전에 이미 받은 팩스(첫 배포 전 수신)를 한 번만 훑어 기록한다.
+    await fax_inbox.backfill(db, client, upto=cursor)
 
     # 3) 기한 안에 로그를 못 찾은 접수 작업은 UNKNOWN 으로 둔다.
     for job in unmatched:

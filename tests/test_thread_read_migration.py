@@ -28,7 +28,8 @@ def _run(conn, direction):
 
 def test_migration_chain_has_single_head_after_0019():
     scripts = ScriptDirectory.from_config(_config())
-    assert scripts.get_heads() == ["0024"]
+    assert scripts.get_heads() == ["0025"]
+    assert scripts.get_revision("0025").down_revision == "0024"
     assert scripts.get_revision("0024").down_revision == "0023"
     assert scripts.get_revision("0023").down_revision == "0022"
     assert scripts.get_revision("0022").down_revision == "0021"
@@ -88,8 +89,8 @@ def test_full_migration_chain_upgrades_and_downgrades_on_temporary_database(tmp_
     command.upgrade(cfg, "head")
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.connect() as conn:
-        assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0024"
-        assert {"notification_deliveries", "fax_jobs"} <= {
+        assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0025"
+        assert {"notification_deliveries", "fax_jobs", "fax_inbox"} <= {
             row[0]
             for row in conn.exec_driver_sql(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -109,9 +110,9 @@ def test_full_migration_chain_upgrades_and_downgrades_on_temporary_database(tmp_
         }
         assert "msghub_rcs_file_id" not in attachment_columns
         assert "rcs_file_expires_at" not in attachment_columns
-        assert "fax_jobs" not in [
+        assert not {"fax_jobs", "fax_inbox"} & {
             row[0]
             for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type = 'table'")
-        ]
+        }
     command.upgrade(cfg, "head")
     engine.dispose()

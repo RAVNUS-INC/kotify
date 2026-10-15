@@ -3,7 +3,14 @@
  * 브라우저는 녹음 원본 주소를 받지 않는다. 재생은 `/api/pbx/recordings/{token}` 만 쓴다.
  */
 import { apiFetchEnvelope, ApiError } from './api';
-import type { CallListMeta, CallRecord, FaxJob, FaxListMeta } from '@/types/pbx';
+import type {
+  CallListMeta,
+  CallRecord,
+  FaxInboxItem,
+  FaxInboxMeta,
+  FaxJob,
+  FaxListMeta,
+} from '@/types/pbx';
 
 export async function fetchFaxJobs(params: {
   limit?: number;
@@ -16,6 +23,20 @@ export async function fetchFaxJobs(params: {
   return {
     data: res.data,
     meta: res.meta ?? { limit: params.limit ?? 50, offset: params.offset ?? 0, hasMore: false },
+  };
+}
+
+export async function fetchFaxInbox(params: {
+  limit?: number;
+  offset?: number;
+}): Promise<{ data: FaxInboxItem[]; meta: FaxInboxMeta }> {
+  const qs = new URLSearchParams();
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.offset) qs.set('offset', String(params.offset));
+  const res = await apiFetchEnvelope<FaxInboxItem[], FaxInboxMeta>(`/fax/inbox?${qs.toString()}`);
+  return {
+    data: res.data,
+    meta: res.meta ?? { limit: params.limit ?? 50, offset: params.offset ?? 0, hasMore: false, unread: 0 },
   };
 }
 

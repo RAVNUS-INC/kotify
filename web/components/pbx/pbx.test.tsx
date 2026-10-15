@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import type { CallRecord } from '@/types/pbx';
+import type { CallRecord, FaxInboxItem } from '@/types/pbx';
 import { CallsTable } from './CallsTable';
+import { FaxInboxTable } from './FaxInboxTable';
 import { validateFaxInput } from './FaxComposer';
 import { RecentCalls } from './RecentCalls';
 
@@ -69,5 +70,44 @@ describe('RecentCalls', () => {
     render(<RecentCalls phone="01000000001" result={{ status: 'ok', calls: [call()] }} />);
     expect(screen.getByRole('link', { name: '전체 보기' })).toHaveAttribute('href', '/calls?phone=01000000001');
     expect(screen.getByText(/수신 · 통화/)).toBeInTheDocument();
+  });
+});
+
+const inboxItem = (overrides: Partial<FaxInboxItem> = {}): FaxInboxItem => ({
+  id: 7,
+  receivedAt: '2026-10-15T16:06:00+00:00',
+  senderNumber: '0200000009',
+  senderName: null,
+  status: 'RECEIVED',
+  error: null,
+  fetchStatus: 'FETCHED',
+  sizeBytes: 25_600,
+  firstViewedAt: null,
+  firstViewedBy: null,
+  ...overrides,
+});
+
+describe('FaxInboxTable', () => {
+  it('새 팩스·PDF 보기 링크·KST 시각·이름을 보여 준다', () => {
+    render(<FaxInboxTable items={[inboxItem({ senderName: '가상 거래처' })]} />);
+    expect(screen.getByText('2026-10-16 01:06')).toBeInTheDocument();
+    expect(screen.getByText('가상 거래처')).toBeInTheDocument();
+    expect(screen.getByText('새 팩스')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /PDF 보기 25KB/ })).toHaveAttribute('href', '/api/fax/inbox/7/pdf');
+  });
+
+  it('수신 실패·가져오기 실패는 링크 없이, 다시 가져오기는 관리자만', () => {
+    const items = [
+      inboxItem({ id: 1, status: 'FAILED', fetchStatus: 'NONE', error: 'Timer T2 expired', sizeBytes: null }),
+      inboxItem({ id: 2, fetchStatus: 'FETCH_FAILED', sizeBytes: null }),
+    ];
+    const { rerender } = render(<FaxInboxTable items={items} />);
+    expect(screen.getByText('수신 실패')).toBeInTheDocument();
+    expect(screen.getByText('Timer T2 expired')).toBeInTheDocument();
+    expect(screen.getByText('PDF 못 가져옴')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.queryByRole('button', { name: /다시 가져오기/ })).toBeNull();
+    rerender(<FaxInboxTable items={items} canRefetch />);
+    expect(screen.getByRole('button', { name: /다시 가져오기/ })).toBeInTheDocument();
   });
 });

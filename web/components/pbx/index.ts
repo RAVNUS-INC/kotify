@@ -1,7 +1,9 @@
 export { CallsTable } from './CallsTable';
 export { FaxAutoRefresh } from './FaxAutoRefresh';
 export { FaxComposer, validateFaxInput } from './FaxComposer';
+export { FaxInboxTable } from './FaxInboxTable';
 export { FaxJobsTable } from './FaxJobsTable';
+export { FaxRefetchButton } from './FaxRefetchButton';
 export { FaxResendButton } from './FaxResendButton';
 export { PbxUnavailable, pbxErrorMessage } from './PbxUnavailable';
 export { RecentCalls } from './RecentCalls';

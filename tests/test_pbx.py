@@ -9,6 +9,7 @@ import json
 import logging
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx
 import pytest
@@ -587,8 +588,9 @@ async def test_track_scans_logs_forward_and_matches_by_file(db_factory, configur
         assert (sent.status, sent.pbx_log_id) == ("SENT", 2)
         assert (pending.status, pending.pbx_log_id) == ("SUBMITTED", 3)
         assert SettingsStore(db).get("pbx.fax_log_cursor") == "3"
-        # 열린 작업을 모두 찾으면 더 읽지 않는다.
-        assert route.call_count == 3
+        # 받은 팩스도 보아야 해서 작업을 다 찾아도 빈 ID 3개까지 읽고, 첫 주기에는
+        # 커서 이전(1~3)을 한 번 더 훑는다(기존 수신 가져오기).
+        assert route.call_count == 3 + fax_service.LOG_SCAN_MISSES + 3
 
         logs[3] = {"type": "Outgoing", "file": "1760000000.2.pdf", "status": "Failed",
                    "error": "The call dropped prematurely", **real}
@@ -829,3 +831,232 @@ def test_calls_attach_names_from_hiworks_then_contacts(client, configure, login_
         res = client.get("/pbx/calls")
     assert res.status_code == 200
     assert res.json()["data"][0]["name"] is None
+
+
+# ── 받은 팩스 ───────────────────────────────────────────────────────────────
+
+from app.models import FaxInbox  # noqa: E402
+from app.pbx import sftp as sftp_mod  # noqa: E402
+from app.services import fax_inbox as inbox  # noqa: E402
+
+SENDER = "0200000009"
+
+
+def _incoming(log_id_ts: int, **overrides) -> dict:
+    entry = {"type": "Incoming", "status": "Received", "error": "OK", "device_id": 2,
+             "file": f"fax-in-{log_id_ts}.67.pdf", "sender": f'"{SENDER}" <{SENDER}>',
+             "recipient": "0200000001", "unix_date": str(log_id_ts)}
+    entry.update(overrides)
+    return entry
+
+
+def _log_router(logs: dict):
+    def _log(request: httpx.Request) -> httpx.Response:
+        log_id = int(request.url.path.rsplit("/", 1)[1])
+        return _ok(logs.get(log_id, _PLACEHOLDER))
+    return _log
+
+
+@pytest.mark.parametrize(
+    ("raw", "digits"),
+    [(f'"{SENDER}" <{SENDER}>', SENDER), ("<+82200000009>", SENDER), ("0200000009", SENDER), ("", "")],
+)
+def test_sender_number(raw, digits):
+    assert inbox.sender_number(raw) == digits
+
+
+async def test_scan_records_incoming_once_and_still_matches_outgoing(db_factory, configure):
+    configure()
+    db = db_factory()
+    SettingsStore(db).set("pbx.fax_log_cursor", "10", is_secret=False, updated_by=None)
+    SettingsStore(db).set("pbx.fax_inbox_backfill_upto", "10", is_secret=False, updated_by=None)
+    db.commit()
+    job = _job(db, pbx_file="1760000000.1.pdf", submitted_at=_now_iso())
+    now = int(time.time())
+    logs = {
+        11: _incoming(now - 60),
+        12: {"type": "Outgoing", "status": "Sent", "error": "OK", "file": "1760000000.1.pdf",
+             "device_id": 2, "unix_date": str(now)},
+        13: _incoming(now, status="Failed", error="Carrier lost during fax receive",
+                      file="File Removed"),
+    }
+    config = load_pbx_config(db)
+    with respx.mock(base_url=BASE) as mock:
+        mock.get(url__regex=r"/api/v2/virtual_faxes/log/\d+").mock(side_effect=_log_router(logs))
+        await fax_service.track_fax_jobs(db, config)
+        await fax_service.track_fax_jobs(db, config)  # 두 번 돌아도 중복 없음
+    db.refresh(job)
+    assert (job.status, job.pbx_log_id) == ("SENT", 12)
+    rows = list(db.execute(select(FaxInbox).order_by(FaxInbox.pbx_log_id)).scalars())
+    assert [(r.pbx_log_id, r.status, r.fetch_status, r.sender_number) for r in rows] == [
+        (11, "RECEIVED", "PENDING", SENDER),
+        (13, "FAILED", "NONE", SENDER),
+    ]
+    assert rows[1].error == "Carrier lost during fax receive"
+    assert SettingsStore(db).get("pbx.fax_log_cursor") == "13"
+    db.close()
+
+
+async def test_backfill_reads_ids_before_cursor_once(db_factory, configure):
+    configure()
+    db = db_factory()
+    SettingsStore(db).set("pbx.fax_log_cursor", "90", is_secret=False, updated_by=None)
+    db.commit()
+    logs = {74: _incoming(1790000000), 88: {"type": "Outgoing", "status": "Sent", "device_id": 2,
+                                            "file": "1.2.pdf", "unix_date": "1790000100"}}
+    config = load_pbx_config(db)
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.get(url__regex=r"/api/v2/virtual_faxes/log/\d+").mock(side_effect=_log_router(logs))
+        await fax_service.track_fax_jobs(db, config)
+        first = route.call_count
+        await fax_service.track_fax_jobs(db, config)
+        second = route.call_count - first
+    assert first == fax_service.LOG_SCAN_MISSES + 90  # 앞으로 빈칸 3 + 1~90 한 번
+    assert second == fax_service.LOG_SCAN_MISSES  # 다시 훑지 않는다
+    assert [r.pbx_log_id for r in db.execute(select(FaxInbox)).scalars()] == [74]
+    assert SettingsStore(db).get("pbx.fax_inbox_backfill_upto") == "90"
+    db.close()
+
+
+def _sftp_settings(db, **overrides):
+    store = SettingsStore(db)
+    for key, value in {"pbx.sftp_user": "kotify-fax", **overrides}.items():
+        store.set(key, value, is_secret=False, updated_by=None)
+    db.commit()
+
+
+def test_sftp_config_defaults_and_rejects_unsafe_values(db_factory, configure):
+    configure()
+    db = db_factory()
+    assert sftp_mod.load_sftp_config(db) is None  # 계정 없음 = 기능 off
+    _sftp_settings(db)
+    cfg = sftp_mod.load_sftp_config(db)
+    assert (cfg.user, cfg.host, cfg.port, cfg.directory) == (
+        "kotify-fax", "10.0.5.10", "55530", "/var/lib/vitalpbx/fax/recvd")
+    for bad in ({"pbx.sftp_dir": "/x/../etc"}, {"pbx.sftp_dir": "/x y"}, {"pbx.sftp_user": "a;rm"},
+                {"pbx.sftp_port": "22x"}):
+        _sftp_settings(db, **{"pbx.sftp_dir": "/recvd", "pbx.sftp_port": "55530"})
+        _sftp_settings(db, **bad)
+        assert sftp_mod.load_sftp_config(db) is None, bad
+    db.close()
+
+
+class _FakeProc:
+    def __init__(self, behaviour, calls):
+        self.behaviour, self.calls, self.returncode = behaviour, calls, None
+
+    async def communicate(self, data):
+        line = data.decode()
+        self.calls[-1]["batch"] = line
+        _, src, dest = line.split()
+        content, rc = self.behaviour(src)
+        if content is not None:
+            Path(dest).write_bytes(content)
+        self.returncode = rc
+        return b"", b""
+
+    def kill(self):
+        pass
+
+    async def wait(self):
+        return self.returncode
+
+
+def _fake_sftp(monkeypatch, behaviour):
+    calls: list[dict] = []
+
+    async def _exec(*args, **kwargs):
+        calls.append({"args": list(args)})
+        return _FakeProc(behaviour, calls)
+
+    monkeypatch.setattr(sftp_mod.asyncio, "create_subprocess_exec", _exec)
+    return calls
+
+
+async def test_fetch_pending_gets_exact_file_with_pinned_host_key(db_factory, configure, monkeypatch):
+    configure()
+    db = db_factory()
+    _sftp_settings(db)
+    inbox.record_incoming(db, 93, _incoming(1792080356))
+    db.commit()
+    calls = _fake_sftp(monkeypatch, lambda src: (PDF, 0))
+    assert await inbox.fetch_pending(db, sftp_mod.load_sftp_config(db)) == 1
+    row = db.execute(select(FaxInbox)).scalar_one()
+    assert (row.fetch_status, row.pdf_blob, row.file_size_bytes) == ("FETCHED", PDF, len(PDF))
+    args = calls[0]["args"]
+    assert args[0] == "sftp"
+    assert "StrictHostKeyChecking=yes" in args and "BatchMode=yes" in args
+    assert any(a.startswith("UserKnownHostsFile=") and a.endswith("pbx_known_hosts") for a in args)
+    assert args[-1] == "kotify-fax@10.0.5.10"
+    assert calls[0]["batch"].startswith("get /var/lib/vitalpbx/fax/recvd/fax-in-1792080356.67.pdf ")
+    db.close()
+
+
+async def test_fetch_failures_retry_then_give_up(db_factory, configure, monkeypatch):
+    configure()
+    db = db_factory()
+    _sftp_settings(db)
+    inbox.record_incoming(db, 93, _incoming(1792080356))
+    inbox.record_incoming(db, 94, _incoming(1792080400))
+    db.commit()
+    _fake_sftp(monkeypatch, lambda src: (None, 1) if "1792080356" in src else (b"<html>", 0))
+    cfg = sftp_mod.load_sftp_config(db)
+    for _ in range(inbox.MAX_FETCH_ATTEMPTS + 1):
+        await inbox.fetch_pending(db, cfg)
+    rows = {r.pbx_log_id: r for r in db.execute(select(FaxInbox)).scalars()}
+    assert (rows[93].fetch_status, rows[93].fetch_attempts) == ("FETCH_FAILED", inbox.MAX_FETCH_ATTEMPTS)
+    assert (rows[94].fetch_status, rows[94].pdf_blob) == ("FETCH_FAILED", None)  # PDF 아님
+    db.close()
+
+
+async def test_fetch_rejects_unexpected_file_names(db_factory, configure):
+    configure()
+    db = db_factory()
+    _sftp_settings(db)
+    with pytest.raises(sftp_mod.SftpError) as info:
+        await sftp_mod.fetch_inbox_pdf(sftp_mod.load_sftp_config(db), "../../etc/passwd")
+    assert info.value.code == "bad_name"
+    db.close()
+
+
+def test_inbox_routes_permissions_names_view_and_audit(client, configure, login_as, db_factory, monkeypatch):
+    from app.services import hiworks
+
+    configure()
+    db = db_factory()
+    ok = inbox.record_incoming(db, 93, _incoming(1792080356))
+    ok.pdf_blob, ok.file_size_bytes, ok.fetch_status = PDF, len(PDF), "FETCHED"
+    pending = inbox.record_incoming(db, 94, _incoming(1792080400))
+    inbox.record_incoming(db, 95, _incoming(1792080500, status="Failed", error="Timer T2 expired", file="File Removed"))
+    db.commit()
+    ok_id, pending_id = ok.id, pending.id
+    db.close()
+    monkeypatch.setattr(hiworks, "lookup_names", lambda _db, phones: {SENDER: {"display": "가상 거래처"}})
+
+    login_as("sub-viewer", "viewer")
+    assert client.get("/fax/inbox").status_code == 403
+    assert client.get(f"/fax/inbox/{ok_id}/pdf").status_code == 403
+
+    login_as("sub-sender", "sender")
+    body = client.get("/fax/inbox").json()
+    assert [r["status"] for r in body["data"]] == ["FAILED", "RECEIVED", "RECEIVED"]  # 최신순
+    assert body["data"][0]["senderName"] == "가상 거래처"
+    assert body["meta"]["unread"] == 2
+    assert "fax-in-" not in json.dumps(body)  # PBX 파일 이름은 내려주지 않는다
+    assert client.get(f"/fax/inbox/{pending_id}/pdf").status_code == 409
+    res = client.get(f"/fax/inbox/{ok_id}/pdf")
+    assert res.status_code == 200 and res.content == PDF
+    assert res.headers["cache-control"] == "private, no-store"
+    body = client.get("/fax/inbox").json()
+    assert body["meta"]["unread"] == 1
+    viewed = next(r for r in body["data"] if r["id"] == ok_id)
+    assert viewed["firstViewedBy"] == "sub-sender" and viewed["firstViewedAt"]
+
+    db = db_factory()
+    assert [a.target for a in db.execute(select(AuditLog).where(AuditLog.action == "FAX_INBOX_VIEW")).scalars()] == [f"fax_inbox:{ok_id}"]
+    db.close()
+
+    assert client.post(f"/fax/inbox/{pending_id}/refetch").status_code == 403
+    login_as("sub-admin", "admin")
+    res = client.post(f"/fax/inbox/{pending_id}/refetch")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "sftp_not_configured"

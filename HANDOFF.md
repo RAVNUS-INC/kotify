@@ -30,6 +30,19 @@
 - 검증(로컬): 웹 typecheck·lint·Vitest 22파일 210개, `next build` 성공, 빌드 CSS 에 투명도 클래스가 생성됨을 확인. 가상 데이터 스크래치 DB 로 API·web 을 띄워 10개 화면 전후 캡처 비교(세그먼트 여백 복구, 비활성 버튼 회색, 사이드바 한글 라벨). 헤드리스 Chrome 실측: 일반 모드 버튼 outline 2px rgb(59,0,139), 입력칸 outline 없음 + 테두리 brand + 3px brand-soft 링, 강제 색상 모드는 둘 다 Highlight 2px outline. `4077691` 로 커밋해 원격 브랜치에 푸시했다(푸시 훅 pytest·ruff·typecheck·lint·vitest 통과). main 머지·운영 배포는 하지 않았다.
 - 다음 단계(2단계 이후): ① 셸 — 본문 배경 `--bg-subtle`, 상단 바·사이드바 v2 비율. ② 화면별로 남은 임의 px 글자(`text-[10.5px]` 등 약 150곳)·`font-mono` 한글 라벨·ISO 날짜(발송 이력 예약 행 `2026-10-16T20:22:02`)·대화방 경로의 인코딩된 id·"Phase 7에서 연결됩니다" 같은 개발 문구 정리. ③ 시안 기준으로 홈·대화방·새 발송 레이아웃 재구성.
 
+## 2026-10-16 — 받은 팩스 보기 운영 배포(`fbd89aa`)·기존 수신 PDF 가져오기 확인
+
+- 목표: PBX 세션 요청(사용자 지시) — 대표 팩스 02-3663-9887 로 받은 팩스를 kotify 에서 보기. 설계 `claudedocs/pbx-fax-inbox-design.md`, 확정 동작 SPEC §8.6 "받은 팩스". 사용자 결정: 열람 sender 이상, 실패 수신 표시, PDF 영구 보관, PBX 에 남은 기존 수신도 가져오기.
+- 상태: `0849ead` 백엔드·`fbd89aa` 화면·문서를 `origin/main` `e917274` 위에 fast-forward 푸시(푸시 훅 통과)하고 운영 배포했다.
+- 운영 CT 준비(2026-10-16): kotify 사용자로 `/var/lib/kotify/pbx_sftp_ed25519`(600)·`.pub` 생성, PBX SSH `10.0.5.10:55530` ED25519 호스트 키(`SHA256:pmLDDSMLd4MEeiW282hEnu9vv8xjqkFjpuGUKfwhKck`)를 `/var/lib/kotify/pbx_known_hosts` 에 고정. 공개 키와 계정 요구 사항(키 인증만·internal-sftp·recvd 읽기 전용·출발지 10.0.5.204)을 PBX 세션에 전달했다(계정 생성은 PBX 세션이 사용자 확인 후).
+- 검증(로컬): 백엔드 830개(+11: 수신 기록·중복 없음·발신 매칭 공존·backfill 한 번·SFTP 명령(호스트 키 고정·파일 하나 get)·실패 재시도·이름 검사·설정 안전성·권한·첫 열람·감사), Ruff, 웹 typecheck·lint·Vitest 212개, 프로덕션 빌드 20/20. 실제 SFTP 접속·실제 수신은 하지 않았다.
+- PBX SFTP 계정(PBX 세션이 사용자 승인 후 생성): `kotify-fax`, 키 인증만, `from="10.0.5.204",restrict`, `internal-sftp -R`, chroot `/srv/kotify-fax`(그 안 `recvd` 는 PBX recvd 의 읽기 전용 바인드 마운트). kotify CT 에서 시험: 키 지문 일치, 호스트 키 고정 접속, `get /recvd/fax-in-…93….pdf` 24,911바이트·`%PDF-`(kotify 사용자와 서비스 샌드박스 `ProtectHome`·`PrivateTmp`·`ProtectSystem` 안 모두), `put` 은 Permission denied.
+- 운영 설정(서비스 사용자 SettingsStore, `SETTINGS_UPDATE` 감사): `pbx.sftp_user=kotify-fax`, `pbx.sftp_dir=/recvd`, `pbx.sftp_port=55530`(호스트는 API 주소 기본값 10.0.5.10).
+- 배포(2026-10-15 17:06:27 UTC `apply` → 17:08:09 `post-restart: 정상 기동 — fbd89aa`): 두 서비스 active·`NRestarts=0`, healthz `fbd89aa`, alembic `0025 (head)`, quick_check ok. 17:09:34 까지 첫 주기들에서 커서 88→93, backfill 1~93 완료, `fax_inbox` 11건 — 받은 팩스 2건(로그 74 2025-08-30 159,975바이트, 로그 93 2026-10-16 24,911바이트) 모두 `FETCHED`·`%PDF-`(1회 시도), 수신 실패 9건(사유 기록, PDF 없음). 이후 warning 0건.
+- 보낸 번호 주의: 로그 78·89~93 의 PBX `sender` 자체가 16자리(`01518` 고정 5자리 + 휴대번호 11자리 모양)다. kotify 파싱은 PBX 값 그대로이며, 접두어를 뗄지는 발신 서비스 확인 후 결정(코드 미변경). 이 번호들은 하이웍스 이름도 붙지 않는다.
+- 다음 단계: ① 로그인 후 `/fax?tab=inbox` 화면에서 PDF 열기 확인 ② 외부 일반 팩스로 실제 수신 1건 → 1분 안에 목록·PDF 반영 확인 ③ 16자리 발신 번호 접두어 처리 결정.
+- 남은 한계: SFTP 설정은 설정 화면 필드가 없다(서비스 사용자로 SettingsStore 입력). 팩스 로그 스캔이 이제 매 분 1~3회 PBX API 를 부른다.
+
 ## 2026-10-16 — 사내 PBX 연동(팩스·통화 기록·녹음 재생) 운영 배포(`bc66590`)·실제 팩스 전송 성공
 
 - 목표: kotify 에 DIPCAST(VitalPBX 4.5) 연동 ① 팩스 발송 ② 고객별 통화 기록 ③ 통화 녹음 재생. 설계는 사용자 승인을 받았다(녹음 재생 sender 이상, 팩스 PDF 영구 보관). 근거·실측 상태는 `claudedocs/pbx-integration-design.md`, 확정 동작은 SPEC §8.6.

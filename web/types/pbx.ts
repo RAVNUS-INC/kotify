@@ -50,3 +50,25 @@ export type CallListMeta = {
   from: string;
   to: string;
 };
+
+export type FaxInboxStatus = 'RECEIVED' | 'FAILED';
+export type FaxInboxFetchStatus = 'PENDING' | 'FETCHED' | 'FETCH_FAILED' | 'NONE';
+
+/** 받은 팩스 1건. PBX 파일 이름·경로는 내려오지 않는다. */
+export type FaxInboxItem = {
+  id: number;
+  /** UTC ISO */
+  receivedAt: string;
+  /** 숫자만, 모르면 빈 문자열 */
+  senderNumber: string;
+  /** 하이웍스 CID·kotify 주소록 이름, 없으면 null */
+  senderName: string | null;
+  status: FaxInboxStatus;
+  error: string | null;
+  fetchStatus: FaxInboxFetchStatus;
+  sizeBytes: number | null;
+  firstViewedAt: string | null;
+  firstViewedBy: string | null;
+};
+
+export type FaxInboxMeta = { limit: number; offset: number; hasMore: boolean; unread: number };
