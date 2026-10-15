@@ -40,7 +40,7 @@ export function ThreadRow({ thread, today, active = false, href }: ThreadRowProp
       )}
       {!unread && <span aria-hidden className="mt-1 inline-block h-1.5 w-1.5 shrink-0" />}
 
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-[11px] text-gray-9">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-3 text-xs text-gray-9">
         {threadDisplayName(thread).charAt(0)}
       </div>
 
@@ -48,21 +48,21 @@ export function ThreadRow({ thread, today, active = false, href }: ThreadRowProp
         <div className="flex items-baseline justify-between gap-2">
           <span
             className={cn(
-              'truncate text-[13.5px]',
+              'truncate text-base',
               unread ? 'font-semibold text-ink' : 'text-ink',
             )}
           >
             {threadDisplayName(thread)}
             {unread && <span className="sr-only"> — 읽지 않음</span>}
           </span>
-          <span className="shrink-0 font-mono text-[11px] text-ink-dim">
+          <span className="shrink-0 tabular-nums text-xs text-ink-dim">
             {formatThreadTime(thread, today)}
           </span>
         </div>
-        <div className="flex items-center gap-1.5 text-[12.5px]">
+        <div className="flex items-center gap-1.5 text-md">
           <span
             className={cn(
-              'shrink-0 font-mono text-[10px]',
+              'shrink-0 text-xs',
               thread.channel === 'rcs' ? 'text-brand' : 'text-ink-dim',
             )}
           >

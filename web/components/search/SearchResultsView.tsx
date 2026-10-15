@@ -41,14 +41,14 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
                   href={`/contacts?selected=${encodeURIComponent(c.id)}` as Route}
                   className="flex items-center gap-3 rounded border border-line bg-surface p-3 transition-colors duration-fast ease-out hover:border-brand/40 hover:bg-brand-soft/20"
                 >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-[11px] text-gray-9">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-3 text-xs text-gray-9">
                     {c.name.charAt(0)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-ink">
                       <HighlightText text={c.name} q={q} />
                     </div>
-                    <div className="truncate font-mono text-[11.5px] text-ink-dim">
+                    <div className="truncate tabular-nums text-xs text-ink-dim">
                       <HighlightText text={formatPhone(c.phone)} q={q} />
                     </div>
                   </div>
@@ -68,7 +68,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
                   href={`/chat/${encodeURIComponent(t.id)}` as Route}
                   className="flex items-start gap-3 px-4 py-3 transition-colors duration-fast ease-out hover:bg-gray-1"
                 >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-[11px] text-gray-9">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-3 text-xs text-gray-9">
                     {t.name.charAt(0)}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -76,16 +76,16 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
                       <span className="truncate text-sm font-medium text-ink">
                         {t.name}
                       </span>
-                      <span className="shrink-0 font-mono text-[11px] text-ink-dim">
+                      <span className="shrink-0 tabular-nums text-xs text-ink-dim">
                         {t.time}
                       </span>
                     </div>
                     {t.campaignName && (
-                      <div className="font-mono text-[10.5px] text-ink-dim">
+                      <div className="text-xs text-ink-dim">
                         {t.campaignName}
                       </div>
                     )}
-                    <div className="mt-0.5 truncate text-[12.5px] text-ink-muted">
+                    <div className="mt-0.5 truncate text-md text-ink-muted">
                       <HighlightText text={t.snippet} q={q} />
                     </div>
                   </div>
@@ -110,7 +110,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
                     <div className="truncate text-sm font-medium text-ink">
                       <HighlightText text={c.name} q={q} />
                     </div>
-                    <div className="font-mono text-[11px] text-ink-dim">
+                    <div className="tabular-nums text-xs text-ink-dim">
                       {c.createdAt}
                     </div>
                   </div>
@@ -131,7 +131,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
                   href={`/audit?q=${encodeURIComponent(q)}` as Route}
                   className="flex items-center gap-3 px-4 py-3 transition-colors duration-fast ease-out hover:bg-gray-1"
                 >
-                  <span className="shrink-0 font-mono text-[11px] text-ink-dim">
+                  <span className="shrink-0 tabular-nums text-xs text-ink-dim">
                     {a.time}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -141,7 +141,7 @@ export function SearchResultsView({ q, result, section }: SearchResultsViewProps
                       </span>
                       <AuditActionBadge action={a.action} />
                     </div>
-                    <div className="truncate text-[12.5px] text-ink-muted">
+                    <div className="truncate text-md text-ink-muted">
                       <HighlightText text={a.target} q={q} />
                     </div>
                   </div>
@@ -167,7 +167,7 @@ function Section({
   return (
     <section>
       <header className="mb-2 flex items-baseline gap-2">
-        <h2 className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
+        <h2 className="text-xs font-semibold text-ink-muted">
           {title}
         </h2>
         <Badge kind="neutral">{count}</Badge>

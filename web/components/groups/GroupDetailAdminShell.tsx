@@ -87,7 +87,7 @@ export function GroupDetailAdminShell({
         </Button>
       </div>
       {err ? (
-        <span className="text-[11px] text-danger" role="alert">
+        <span className="text-xs text-danger" role="alert">
           {err}
         </span>
       ) : null}

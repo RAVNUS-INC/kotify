@@ -99,7 +99,7 @@ export function NumberActions({ number, canManage }: NumberActionsProps) {
         </Button>
       ) : null}
       {error ? (
-        <span className="ml-2 text-[11px] text-danger" role="alert">
+        <span className="ml-2 text-xs text-danger" role="alert">
           {error}
         </span>
       ) : null}

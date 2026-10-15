@@ -178,7 +178,7 @@ export function ContactImportDialog({
             </ul>
           </div>
           {result.errors.length > 0 ? (
-            <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-[12.5px] text-warning">
+            <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-md text-warning">
               <div className="mb-1 font-semibold">경고 ({result.errors.length})</div>
               <ul className="space-y-1">
                 {result.errors.slice(0, 10).map((err, i) => (
@@ -188,7 +188,7 @@ export function ContactImportDialog({
             </div>
           ) : null}
           {result.invalidPreview.length > 0 ? (
-            <div className="rounded-lg border border-line bg-surface p-3 text-[12px] text-ink-muted">
+            <div className="rounded-lg border border-line bg-surface p-3 text-sm text-ink-muted">
               <div className="mb-1 font-semibold text-ink">잘못된 행 미리보기</div>
               <ul className="space-y-1">
                 {result.invalidPreview.slice(0, 10).map((row, i) => (

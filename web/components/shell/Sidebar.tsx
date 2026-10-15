@@ -110,8 +110,8 @@ export function Sidebar({ user }: SidebarProps) {
                     aria-current={active ? 'page' : undefined}
                     className={cn('k-nav-item', active && 'on')}
                   >
-                    <span className="flex items-center gap-2">
-                      <Icon name={item.icon} size={14} strokeWidth={1.7} />
+                    <span className="flex items-center gap-2.5">
+                      <Icon name={item.icon} size={18} strokeWidth={1.75} />
                       {item.label}
                     </span>
                     {item.count != null && (

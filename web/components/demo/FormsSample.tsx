@@ -153,10 +153,10 @@ export function FormsSample() {
           }
           footer={
             <>
-              <span className="font-mono">
+              <span className="tabular-nums">
                 {bytes} / 180 bytes · 예상 1건 ₩8
               </span>
-              <span className="font-mono text-ink-dim">plain text</span>
+              <span className="text-ink-dim">plain text</span>
             </>
           }
         />

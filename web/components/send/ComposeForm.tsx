@@ -289,7 +289,7 @@ export function ComposeForm() {
             value={sender}
             onChange={(e) => setSender(e.target.value)}
             disabled={senderLoading || senderOptions.length === 0}
-            className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand focus:shadow-[0_0_0_3px_rgba(59,0,139,0.08)] focus:outline-none disabled:bg-gray-1 disabled:text-ink-dim"
+            className="h-[36px] w-full rounded border border-line-strong bg-surface px-3 text-base focus:border-brand focus:shadow-[0_0_0_3px_var(--brand-soft)] focus-visible:outline-none disabled:bg-surface-subtle disabled:text-ink-dim"
           >
             {senderLoading ? (
               <option value="">불러오는 중...</option>
@@ -330,7 +330,7 @@ export function ComposeForm() {
               .filter((x) => x.cid);
             if (matched.length === 0) return null;
             return (
-              <div className="mt-2 rounded border border-line bg-gray-1 p-2 text-[12px] text-ink-muted">
+              <div className="mt-2 rounded border border-line bg-gray-1 p-2 text-sm text-ink-muted">
                 <span className="text-ink-dim">주소록 매칭 </span>
                 <span className="font-medium text-ink">
                   {matched.length}/{recipients.length}명
@@ -339,7 +339,7 @@ export function ComposeForm() {
                   {matched.slice(0, 12).map((x) => (
                     <span
                       key={x.phone}
-                      className="rounded bg-surface px-1.5 py-0.5 text-[11.5px] text-ink"
+                      className="rounded bg-surface px-1.5 py-0.5 text-xs text-ink"
                       title={formatPhone(x.phone)}
                     >
                       {x.cid!.display}
@@ -354,18 +354,6 @@ export function ComposeForm() {
               </div>
             );
           })()}
-        </Field>
-
-        <Field label="CSV 업로드" hint="수신자 목록을 일괄 추가 (준비 중)">
-          <Button
-            type="button"
-            variant="secondary"
-            size="md"
-            icon={<Icon name="upload" size={12} />}
-            disabled
-          >
-            CSV 파일 선택
-          </Button>
         </Field>
 
         <Field
@@ -441,10 +429,10 @@ export function ComposeForm() {
             }
             footer={
               <>
-                <span className="font-mono">
+                <span className="tabular-nums">
                   {lengthLabel} · {displayChannel}
                 </span>
-                <span role="status" aria-live="polite" className="font-mono text-ink-dim">
+                <span role="status" aria-live="polite" className="tabular-nums text-ink-dim">
                   {costLabel}
                 </span>
               </>

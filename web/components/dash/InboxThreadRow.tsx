@@ -29,18 +29,18 @@ export function InboxThreadRow({ thread, today }: InboxThreadRowProps) {
         <div className="flex items-baseline justify-between gap-2">
           <div
             className={cn(
-              'truncate text-[13.5px]',
+              'truncate text-base',
               unread ? 'font-semibold text-ink' : 'text-ink-muted',
             )}
           >
             {thread.phone && thread.name === thread.phone ? formatPhone(thread.phone) : thread.name}
             {unread && <span className="sr-only"> — 읽지 않음</span>}
           </div>
-          <div className="shrink-0 font-mono text-[11px] text-ink-dim">
+          <div className="shrink-0 tabular-nums text-xs text-ink-dim">
             {formatThreadTime(thread, today)}
           </div>
         </div>
-        <div className="truncate text-[12.5px] text-ink-muted">
+        <div className="truncate text-md text-ink-muted">
           {thread.preview}
         </div>
       </div>

@@ -202,7 +202,7 @@ export function CommandPalette() {
                 aria-label="검색어"
               />
               {loading && (
-                <span className="font-mono text-[10.5px] text-ink-dim">검색 중…</span>
+                <span className="text-xs text-ink-dim">검색 중…</span>
               )}
               <Kbd>Esc</Kbd>
             </div>
@@ -212,7 +212,7 @@ export function CommandPalette() {
             {!q.trim() && (
               <div className="px-4 py-6 text-center text-sm text-ink-muted">
                 <p>검색어를 입력하세요.</p>
-                <p className="mt-1 font-mono text-[11px] text-ink-dim">
+                <p className="mt-1 text-xs text-ink-dim">
                   ↑↓로 이동 · Enter로 열기 · Esc로 닫기
                 </p>
               </div>
@@ -251,12 +251,12 @@ export function CommandPalette() {
                           <HighlightText text={it.primary} q={q} />
                         </div>
                         {it.secondary && (
-                          <div className="truncate text-[11.5px] text-ink-muted">
+                          <div className="truncate text-xs text-ink-muted">
                             <HighlightText text={it.secondary} q={q} />
                           </div>
                         )}
                       </div>
-                      <span className="font-mono text-[10.5px] text-ink-dim">
+                      <span className="text-xs text-ink-dim">
                         {it.section}
                       </span>
                     </Link>
@@ -267,7 +267,7 @@ export function CommandPalette() {
           </div>
 
           {q.trim() && (
-            <div className="flex items-center justify-between border-t border-line bg-gray-1 px-4 py-2 font-mono text-[11px] text-ink-dim">
+            <div className="flex items-center justify-between border-t border-line bg-gray-1 px-4 py-2 text-xs text-ink-dim">
               <span>Enter로 전체 결과 페이지</span>
               <span>↑↓ 이동 · Esc 닫기</span>
             </div>

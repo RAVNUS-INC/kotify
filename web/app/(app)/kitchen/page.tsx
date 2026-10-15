@@ -72,7 +72,7 @@ export default function Kitchen() {
           {['home', 'send', 'inbox', 'users', 'bell', 'search', 'settings', 'chart', 'shield', 'zap'].map((n) => (
             <div key={n} className="flex flex-col items-center gap-1">
               <Icon name={n as 'home'} size={20} strokeWidth={1.6} />
-              <span className="font-mono text-[10.5px] text-ink-dim">{n}</span>
+              <span className="font-mono text-xs text-ink-dim">{n}</span>
             </div>
           ))}
         </div>
@@ -121,7 +121,7 @@ export default function Kitchen() {
           />
           <CardBody>
             <div className="flex items-baseline gap-3">
-              <div className="font-mono text-3xl font-semibold tracking-[-0.03em] tabular-nums">
+              <div className="text-3xl font-semibold tracking-[-0.03em] tabular-nums">
                 72.4%
               </div>
               <Badge kind="success" dot>+2.1p</Badge>
@@ -131,7 +131,7 @@ export default function Kitchen() {
             </p>
           </CardBody>
           <CardFooter align="between">
-            <span className="font-mono text-xs text-ink-dim">업데이트 14:02</span>
+            <span className="tabular-nums text-xs text-ink-dim">업데이트 14:02</span>
             <Button variant="secondary" size="sm" iconRight={<Icon name="external" />}>
               리포트로
             </Button>
@@ -145,7 +145,7 @@ export default function Kitchen() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mt-10">
-      <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-dim">
+      <h2 className="mb-3 text-xs font-semibold text-ink-muted">
         {title}
       </h2>
       {children}

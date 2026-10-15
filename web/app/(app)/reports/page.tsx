@@ -64,7 +64,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
           param="period"
           options={[{ value: '7d', label: '7일' }]}
         />
-        <span className="font-mono text-[11px] text-ink-dim">
+        <span className="text-xs text-ink-dim">
           30일 · 90일은 실제 집계 쿼리 연결 후 제공
         </span>
       </div>

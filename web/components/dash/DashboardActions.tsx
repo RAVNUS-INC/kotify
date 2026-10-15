@@ -26,7 +26,7 @@ export function DashboardActions() {
       </Button>
       <Link
         href="/send/new"
-        className="inline-flex h-8 items-center gap-1.5 rounded border border-brand bg-brand px-3 text-sm font-medium text-white transition-colors duration-fast ease-out hover:bg-brand-hover focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(59,0,139,0.12)]"
+        className="inline-flex h-8 items-center gap-1.5 rounded border border-brand bg-brand px-3 text-sm font-medium text-white transition-colors duration-fast ease-out hover:bg-brand-hover"
       >
         <Icon name="send" size={12} />
         새 발송

@@ -45,13 +45,13 @@ export function GroupMembersTable({ members }: GroupMembersTableProps) {
                       href={href}
                       className="flex items-center gap-2 font-medium text-ink hover:text-brand"
                     >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-[11px] text-gray-9">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-3 text-xs text-gray-9">
                         {m.name.charAt(0)}
                       </span>
                       <span className="truncate">{m.name}</span>
                     </Link>
                   </td>
-                  <td className="mono">{formatPhone(m.phone)}</td>
+                  <td className="tabular-nums">{formatPhone(m.phone)}</td>
                   <td className="truncate text-ink-muted">{m.email ?? '—'}</td>
                   <td>{m.team ?? '—'}</td>
                   <td>

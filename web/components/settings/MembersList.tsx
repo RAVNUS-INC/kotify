@@ -38,7 +38,7 @@ export function MembersList({ members }: MembersListProps) {
               !m.active && 'opacity-60',
             )}
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-[11px] text-gray-9">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-3 text-xs text-gray-9">
               {m.name.charAt(0)}
             </div>
             <div className="min-w-0 flex-1">
@@ -49,11 +49,11 @@ export function MembersList({ members }: MembersListProps) {
                 <Badge kind={role.kind}>{role.label}</Badge>
                 {!m.active && <Badge kind="neutral">비활성</Badge>}
               </div>
-              <div className="truncate font-mono text-[12.5px] text-ink-dim">
+              <div className="truncate text-md text-ink-dim">
                 {m.email}
               </div>
             </div>
-            <div className="font-mono text-[11px] text-ink-dim">
+            <div className="tabular-nums text-xs text-ink-dim">
               {m.invitedAt}
             </div>
             <Button

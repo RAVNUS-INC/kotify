@@ -11,7 +11,7 @@ export function ChatDateDivider({ date }: ChatDateDividerProps) {
   return (
     <div className="flex items-center gap-3 py-2">
       <span aria-hidden className="flex-1 border-t border-line" />
-      <time dateTime={date} className="shrink-0 text-[11px] text-ink-muted">
+      <time dateTime={date} className="shrink-0 text-xs text-ink-muted">
         {formatChatDate(date)}
       </time>
       <span aria-hidden className="flex-1 border-t border-line" />

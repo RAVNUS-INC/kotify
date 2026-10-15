@@ -60,13 +60,13 @@ export function ContactsTable({ contacts, selectedId, filter }: ContactsTablePro
                       className="flex items-center gap-2 font-medium text-ink hover:text-brand"
                       aria-current={isActive ? 'true' : undefined}
                     >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-[11px] text-gray-9">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-3 text-xs text-gray-9">
                         {c.name.charAt(0)}
                       </span>
                       <span className="truncate">{c.name}</span>
                     </Link>
                   </td>
-                  <td className="mono">{formatPhone(c.phone)}</td>
+                  <td className="tabular-nums">{formatPhone(c.phone)}</td>
                   <td className="truncate text-ink-muted">{c.email ?? '—'}</td>
                   <td>{c.team ?? '—'}</td>
                   <td>

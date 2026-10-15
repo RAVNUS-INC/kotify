@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import type { Campaign } from '@/types/campaign';
 import { EmptyState } from '@/components/ui';
+import { formatDateTime } from '@/lib/datetime';
 import { StatusBadge } from './StatusBadge';
 
 export type CampaignsTableProps = {
@@ -58,10 +59,10 @@ export function CampaignsTable({ campaigns }: CampaignsTableProps) {
               const href = `/campaigns/${encodeURIComponent(c.id)}` as Route;
               return (
                 <tr key={c.id}>
-                  <td className="mono">
-                    {c.status === 'scheduled' && c.scheduledAt
-                      ? c.scheduledAt
-                      : c.createdAt}
+                  <td className="tabular-nums">
+                    {formatDateTime(
+                      c.status === 'scheduled' && c.scheduledAt ? c.scheduledAt : c.createdAt,
+                    )}
                   </td>
                   <td>
                     <StatusBadge status={c.status} />

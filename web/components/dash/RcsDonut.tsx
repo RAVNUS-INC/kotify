@@ -54,7 +54,7 @@ export function RcsDonut({
           cy={size / 2}
           r={r}
           fill="none"
-          stroke="rgba(255,255,255,0.14)"
+          stroke="var(--surface-hover)"
           strokeWidth={strokeWidth}
         />
         <circle

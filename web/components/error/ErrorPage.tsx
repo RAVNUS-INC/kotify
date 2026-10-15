@@ -59,7 +59,7 @@ export function ErrorPage({
           )}
         </div>
 
-        <div className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-ink-dim">
+        <div className="text-xs font-semibold text-ink-muted">
           Error {code}
         </div>
 
@@ -80,10 +80,10 @@ export function ErrorPage({
 
         {diagnostics && diagnostics.length > 0 && (
           <div className="w-full rounded border border-line bg-gray-1 p-3 text-left">
-            <div className="mb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
+            <div className="mb-1.5 text-xs font-semibold text-ink-muted">
               진단 정보
             </div>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[11.5px]">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
               {diagnostics.map((d) => (
                 <Fragment key={d.label}>
                   <dt className="text-ink-dim">{d.label}</dt>

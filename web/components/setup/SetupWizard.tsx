@@ -164,7 +164,7 @@ export function SetupWizard({ initial }: SetupWizardProps) {
               새 session.secret 은 프로세스 재시작 시점에 활성화됩니다.
               재시작 전에 만든 세션은 재시작 후 무효화됩니다.
             </p>
-            <div className="mt-4 rounded border border-line bg-gray-1 p-3 text-left font-mono text-[12px] text-ink-muted">
+            <div className="mt-4 rounded border border-line bg-gray-1 p-3 text-left font-mono text-sm text-ink-muted">
               # 예) systemd 기반 배포:
               <br />$ sudo systemctl restart kotify
             </div>
@@ -204,7 +204,7 @@ export function SetupWizard({ initial }: SetupWizardProps) {
           onSubmit={verifyToken}
           className="rounded-lg border border-line bg-surface p-5"
         >
-          <div className="mb-4 rounded bg-gray-1 p-3 font-mono text-[12.5px] text-ink-muted">
+          <div className="mb-4 rounded bg-gray-1 p-3 font-mono text-md text-ink-muted">
             $ cat {initial.tokenPath}
           </div>
           <Field label="Setup token" hint="128-bit hex. 완료 후 파일은 자동 삭제.">
@@ -288,8 +288,8 @@ export function SetupWizard({ initial }: SetupWizardProps) {
                   <span
                     className={
                       kcTest.kind === 'ok'
-                        ? 'text-[12px] text-ok'
-                        : 'text-[12px] text-danger'
+                        ? 'text-sm text-ok'
+                        : 'text-sm text-danger'
                     }
                   >
                     {kcTest.text}
@@ -332,7 +332,7 @@ export function SetupWizard({ initial }: SetupWizardProps) {
                   value={msghubEnv}
                   onChange={(e) => setMsghubEnv(e.target.value as MsghubEnv)}
                   disabled={submitting}
-                  className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand focus:shadow-[0_0_0_3px_rgba(59,0,139,0.08)] focus:outline-none disabled:bg-gray-1 disabled:text-ink-dim"
+                  className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand disabled:bg-gray-1 disabled:text-ink-dim"
                 >
                   <option value="production">production (상용)</option>
                   <option value="qa">qa (검수)</option>
@@ -353,8 +353,8 @@ export function SetupWizard({ initial }: SetupWizardProps) {
                   <span
                     className={
                       mhTest.kind === 'ok'
-                        ? 'text-[12px] text-ok'
-                        : 'text-[12px] text-danger'
+                        ? 'text-sm text-ok'
+                        : 'text-sm text-danger'
                     }
                   >
                     {mhTest.text}

@@ -67,7 +67,7 @@ export function MotionSample() {
           <CardHeader eyebrow="스파크라인" title="RCS 도달률 추세" />
           <CardBody>
             <div className="flex items-baseline gap-3">
-              <div className="font-mono text-2xl font-semibold tracking-tight tabular-nums">
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
                 72.4%
               </div>
               <Sparkline
@@ -97,7 +97,7 @@ export function MotionSample() {
                 ariaLabel="SMS fallback 비율"
               />
             </div>
-            <div className="mt-2 flex justify-between font-mono text-[11px] text-ink-dim">
+            <div className="mt-2 flex justify-between tabular-nums text-xs text-ink-dim">
               <span>RCS 97.3%</span>
               <span>SMS fallback 2.7%</span>
             </div>
@@ -148,7 +148,7 @@ export function MotionSample() {
       </Card>
 
       <Rise delay={200}>
-        <div className="text-center font-mono text-[10.5px] text-ink-dim">
+        <div className="text-center text-xs text-ink-dim">
           Rise 단일 연출 · reduced-motion 환경에서는 즉시 표시
         </div>
       </Rise>
@@ -170,7 +170,7 @@ function Kpi({
   return (
     <Card>
       <CardBody>
-        <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-ink-dim">
+        <div className="text-xs font-semibold text-ink-muted">
           {label}
         </div>
         <div className="mt-1.5 text-[28px] font-semibold leading-none tracking-[-0.03em]">

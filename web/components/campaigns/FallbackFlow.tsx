@@ -16,10 +16,10 @@ export function FallbackFlow({ breakdown }: FallbackFlowProps) {
 
   return (
     <div className="rounded-lg border border-line bg-surface p-4">
-      <div className="mb-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-dim">
+      <div className="mb-1 text-xs font-semibold text-ink-muted">
         Fallback 흐름
       </div>
-      <div className="mb-3 text-[11px] text-ink-muted">
+      <div className="mb-3 text-xs text-ink-muted">
         RCS 실패 시 SMS로 자동 대체
       </div>
 
@@ -47,7 +47,7 @@ export function FallbackFlow({ breakdown }: FallbackFlowProps) {
         />
       </div>
 
-      <div className="mt-4 flex items-center justify-between border-t border-line pt-3 font-mono text-[11px]">
+      <div className="mt-4 flex items-center justify-between border-t border-line pt-3 text-xs">
         <span className="text-ink-muted">전체 시도</span>
         <span className="font-semibold text-ink tabular-nums">
           {total.toLocaleString('ko-KR')}건
@@ -76,9 +76,9 @@ function FlowRow({ label, count, total, color, delay }: FlowRowProps) {
             className={cn('inline-block h-1.5 w-1.5 rounded-full')}
             style={{ background: color }}
           />
-          <span className="text-[12.5px] text-ink">{label}</span>
+          <span className="text-md text-ink">{label}</span>
         </div>
-        <div className="flex items-baseline gap-1.5 font-mono text-[11px]">
+        <div className="flex items-baseline gap-1.5 text-xs">
           <span className="tabular-nums text-ink">
             {count.toLocaleString('ko-KR')}
           </span>

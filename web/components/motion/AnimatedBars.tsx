@@ -66,7 +66,7 @@ export function AnimatedBars({
               />
             </div>
             {labels?.[i] != null && (
-              <div className="font-mono text-[10px] text-ink-dim">{labels[i]}</div>
+              <div className="tabular-nums text-xs text-ink-dim">{labels[i]}</div>
             )}
           </div>
         );

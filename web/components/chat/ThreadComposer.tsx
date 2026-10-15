@@ -166,9 +166,9 @@ export function ThreadComposer({
         aria-describedby={`${lengthHintId}${validationError ? ` ${validationErrorId}` : ''}`}
         invalid={Boolean(validationError)}
       />
-      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-dim">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-dim">
         <span>답장은 최대 {REPLY_MAX_BYTES}바이트 · 한글 약 45자, 영문 약 90자</span>
-        <span id={lengthHintId} role="status" aria-live="polite" className="font-mono">
+        <span id={lengthHintId} role="status" aria-live="polite" className="tabular-nums">
           {lengthHint}
         </span>
       </div>
@@ -206,7 +206,7 @@ export function ThreadComposer({
             />
           ))}
           {defaultSendChannel && sendChannel === defaultSendChannel && (
-            <span className="whitespace-nowrap text-[11px] text-ink-dim">
+            <span className="whitespace-nowrap text-xs text-ink-dim">
               최근 전달 성공 방식
             </span>
           )}

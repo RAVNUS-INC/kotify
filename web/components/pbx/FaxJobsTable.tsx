@@ -35,8 +35,8 @@ export function FaxJobsTable({ jobs, showCreator = false }: FaxJobsTableProps) {
           <tbody>
             {jobs.map((job) => (
               <tr key={job.id}>
-                <td className="mono">{fmtKstDateTime(job.createdAt)}</td>
-                <td className="mono text-ink">{formatPhone(job.recipient)}</td>
+                <td className="tabular-nums">{fmtKstDateTime(job.createdAt)}</td>
+                <td className="tabular-nums text-ink">{formatPhone(job.recipient)}</td>
                 <td className="max-w-[240px] truncate">
                   <a
                     href={`/api/fax/${job.id}/pdf`}
@@ -53,7 +53,7 @@ export function FaxJobsTable({ jobs, showCreator = false }: FaxJobsTableProps) {
                       {FAX_STATUS_LABEL[job.status]}
                     </Badge>
                     {job.error ? (
-                      <span className="text-[12px] text-ink-muted">{job.error}</span>
+                      <span className="text-sm text-ink-muted">{job.error}</span>
                     ) : null}
                   </div>
                 </td>

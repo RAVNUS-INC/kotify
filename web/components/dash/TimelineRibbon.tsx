@@ -37,14 +37,14 @@ export function TimelineRibbon({
     <div className="rounded-lg border border-line bg-surface p-5">
       <div className="flex items-baseline justify-between">
         <div>
-          <div className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-dim">
+          <div className="text-xs font-semibold text-ink-muted">
             Today
           </div>
-          <div className="mt-0.5 text-md text-ink-muted">
+          <div className="mt-0.5 text-md tabular-nums text-ink-muted">
             {String(startHour).padStart(2, '0')}:00 – {String(endHour).padStart(2, '0')}:00
           </div>
         </div>
-        <div className="font-mono text-xs text-ink-muted">
+        <div className="text-xs tabular-nums text-ink-muted">
           NOW <span className="font-semibold text-brand">{now}</span>
         </div>
       </div>
@@ -61,7 +61,7 @@ export function TimelineRibbon({
               style={{ left: `${pct}%` }}
             >
               <div className="mx-auto h-2 w-px bg-gray-4" />
-              <div className="mt-1 font-mono text-[10px] text-ink-dim">
+              <div className="mt-1 tabular-nums text-xs text-ink-dim">
                 {String(hour).padStart(2, '0')}
               </div>
             </div>

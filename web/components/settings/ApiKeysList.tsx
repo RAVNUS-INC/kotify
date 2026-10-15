@@ -32,8 +32,8 @@ export function ApiKeysList({ keys }: ApiKeysListProps) {
                 </Pill>
               ))}
             </div>
-            <div className="mt-0.5 flex items-center gap-2 font-mono text-[12.5px] text-ink-muted">
-              <span>{k.prefix}...</span>
+            <div className="mt-0.5 flex items-center gap-2 text-md text-ink-muted">
+              <span className="font-mono">{k.prefix}...</span>
               <span className="text-ink-dim">·</span>
               <span>
                 {k.lastUsedAt

@@ -27,11 +27,11 @@ export function CampaignMessagePreview({
 
   return (
     <div className="rounded-lg border border-line bg-surface p-4">
-      <div className="mb-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-dim">
+      <div className="mb-1 text-xs font-semibold text-ink-muted">
         원본 프리뷰 · {kind.toUpperCase()}
       </div>
-      <div className="mb-3 text-[11px] text-ink-muted">
-        발신: <span className="font-mono text-ink">{campaign.sender}</span>
+      <div className="mb-3 text-xs text-ink-muted">
+        발신: <span className="tabular-nums text-ink">{campaign.sender}</span>
       </div>
       <DeviceMockup frame="ios" width={220} senderName="Kotify" timeLabel={campaign.createdAt.split(' ')[1] ?? '지금'}>
         <MessageBubble kind={kind} side="them">

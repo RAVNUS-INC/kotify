@@ -70,7 +70,7 @@ export function WebhooksList({ webhooks, meta }: WebhooksListProps) {
       {meta?.hint ? (
         <div
           role="alert"
-          className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-[12.5px] text-warning"
+          className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-md text-warning"
         >
           ⚠ {meta.hint}
         </div>
@@ -84,7 +84,7 @@ export function WebhooksList({ webhooks, meta }: WebhooksListProps) {
               <div className="flex items-baseline justify-between gap-2">
                 <div>
                   <div className="text-sm font-semibold text-ink">{w.name}</div>
-                  <div className="mt-0.5 text-[12px] text-ink-muted">
+                  <div className="mt-0.5 text-sm text-ink-muted">
                     {w.description}
                   </div>
                 </div>
@@ -93,7 +93,7 @@ export function WebhooksList({ webhooks, meta }: WebhooksListProps) {
 
               <div className="flex items-center gap-2 rounded border border-line bg-gray-1 px-2.5 py-1.5">
                 <span
-                  className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink"
+                  className="min-w-0 flex-1 truncate font-mono text-sm text-ink"
                   title={w.url || '설정 미완료 — URL 없음'}
                 >
                   {w.url || '(URL 없음 — 토큰/공개URL 설정 필요)'}
@@ -102,11 +102,11 @@ export function WebhooksList({ webhooks, meta }: WebhooksListProps) {
               </div>
 
               {w.lastReceivedAt ? (
-                <div className="font-mono text-[11px] text-ink-dim">
+                <div className="tabular-nums text-xs text-ink-dim">
                   마지막 수신 · {w.lastReceivedAt}
                 </div>
               ) : w.configured ? (
-                <div className="font-mono text-[11px] text-danger">
+                <div className="text-xs text-danger">
                   여태 한 번도 수신 못 함 — msghub 콘솔에 이 URL 을 등록했는지
                   확인하세요.
                 </div>
@@ -117,7 +117,7 @@ export function WebhooksList({ webhooks, meta }: WebhooksListProps) {
       </ul>
 
       {meta?.outbound?.featurePending ? (
-        <div className="rounded border border-dashed border-line bg-gray-1 p-3 text-[12.5px] text-ink-muted">
+        <div className="rounded border border-dashed border-line bg-gray-1 p-3 text-md text-ink-muted">
           <div className="font-semibold text-ink">아웃바운드 웹훅 구독</div>
           <div className="mt-1">{meta.outbound.note}</div>
         </div>

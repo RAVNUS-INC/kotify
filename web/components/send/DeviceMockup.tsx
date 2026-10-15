@@ -48,7 +48,7 @@ export function DeviceMockup({
         style={{ borderRadius: radius }}
       >
         {/* 상단 상태바 */}
-        <div className="flex items-center justify-between px-5 pt-2 font-mono text-[10px] text-ink">
+        <div className="flex items-center justify-between px-5 pt-2 text-xs tabular-nums text-ink">
           <span>9:41</span>
           <span className="flex items-center gap-0.5">
             {isIos ? (
@@ -72,14 +72,14 @@ export function DeviceMockup({
 
         {/* 발신자 헤더 */}
         <div className="mt-2 flex items-center gap-2 border-b border-line px-4 py-2">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-[11px] text-gray-9">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-3 text-xs text-gray-9">
             {senderName.charAt(0)}
           </div>
           <div className="min-w-0">
-            <div className="truncate text-[11px] font-semibold text-ink">
+            <div className="truncate text-xs font-semibold text-ink">
               {senderName}
             </div>
-            <div className="font-mono text-[10px] text-ink-dim">{timeLabel}</div>
+            <div className="tabular-nums text-xs text-ink-dim">{timeLabel}</div>
           </div>
         </div>
 

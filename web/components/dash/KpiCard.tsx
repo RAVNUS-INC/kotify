@@ -42,8 +42,8 @@ export function KpiCard({
     >
       <div
         className={cn(
-          'font-mono text-[10.5px] font-medium uppercase tracking-[0.06em]',
-          dark ? 'text-gray-5' : 'text-ink-dim',
+          'text-xs font-semibold',
+          dark ? 'text-gray-4' : 'text-ink-muted',
         )}
       >
         {label}
@@ -64,11 +64,11 @@ export function KpiCard({
       {delta && (
         <div
           className={cn(
-            'mt-1 inline-flex items-center gap-1 font-mono text-[11px]',
+            'mt-1 inline-flex items-center gap-1 tabular-nums text-xs',
             delta.direction === 'down' && 'text-danger',
             delta.direction === 'up' && 'text-success',
             (!delta.direction || delta.direction === 'flat') &&
-              (dark ? 'text-gray-5' : 'text-ink-muted'),
+              (dark ? 'text-gray-4' : 'text-ink-muted'),
           )}
         >
           {delta.text}

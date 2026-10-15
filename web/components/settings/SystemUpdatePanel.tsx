@@ -105,7 +105,7 @@ export function SystemUpdatePanel() {
       {dialog}
       <header className="mb-4">
         <h2 className="text-base font-semibold text-ink">시스템 업데이트</h2>
-        <p className="mt-0.5 text-[12.5px] text-ink-muted">
+        <p className="mt-0.5 text-md text-ink-muted">
           원격 저장소의 최신 커밋을 CT 에 배포합니다. DB 마이그레이션 + 양
           서비스 재시작까지 자동.
         </p>
@@ -132,14 +132,14 @@ export function SystemUpdatePanel() {
                   <Badge kind="warning">
                     {info.count}건 대기 중
                   </Badge>
-                  <span className="ml-2 font-mono text-[12.5px] text-ink-muted">
+                  <span className="ml-2 font-mono text-md text-ink-muted">
                     {info.current} → {info.remote}
                   </span>
                 </>
               ) : (
                 <>
                   <Badge kind="brand">최신 버전</Badge>
-                  <span className="ml-2 font-mono text-[12.5px] text-ink-muted">
+                  <span className="ml-2 font-mono text-md text-ink-muted">
                     {info.current}
                   </span>
                 </>
@@ -163,7 +163,7 @@ export function SystemUpdatePanel() {
           </div>
 
           {info.commits.length > 0 ? (
-            <ul className="max-h-44 overflow-y-auto rounded border border-line bg-gray-1 p-3 font-mono text-[11.5px] text-ink-muted">
+            <ul className="max-h-44 overflow-y-auto rounded border border-line bg-gray-1 p-3 font-mono text-xs text-ink-muted">
               {info.commits.slice(0, 20).map((c) => (
                 <li key={c.hash} className="truncate">
                   <span className="text-ink-dim">{c.hash}</span>{' '}

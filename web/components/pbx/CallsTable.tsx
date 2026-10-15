@@ -40,7 +40,7 @@ export function CallsTable({ calls }: { calls: ReadonlyArray<CallRecord> }) {
               const time = formatCallTime(call.at);
               return (
                 <tr key={call.id}>
-                  <td className="mono">{time || '-'}</td>
+                  <td className="tabular-nums">{time || '-'}</td>
                   <td>
                     <Pill tone={call.direction === 'in' ? 'brand' : 'neutral'}>
                       {DIRECTION_LABEL[call.direction]}
@@ -50,15 +50,15 @@ export function CallsTable({ calls }: { calls: ReadonlyArray<CallRecord> }) {
                     {call.name ? (
                       <div className="flex flex-col">
                         <span className="truncate text-ink">{call.name}</span>
-                        <span className="mono text-[12px] text-ink-muted">{formatPhone(other) || other}</span>
+                        <span className="tabular-nums text-sm text-ink-muted">{formatPhone(other) || other}</span>
                       </div>
                     ) : (
-                      <span className="mono text-ink">{formatPhone(other) || other || '-'}</span>
+                      <span className="tabular-nums text-ink">{formatPhone(other) || other || '-'}</span>
                     )}
                   </td>
-                  <td className="mono text-ink-muted">{formatPhone(ours) || ours || '-'}</td>
+                  <td className="tabular-nums text-ink-muted">{formatPhone(ours) || ours || '-'}</td>
                   <td>{dispositionLabel(call.disposition)}</td>
-                  <td className="num mono">{formatDuration(call.billSec)}</td>
+                  <td className="num tabular-nums">{formatDuration(call.billSec)}</td>
                   <td className="text-right">
                     {call.recordingToken ? (
                       <RecordingPlayer token={call.recordingToken} label={`${time} 통화`} />

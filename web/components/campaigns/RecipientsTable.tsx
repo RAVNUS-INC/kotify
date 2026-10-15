@@ -1,6 +1,7 @@
 import type { Recipient } from '@/types/campaign';
 import { EmptyState } from '@/components/ui';
 import { formatPhone } from '@/lib/phone';
+import { formatDateTime } from '@/lib/datetime';
 import { RecipientStatusBadge } from './RecipientStatusBadge';
 
 export type RecipientsTableProps = {
@@ -39,13 +40,13 @@ export function RecipientsTable({ recipients }: RecipientsTableProps) {
             {recipients.map((r) => (
               <tr key={r.id}>
                 <td>{r.name}</td>
-                <td className="mono">{formatPhone(r.phone)}</td>
+                <td className="tabular-nums">{formatPhone(r.phone)}</td>
                 <td>
                   <RecipientStatusBadge status={r.status} />
                 </td>
-                <td className="mono">{r.sentAt ?? '—'}</td>
-                <td className="mono">{r.readAt ?? '—'}</td>
-                <td className="mono">{r.repliedAt ?? '—'}</td>
+                <td className="tabular-nums">{r.sentAt ? formatDateTime(r.sentAt) : '—'}</td>
+                <td className="tabular-nums">{r.readAt ? formatDateTime(r.readAt) : '—'}</td>
+                <td className="tabular-nums">{r.repliedAt ? formatDateTime(r.repliedAt) : '—'}</td>
               </tr>
             ))}
           </tbody>

@@ -29,13 +29,14 @@ export default async function Home() {
         />
 
         <div className="flex flex-col gap-4">
-          <div className="rounded-lg border border-gray-10 bg-gray-11 p-5 text-white">
+          {/* v2: 검은 카드 대신 다른 카드와 같은 흰 카드 — 짙은 바탕 위 보라 숫자는 대비가 낮았다 */}
+          <div className="rounded-lg border border-line bg-surface p-5 shadow-sm">
             <div className="flex items-baseline justify-between">
               <div>
-                <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-gray-5">
+                <div className="text-[15px] font-semibold leading-[22px] text-ink">
                   오늘의 RCS 도달률
                 </div>
-                <div className="mt-0.5 text-[11.5px] text-gray-6">
+                <div className="mt-0.5 text-xs text-ink-dim">
                   조직 전체 · 최근 24시간
                 </div>
               </div>

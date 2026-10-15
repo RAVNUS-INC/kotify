@@ -68,11 +68,11 @@ export default async function GroupDetailPage({ params }: PageProps) {
 
       <div className="mt-6">
         <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
+          <h2 className="text-xs font-semibold text-ink-muted">
             멤버 ({group.members.length}명)
           </h2>
           {group.lastSyncAt && (
-            <div className="font-mono text-[11px] text-ink-dim">
+            <div className="tabular-nums text-xs text-ink-dim">
               마지막 동기화 · {group.lastSyncAt}
             </div>
           )}

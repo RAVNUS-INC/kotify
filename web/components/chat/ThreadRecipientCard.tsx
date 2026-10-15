@@ -29,21 +29,21 @@ export function ThreadRecipientCard({ thread, extra }: ThreadRecipientCardProps)
       className="flex h-full flex-col gap-5 overflow-y-auto rounded-lg border border-line bg-surface p-5"
     >
       <div className="flex items-center gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gray-3 font-mono text-base text-ink">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gray-3 text-base text-ink">
           {threadDisplayName(thread).charAt(0)}
         </div>
         <div className="min-w-0">
           <div className="truncate text-base font-semibold text-ink">
             {threadDisplayName(thread)}
           </div>
-          <div className="truncate font-mono text-[12.5px] text-ink-dim">
+          <div className="truncate tabular-nums text-md text-ink-dim">
             {formatPhone(thread.phone)}
           </div>
         </div>
       </div>
 
       <div>
-        <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-dim">
+        <div className="mb-2 text-xs font-semibold text-ink-muted">
           채널 · 세션
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -52,14 +52,14 @@ export function ThreadRecipientCard({ thread, extra }: ThreadRecipientCardProps)
             세션 24:00:00
           </Badge>
         </div>
-        <p className="mt-1.5 text-[11px] text-ink-dim">
+        <p className="mt-1.5 text-xs text-ink-dim">
           RCS 과금 단위. 첫 수신 후 24시간 내 무제한 회신.
         </p>
       </div>
 
       {thread.lastCampaign && (
         <div>
-          <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-dim">
+          <div className="mb-2 text-xs font-semibold text-ink-muted">
             최근 캠페인
           </div>
           <div className="flex items-center gap-2 rounded border border-line bg-gray-1 px-3 py-2 text-sm">
@@ -72,7 +72,7 @@ export function ThreadRecipientCard({ thread, extra }: ThreadRecipientCardProps)
       {extra}
 
       <div>
-        <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-dim">
+        <div className="mb-2 text-xs font-semibold text-ink-muted">
           액션
         </div>
         <div className="flex flex-col gap-1.5">

@@ -109,23 +109,23 @@ export function OrgSettingsForm({ initial }: OrgSettingsFormProps) {
         />
       </Field>
 
-      <Field label="타임존" hint="변경은 Phase 후속에 지원 예정">
+      <Field label="타임존" hint="모든 시각은 한국 시간(KST)으로 표시합니다.">
         <Input value={baseline.timezone} readOnly disabled />
       </Field>
 
-      <div className="rounded border border-line bg-gray-1 p-3 text-[12.5px] text-ink-muted">
-        <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-dim">
+      <div className="rounded border border-line bg-gray-1 p-3 text-md text-ink-muted">
+        <div className="mb-1 text-xs font-semibold text-ink-muted">
           조직 한도 (읽기 전용)
         </div>
         <div className="flex justify-between">
           <span>캠페인당 수신자</span>
-          <span className="font-mono tabular-nums">
+          <span className="tabular-nums">
             {baseline.limits.recipientsPerCampaign.toLocaleString('ko-KR')}명
           </span>
         </div>
         <div className="mt-0.5 flex justify-between">
           <span>분당 캠페인</span>
-          <span className="font-mono tabular-nums">
+          <span className="tabular-nums">
             {baseline.limits.campaignsPerMinute}건
           </span>
         </div>

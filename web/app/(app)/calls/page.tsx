@@ -127,7 +127,7 @@ export default async function CallsPage({ searchParams }: PageProps) {
         <Button type="submit" variant="secondary" size="md" icon={<Icon name="search" size={12} />}>
           조회
         </Button>
-        <p className="w-full text-[12px] text-ink-dim">기간을 비우면 최근 30일입니다. 녹음 재생은 감사 로그에 남습니다.</p>
+        <p className="w-full text-sm text-ink-dim">기간을 비우면 최근 30일입니다. 녹음 재생은 감사 로그에 남습니다.</p>
       </form>
       {body}
     </div>

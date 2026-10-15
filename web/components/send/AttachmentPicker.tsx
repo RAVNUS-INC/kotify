@@ -120,13 +120,13 @@ export function AttachmentPicker({
             alt={value.originalFilename}
             className="h-24 w-24 shrink-0 rounded object-cover"
           />
-          <div className="min-w-0 flex-1 text-[12.5px] text-ink-muted">
+          <div className="min-w-0 flex-1 text-md text-ink-muted">
             <div className="truncate text-ink">{value.originalFilename}</div>
-            <div className="mt-0.5 font-mono">
+            <div className="mt-0.5 tabular-nums">
               {value.width} × {value.height} ·{' '}
               {(value.sizeBytes / 1024).toFixed(1)} KB
             </div>
-            <div className="mt-0.5 text-[11px] text-ink-dim">
+            <div className="mt-0.5 text-xs text-ink-dim">
               첨부된 이미지는 MMS 로 전송됩니다. RCS 지원 번호에는 RCS 이미지로
               대체 전송될 수 있습니다.
             </div>
@@ -136,7 +136,7 @@ export function AttachmentPicker({
 
       {error ? (
         <div
-          className="rounded border border-danger/30 bg-danger/5 p-2 text-[12.5px] text-danger"
+          className="rounded border border-danger/30 bg-danger/5 p-2 text-md text-danger"
           role="alert"
         >
           {error}

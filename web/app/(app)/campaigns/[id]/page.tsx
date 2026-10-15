@@ -40,7 +40,7 @@ export default async function CampaignDetail({ params }: PageProps) {
         sub={
           <span className="flex items-center gap-2">
             <StatusBadge status={campaign.status} />
-            <span className="font-mono text-ink-dim">{campaign.createdAt}</span>
+            <span className="tabular-nums text-ink-dim">{campaign.createdAt}</span>
             <span className="text-ink-dim">·</span>
             <span>발신 {campaign.sender}</span>
           </span>
@@ -72,7 +72,7 @@ export default async function CampaignDetail({ params }: PageProps) {
           <div className="font-semibold">
             {campaign.status === 'scheduled' ? '예약 확인 필요' : '발송 실패 원인'}
           </div>
-          <div className="mt-0.5 text-[13px]">{campaign.failureReason}</div>
+          <div className="mt-0.5 text-md">{campaign.failureReason}</div>
         </div>
       )}
     </div>

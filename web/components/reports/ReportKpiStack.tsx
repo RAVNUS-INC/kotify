@@ -55,17 +55,24 @@ function KpiCell({ label, kpi, format, delay }: KpiCellProps) {
 
   return (
     <div className="rounded-lg border border-line bg-surface p-4">
-      <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-dim">
+      <div className="text-xs font-semibold text-ink-muted">
         {label}
       </div>
       <div className="mt-1.5 text-[28px] font-semibold leading-none tracking-[-0.03em] text-ink">
         <Counter value={kpi.value} format={format} delay={delay} duration={800} />
       </div>
       <div className="mt-1 flex items-center gap-1.5">
-        <span className={cn('font-mono text-[11px] font-medium', deltaColor)}>
-          {kpi.delta}
-        </span>
-        <span className="font-mono text-[10.5px] text-ink-dim">vs 지난 주</span>
+        {kpi.delta === '—' ? (
+          // 지난 기간이 0 이면 비율 변화가 없다 — 서버가 '—' 를 내려준다
+          <span className="text-xs text-ink-dim">지난 주 기록 없음</span>
+        ) : (
+          <>
+            <span className={cn('tabular-nums text-xs font-medium', deltaColor)}>
+              {kpi.delta}
+            </span>
+            <span className="text-xs text-ink-dim">vs 지난 주</span>
+          </>
+        )}
       </div>
       <div className="mt-3">
         {/* Phase 10c: Counter와 거의 동시에 시작, 700ms로 압축 (1.2초 예산) */}

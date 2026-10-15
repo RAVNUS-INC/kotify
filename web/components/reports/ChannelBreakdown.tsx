@@ -47,11 +47,11 @@ export function ChannelBreakdown({ channels }: ChannelBreakdownProps) {
                     className="inline-block h-1.5 w-1.5 rounded-full"
                     style={{ background: e.color }}
                   />
-                  <span className="text-[12.5px] font-medium text-ink">
+                  <span className="text-md font-medium text-ink">
                     {e.label}
                   </span>
                 </div>
-                <div className="flex items-baseline gap-1.5 font-mono text-[11px]">
+                <div className="flex items-baseline gap-1.5 tabular-nums text-xs">
                   <span className="tabular-nums text-ink">
                     {e.count.toLocaleString('ko-KR')}
                   </span>

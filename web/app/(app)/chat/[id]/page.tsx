@@ -39,7 +39,8 @@ export default async function ThreadDetailPage({ params }: PageProps) {
         deliveryRefreshIds={getDeliveryRefreshIds(thread)}
       />
       <PageHeader
-        title={thread.name}
+        // 연락처에 없는 번호는 서버가 이름 자리에 숫자만 준다 → 하이픈 넣은 번호로 보여준다
+        title={/^\d+$/.test(thread.name) ? formatPhone(thread.name) : thread.name}
         sub={`${formatPhone(thread.phone)} · ${thread.messages.length}개 메시지`}
         actions={
           <Link

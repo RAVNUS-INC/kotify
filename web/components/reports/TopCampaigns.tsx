@@ -35,7 +35,7 @@ export function TopCampaigns({ campaigns }: TopCampaignsProps) {
                   const href = `/campaigns/${encodeURIComponent(c.id)}` as Route;
                   return (
                     <tr key={c.id}>
-                      <td className="mono text-ink-dim">{i + 1}</td>
+                      <td className="tabular-nums text-ink-dim">{i + 1}</td>
                       <td>
                         <Link
                           href={href}

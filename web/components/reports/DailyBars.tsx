@@ -28,7 +28,7 @@ export function DailyBars({ daily }: DailyBarsProps) {
         />
 
         <div className="mt-4 border-t border-line pt-3">
-          <div className="mb-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
+          <div className="mb-2 text-xs font-semibold text-ink-muted">
             일별 회신
           </div>
           <ul
@@ -42,10 +42,10 @@ export function DailyBars({ daily }: DailyBarsProps) {
                   key={label}
                   className="flex flex-col items-center gap-0.5"
                 >
-                  <span className="font-mono text-xs tabular-nums text-ink">
+                  <span className="text-xs tabular-nums text-ink">
                     {reply}
                   </span>
-                  <span className="font-mono text-[10px] text-ink-dim">
+                  <span className="tabular-nums text-xs text-ink-dim">
                     {label}
                   </span>
                 </li>

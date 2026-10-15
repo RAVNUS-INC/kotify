@@ -24,7 +24,7 @@ export type MessageBubbleProps = {
 // 글자만 남는다 → 그 모드에서만 1px 테두리를 그린다(색은 브라우저가 CanvasText 로 강제).
 // 투명 테두리를 늘 두는 방식과 달리 일반 모드의 크기·모양은 그대로다.
 const BASE =
-  'min-w-0 max-w-[78%] rounded-2xl px-3 py-2 text-[13px] leading-[1.55] break-words whitespace-pre-wrap forced-colors:border';
+  'min-w-0 max-w-[78%] rounded-2xl px-3 py-2 text-md leading-[1.55] break-words whitespace-pre-wrap forced-colors:border';
 
 // 채널(RCS/SMS)은 색이 아니라 타임스탬프 옆 텍스트 라벨로 표시 — 색맹/프린트
 // 환경에서도 정보 유실 없도록. 발신/수신만 색으로 구분.
@@ -34,11 +34,14 @@ const STYLES: Record<MessageSide, Record<'default' | 'kakao', string>> = {
     default: 'bg-gray-1 border border-gray-3 text-ink',
     kakao: 'bg-[#fee500] text-[#2e2a1d]',
   },
+  // v2: 보낸 메시지는 연보라 바탕 + 검은 글자(진한 보라 채움은 화면을 무겁게 해 화면당 주 버튼에만 쓴다)
   us: {
-    default: 'bg-brand text-white',
+    default: 'bg-brand-soft border border-brand-border text-ink',
     kakao: 'bg-[#2e2a1d] text-white',
   },
 };
+
+const FAILED_STYLE = 'bg-danger-bg border border-danger text-ink';
 
 const KIND_LABEL: Record<MessageKind, string> = {
   rcs: 'RCS',
@@ -67,7 +70,12 @@ export function MessageBubble({
   children,
   className,
 }: MessageBubbleProps) {
-  const bubbleStyle = STYLES[side][kind === 'kakao' ? 'kakao' : 'default'];
+  // 전달 실패한 보낸 메시지는 말풍선 자체도 실패 색으로 — 메타 줄의 '실패'만으로는 눈에 덜 띈다.
+  // cn 은 충돌 클래스를 병합하지 않으므로 기본 스타일에 덧붙이지 않고 통째로 고른다.
+  const bubbleStyle =
+    side === 'us' && status === 'failed' && kind !== 'kakao'
+      ? FAILED_STYLE
+      : STYLES[side][kind === 'kakao' ? 'kakao' : 'default'];
   // 수신 말풍선은 status 가 와도 기존 표시 그대로.
   const outStatus = side === 'us' ? status : undefined;
   const statusLabel = outStatus ? STATUS_LABEL[outStatus] : null;
@@ -77,7 +85,7 @@ export function MessageBubble({
     side === 'us' ? `${channelMeta} / ${senderName?.trim() || '알 수 없음'}` : channelMeta;
   const meta = statusLabel ? `${senderMeta} · ${statusLabel}` : senderMeta;
   const metaClass = cn(
-    'font-mono text-[10px]',
+    'text-xs tabular-nums',
     side === 'us'
       ? 'min-w-0 max-w-[40%] break-words whitespace-normal text-right'
       : 'whitespace-nowrap',

@@ -43,7 +43,7 @@ export function GroupKpis({ group }: GroupKpisProps) {
         label="최근 발송"
         sub={group.lastCampaignAt ? group.lastCampaignAt.split(' ')[1] : undefined}
       >
-        <span className="text-[22px] font-mono">
+        <span className="text-[22px] tabular-nums">
           {group.lastCampaignAt ? group.lastCampaignAt.split(' ')[0] : '—'}
         </span>
       </KpiBox>
@@ -60,7 +60,7 @@ type KpiBoxProps = {
 function KpiBox({ label, sub, children }: KpiBoxProps) {
   return (
     <div className="rounded-lg border border-line bg-surface p-4">
-      <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-dim">
+      <div className="text-xs font-semibold text-ink-muted">
         {label}
       </div>
       <div
@@ -71,7 +71,7 @@ function KpiBox({ label, sub, children }: KpiBoxProps) {
         {children}
       </div>
       {sub && (
-        <div className="mt-1 font-mono text-[11px] text-ink-muted">{sub}</div>
+        <div className="mt-1 tabular-nums text-xs text-ink-muted">{sub}</div>
       )}
     </div>
   );

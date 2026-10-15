@@ -265,18 +265,14 @@ def _delta(
     - is_percent=False → '+N.N%' (비율 변화)
     - is_percent=True  → '+N.Np' (퍼센트 포인트 변화)
 
-    previous==0 이면 비율 정의가 불가능 — 유한한 상한(+999.9%)으로 표기해
-    프론트 배지가 항상 렌더 가능하도록 한다 ('∞' 같은 특수문자 폰트 호환
-    문제 회피).
+    previous==0 이면 비율 변화를 정의할 수 없다 — 지어낸 상한(+999.9%) 대신 '—'(flat)를
+    내려 프론트가 "지난 주 기록 없음"으로 보여준다. 퍼센트 포인트 변화는 previous==0 이어도
+    뺄셈으로 정의되므로 그대로 계산한다.
     """
     if current == previous:
         return ("0.0p" if is_percent else "0.0%", "flat")
-    if previous == 0:
-        # '이전 기간 0, 현재 증가' 는 신규 유입으로 간주 — 상한 표시.
-        return (
-            "+100.0p" if is_percent else "+999.9%",
-            "up" if current > 0 else "down",
-        )
+    if previous == 0 and not is_percent:
+        return ("—", "flat")
     if is_percent:
         diff = current - previous
         return (f"{diff:+.1f}p", "up" if diff > 0 else "down")

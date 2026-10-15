@@ -21,6 +21,26 @@ describe('MessageBubble 발신 전달 상태', () => {
     expect(screen.getByLabelText('보낸 RCS 메시지, 전송 실패')).toHaveTextContent('답장입니다');
   });
 
+  it('보낸 말풍선은 연보라 바탕, 전송 실패는 기본 색 없이 실패 색만 쓴다', () => {
+    const { unmount } = render(
+      <MessageBubble side="us" kind="sms" status="sent">
+        정상
+      </MessageBubble>,
+    );
+    expect(screen.getByLabelText(/^보낸 SMS 메시지/)).toHaveClass('bg-brand-soft', 'text-ink');
+    unmount();
+
+    render(
+      <MessageBubble side="us" kind="sms" status="failed">
+        실패
+      </MessageBubble>,
+    );
+    const failed = screen.getByLabelText('보낸 SMS 메시지, 전송 실패');
+    // cn 이 충돌 클래스를 병합하지 않으므로 두 배경이 함께 붙지 않아야 한다
+    expect(failed).toHaveClass('bg-danger-bg', 'border-danger');
+    expect(failed).not.toHaveClass('bg-brand-soft');
+  });
+
   it('결과를 기다리는 발신(SMS 대체 발송 중 포함)은 대기로 표시한다', () => {
     render(
       <MessageBubble side="us" kind="sms" status="pending" timestamp="01:38" senderName="가상 담당가">

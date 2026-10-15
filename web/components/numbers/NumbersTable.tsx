@@ -61,7 +61,7 @@ export function NumbersTable({ numbers, canManage = false }: NumbersTableProps) 
               const usageWarn = usagePct > 90;
               return (
                 <tr key={n.id}>
-                  <td className="mono text-ink">{formatPhone(n.number)}</td>
+                  <td className="tabular-nums text-ink">{formatPhone(n.number)}</td>
                   <td>{KIND_LABEL[n.kind]}</td>
                   <td>
                     <div className="flex flex-wrap gap-1">
@@ -85,7 +85,7 @@ export function NumbersTable({ numbers, canManage = false }: NumbersTableProps) 
                   <td className="num">
                     {n.status === 'approved' && n.dailyLimit ? (
                       <div className="flex flex-col items-end gap-1">
-                        <div className="font-mono text-[12.5px] tabular-nums">
+                        <div className="text-md tabular-nums">
                           {n.dailyUsage.toLocaleString('ko-KR')} /{' '}
                           {n.dailyLimit.toLocaleString('ko-KR')}
                         </div>

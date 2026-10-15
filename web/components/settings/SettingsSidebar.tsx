@@ -60,7 +60,7 @@ export function SettingsSidebar({ active }: SettingsSidebarProps) {
                 {item.label}
               </div>
               {item.hint && (
-                <div className="font-mono text-[10.5px] text-ink-dim">
+                <div className="text-xs text-ink-dim">
                   {item.hint}
                 </div>
               )}

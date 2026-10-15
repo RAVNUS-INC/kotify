@@ -224,7 +224,7 @@ export function ProviderSettingsForm({
         >
           <header className="mb-4">
             <h2 className="text-base font-semibold text-ink">msghub 인증</h2>
-            <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            <p className="mt-0.5 text-md text-ink-muted">
               U+ msghub API 호출에 사용하는 자격증명. 비어 있으면 발송 불가.
             </p>
           </header>
@@ -235,7 +235,7 @@ export function ProviderSettingsForm({
                 value={msghubEnv}
                 onChange={(e) => setMsghubEnv(e.target.value as MsghubEnv)}
                 disabled={submitting}
-                className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand focus:shadow-[0_0_0_3px_rgba(59,0,139,0.08)] focus:outline-none disabled:bg-gray-1 disabled:text-ink-dim"
+                className="h-9 w-full rounded border border-gray-4 bg-surface px-3 text-md focus:border-brand disabled:bg-gray-1 disabled:text-ink-dim"
               >
                 <option value="production">production (상용)</option>
                 <option value="qa">qa (검수)</option>
@@ -316,7 +316,7 @@ export function ProviderSettingsForm({
                 </Button>
               </div>
             </Field>
-            <div className="md:col-span-2 rounded border border-line bg-gray-1 p-3 text-[12px] text-ink-muted">
+            <div className="md:col-span-2 rounded border border-line bg-gray-1 p-3 text-sm text-ink-muted">
               저장 후{' '}
               <a
                 href="/settings/developers"
@@ -340,7 +340,7 @@ export function ProviderSettingsForm({
             <h2 className="text-base font-semibold text-ink">
               회신 알림 (n8n)
             </h2>
-            <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            <p className="mt-0.5 text-md text-ink-muted">
               고객이 문자/RCS 로 회신하면 지정한 n8n Webhook URL 로 전송합니다.
               n8n 에서 Telegram 등으로 포워딩하세요. 알림 테스트는 현재 로그인
               사용자에게 실제 Telegram 알림을 요청합니다.
@@ -366,7 +366,7 @@ export function ProviderSettingsForm({
                 disabled={submitting}
               />
             </Field>
-            <div className="rounded border border-line bg-gray-1 p-3 text-[12px] text-ink-muted">
+            <div className="rounded border border-line bg-gray-1 p-3 text-sm text-ink-muted">
               전송 페이로드(JSON) 주요 필드: <code>from</code>(회신 번호),{' '}
               <code>fromDisplay</code>(하이픈 표시),{' '}
               <code>text</code>(본문), <code>to</code>(발신번호),{' '}
@@ -386,7 +386,7 @@ export function ProviderSettingsForm({
             <h2 className="text-base font-semibold text-ink">
               하이웍스 주소록 (CID)
             </h2>
-            <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            <p className="mt-0.5 text-md text-ink-muted">
               수신 전화·문자의 발신자를 하이웍스 공유 주소록 이름으로
               표시합니다. 별도 MySQL(cid_lookup)을 읽기 전용으로 조회합니다.
             </p>
@@ -455,7 +455,7 @@ export function ProviderSettingsForm({
             <h2 className="text-base font-semibold text-ink">
               전화 교환기 (PBX)
             </h2>
-            <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            <p className="mt-0.5 text-md text-ink-muted">
               사내 VitalPBX API 로 통화 기록·녹음을 조회하고 팩스를 보냅니다.
               공인 도메인이 아니라 사내 주소로 직접 연결하세요.
             </p>
@@ -529,7 +529,7 @@ export function ProviderSettingsForm({
           >
             <header className="mb-4">
               <h2 className="text-base font-semibold text-ink">Keycloak (SSO)</h2>
-              <p className="mt-0.5 text-[12.5px] text-ink-muted">
+              <p className="mt-0.5 text-md text-ink-muted">
                 OIDC Authorization Code Flow. issuer 와 client_id 는 Keycloak 의
                 Realm/Client 설정과 일치해야 한다.
               </p>
@@ -579,7 +579,7 @@ export function ProviderSettingsForm({
           >
             <header className="mb-4">
               <h2 className="text-base font-semibold text-ink">앱 / 세션</h2>
-              <p className="mt-0.5 text-[12.5px] text-ink-muted">
+              <p className="mt-0.5 text-md text-ink-muted">
                 외부 접근 URL 과 세션 서명 키. URL 은 Keycloak redirect_uri
                 생성 + 로그아웃 post_logout 에 사용.
               </p>

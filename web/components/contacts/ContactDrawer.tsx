@@ -81,7 +81,7 @@ export function ContactDrawer({
           <div className="flex flex-col gap-2">
             {actionError ? (
               <div
-                className="text-[12px] text-danger"
+                className="text-sm text-danger"
                 role="alert"
               >
                 {actionError}
@@ -162,7 +162,7 @@ export function ContactDrawer({
                     className="flex items-center justify-between gap-2 rounded border border-line bg-gray-1 px-3 py-2 text-sm"
                   >
                     <span className="truncate">{rc.name}</span>
-                    <span className="shrink-0 font-mono text-[11px] text-ink-dim">
+                    <span className="shrink-0 tabular-nums text-xs text-ink-dim">
                       {rc.sentAt.split(' ')[0]}
                     </span>
                   </li>
@@ -185,7 +185,7 @@ export function ContactDrawer({
                       <span className="truncate font-medium text-ink">
                         {rh.campaignName}
                       </span>
-                      <span className="shrink-0 font-mono text-[11px] text-ink-dim">
+                      <span className="shrink-0 tabular-nums text-xs text-ink-dim">
                         {rh.at.split(' ')[1]}
                       </span>
                     </div>
@@ -218,7 +218,7 @@ type SectionProps = {
 function Section({ title, children }: SectionProps) {
   return (
     <section>
-      <h3 className="mb-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
+      <h3 className="mb-2 text-xs font-semibold text-ink-muted">
         {title}
       </h3>
       {children}
@@ -236,7 +236,7 @@ function InfoRow({ label, value, mono }: InfoRowProps) {
   return (
     <div className="flex items-baseline justify-between gap-3 text-sm">
       <span className="text-ink-muted">{label}</span>
-      <span className={mono ? 'font-mono text-ink' : 'text-ink'}>{value}</span>
+      <span className={mono ? 'tabular-nums text-ink' : 'text-ink'}>{value}</span>
     </div>
   );
 }

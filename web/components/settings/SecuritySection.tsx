@@ -48,7 +48,7 @@ function Card({ icon, title, description, badge }: CardProps) {
           <span className="text-sm font-semibold text-ink">{title}</span>
           {badge}
         </div>
-        <p className="mt-0.5 text-[12.5px] text-ink-muted">{description}</p>
+        <p className="mt-0.5 text-md text-ink-muted">{description}</p>
       </div>
     </div>
   );

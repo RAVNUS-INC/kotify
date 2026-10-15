@@ -17,7 +17,7 @@ export default function Login({
     <Card>
       <CardBody>
         <div className="py-2 text-center">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gray-11 font-mono text-white">
+          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gray-11 text-white">
             K
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">Kotify</h1>
@@ -34,7 +34,7 @@ export default function Login({
           Keycloak으로 로그인
         </a>
 
-        <div className="mt-4 text-center text-[11px] text-ink-dim">
+        <div className="mt-4 text-center text-xs text-ink-dim">
           로그인 후 <span className="font-mono">{from}</span>으로 돌아갑니다.
         </div>
       </CardBody>

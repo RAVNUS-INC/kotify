@@ -24,7 +24,7 @@ export function Placeholder({
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface text-ink-dim">
           <Icon name={icon} size={22} />
         </div>
-        <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-brand">
+        <div className="text-xs font-semibold text-brand">
           {phase}
         </div>
         <p className="max-w-[420px] text-sm leading-relaxed text-ink-muted">

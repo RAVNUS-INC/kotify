@@ -36,11 +36,11 @@ export function AuditTable({ entries }: AuditTableProps) {
           <tbody>
             {entries.map((e) => (
               <tr key={e.id}>
-                <td className="mono">{e.time}</td>
+                <td className="tabular-nums">{e.time}</td>
                 <td>
                   <div className="flex flex-col">
                     <span className="font-medium text-ink">{e.actor}</span>
-                    <span className="font-mono text-[11px] text-ink-dim">
+                    <span className="text-xs text-ink-dim">
                       {e.actorEmail}
                     </span>
                   </div>

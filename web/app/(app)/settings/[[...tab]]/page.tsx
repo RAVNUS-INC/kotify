@@ -11,7 +11,6 @@ import {
   WebhooksList,
   type SettingsTab,
 } from '@/components/settings';
-import { Button, Icon } from '@/components/ui';
 import {
   fetchApiKeys,
   fetchMembers,
@@ -91,13 +90,10 @@ async function OrgTabContent() {
         <header className="mb-3 flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-ink">멤버</h2>
-            <p className="mt-0.5 text-[12.5px] text-ink-muted">
-              역할 변경·초대는 Phase 후속에 연결됩니다.
+            <p className="mt-0.5 text-md text-ink-muted">
+              역할은 Keycloak 에서 부여하며 다음 로그인 때 반영됩니다.
             </p>
           </div>
-          <Button variant="secondary" size="sm" icon={<Icon name="plus" size={12} />} disabled>
-            멤버 초대
-          </Button>
         </header>
         <MembersListWrapper />
       </section>
@@ -129,13 +125,10 @@ async function DevelopersTabContent() {
         <header className="mb-3 flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-ink">API 키</h2>
-            <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            <p className="mt-0.5 text-md text-ink-muted">
               외부 시스템에서 Kotify를 호출할 때 사용합니다.
             </p>
           </div>
-          <Button variant="secondary" size="sm" icon={<Icon name="plus" size={12} />} disabled>
-            새 키 발급
-          </Button>
         </header>
         <ApiKeysList keys={keys} />
       </section>
@@ -146,7 +139,7 @@ async function DevelopersTabContent() {
       >
         <header className="mb-3">
           <h2 className="text-base font-semibold text-ink">웹훅</h2>
-          <p className="mt-0.5 text-[12.5px] text-ink-muted">
+          <p className="mt-0.5 text-md text-ink-muted">
             msghub 가 발송 리포트와 고객 회신을 여기로 POST 합니다. 이 URL 을
             msghub 콘솔에 등록하세요.
           </p>

@@ -53,7 +53,7 @@ export function FaxResendButton({ job }: { job: FaxJob }) {
         다시 보내기
       </Button>
       {error ? (
-        <span role="alert" className="text-[12px] text-danger">
+        <span role="alert" className="text-sm text-danger">
           {error}
         </span>
       ) : null}

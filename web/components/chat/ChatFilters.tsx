@@ -30,7 +30,7 @@ export function ChatFilters({ active, unreadCount = 0, selected, q }: ChatFilter
       aria-label="대화 필터"
       className="flex flex-col gap-1 border-r border-line bg-gray-1 p-3"
     >
-      <div className="mb-1 px-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
+      <div className="mb-1 px-2 text-xs font-semibold text-ink-muted">
         대화
       </div>
 
@@ -61,7 +61,7 @@ export function ChatFilters({ active, unreadCount = 0, selected, q }: ChatFilter
             {count != null && count > 0 && (
               <span
                 className={cn(
-                  'font-mono text-[11px]',
+                  'tabular-nums text-xs',
                   isActive ? 'text-brand font-semibold' : 'text-ink-dim',
                 )}
               >
@@ -72,12 +72,6 @@ export function ChatFilters({ active, unreadCount = 0, selected, q }: ChatFilter
         );
       })}
 
-      <div className="mt-5 mb-1 px-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-dim">
-        최근 캠페인
-      </div>
-      <div className="px-2 text-xs text-ink-dim">
-        Phase 7에서 연결됩니다.
-      </div>
     </aside>
   );
 }

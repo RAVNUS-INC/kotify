@@ -60,12 +60,12 @@ export function NotificationItem({ notification: n }: NotificationItemProps) {
             {n.title}
             {n.unread && <span className="sr-only"> — 읽지 않음</span>}
           </span>
-          <span className="shrink-0 font-mono text-[11px] text-ink-dim">
+          <span className="shrink-0 tabular-nums text-xs text-ink-dim">
             {n.createdAt.split(' ')[1] ?? n.createdAt}
           </span>
         </div>
         {n.subtitle && (
-          <div className="mt-0.5 truncate text-[12.5px] text-ink-muted">
+          <div className="mt-0.5 truncate text-md text-ink-muted">
             {n.subtitle}
           </div>
         )}
@@ -90,7 +90,7 @@ export function NotificationItem({ notification: n }: NotificationItemProps) {
       <Link
         href={safeHref as Route}
         aria-label={`${n.title} — ${n.subtitle ?? ''}`}
-        className="block border-b border-line last:border-b-0 focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(59,0,139,0.12)] focus-visible:z-10"
+        className="block border-b border-line last:border-b-0 focus-visible:z-10"
       >
         {content}
       </Link>
