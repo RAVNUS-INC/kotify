@@ -108,7 +108,7 @@ export function FaxComposer() {
           role={msg?.kind === 'err' ? 'alert' : 'status'}
           className={msg?.kind === 'err' ? 'text-sm text-danger' : 'text-sm text-ink-muted'}
         >
-          {msg?.text ?? '회선 사정으로 실패하면 PBX 가 5분 간격으로 2번 더 시도합니다.'}
+          {msg?.text ?? '음성 회선으로 보내 중간에 끊길 수 있습니다. 실패하면 이력에서 다시 보내기를 누르세요.'}
         </p>
         <Button
           type="submit"
