@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { ChatThreadDetail } from '@/types/chat';
 import { Badge, Button, Icon } from '@/components/ui';
-import { formatPhone, threadDisplayName } from '@/lib/phone';
+import { formatPhone, hasDisplayName, threadDisplayName } from '@/lib/phone';
 
 export type ThreadRecipientCardProps = {
   thread: ChatThreadDetail;
@@ -29,8 +29,15 @@ export function ThreadRecipientCard({ thread, extra }: ThreadRecipientCardProps)
       className="flex h-full flex-col gap-5 overflow-y-auto rounded-lg border border-line bg-surface p-5"
     >
       <div className="flex items-center gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gray-3 text-base text-ink">
-          {threadDisplayName(thread).charAt(0)}
+        <div
+          aria-hidden
+          className={
+            hasDisplayName(thread)
+              ? 'flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand-soft text-lg font-bold text-brand'
+              : 'flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-hover text-ink-dim'
+          }
+        >
+          {hasDisplayName(thread) ? threadDisplayName(thread).charAt(0) : <Icon name="user" size={20} />}
         </div>
         <div className="min-w-0">
           <div className="truncate text-base font-semibold text-ink">

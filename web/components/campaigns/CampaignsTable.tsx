@@ -7,6 +7,8 @@ import { StatusBadge } from './StatusBadge';
 
 export type CampaignsTableProps = {
   campaigns: ReadonlyArray<Campaign>;
+  /** 비었을 때 설명. 기본은 발송 이력의 검색 결과 문구 */
+  emptyDescription?: string;
 };
 
 function fmtNumber(n: number | null | undefined): string {
@@ -25,14 +27,17 @@ function fmtRate(reach: number | null | undefined, total: number): string {
   return `${pct.toFixed(1)}%`;
 }
 
-export function CampaignsTable({ campaigns }: CampaignsTableProps) {
+export function CampaignsTable({
+  campaigns,
+  emptyDescription = '검색 조건에 맞는 캠페인이 없습니다.',
+}: CampaignsTableProps) {
   if (campaigns.length === 0) {
     return (
       <div className="rounded-lg border border-line bg-surface">
         <EmptyState
           icon="zap"
           title="캠페인 없음"
-          description="검색 조건에 맞는 캠페인이 없습니다."
+          description={emptyDescription}
           size="md"
         />
       </div>

@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import type { Route } from 'next';
-import { Icon } from '@/components/ui';
 import { cn } from '@/lib/cn';
 
-export type ChatFilter = 'all' | 'unread' | 'urgent';
+// 'urgent'(긴급)는 서버가 지원하지 않아 눌러도 전체 목록과 같았다 → 뺐다.
+export type ChatFilter = 'all' | 'unread';
 
 export type ChatFiltersProps = {
   active: ChatFilter;
@@ -12,66 +12,41 @@ export type ChatFiltersProps = {
   q?: string;
 };
 
-type Item = {
-  value: ChatFilter;
-  label: string;
-  icon: Parameters<typeof Icon>[0]['name'];
-};
-
-const ITEMS: ReadonlyArray<Item> = [
-  { value: 'all', label: '전체', icon: 'inbox' },
-  { value: 'unread', label: '안읽음', icon: 'bell' },
-  { value: 'urgent', label: '긴급', icon: 'alert' },
+const ITEMS: ReadonlyArray<{ value: ChatFilter; label: string }> = [
+  { value: 'all', label: '전체' },
+  { value: 'unread', label: '안읽음' },
 ];
 
+/** 대화 목록 위의 세그먼트 필터. 열린 대화·검색어는 유지하고 페이지는 처음으로 돌린다. */
 export function ChatFilters({ active, unreadCount = 0, selected, q }: ChatFiltersProps) {
   return (
-    <aside
-      aria-label="대화 필터"
-      className="flex flex-col gap-1 border-r border-line bg-gray-1 p-3"
-    >
-      <div className="mb-1 px-2 text-xs font-semibold text-ink-muted">
-        대화
-      </div>
-
-      {ITEMS.map((item) => {
-        const isActive = item.value === active;
-        const qs = new URLSearchParams();
-        if (item.value !== 'all') qs.set('filter', item.value);
-        if (selected) qs.set('selected', selected);
-        if (q) qs.set('q', q);
-        const href = `/chat${qs.size ? `?${qs.toString()}` : ''}` as Route;
-        const count = item.value === 'unread' ? unreadCount : undefined;
-        return (
-          <Link
-            key={item.value}
-            href={href}
-            aria-current={isActive ? 'page' : undefined}
-            className={cn(
-              'flex items-center justify-between rounded px-2 py-1.5 text-md transition-colors duration-fast ease-out',
-              isActive
-                ? 'bg-surface text-ink font-medium shadow-xs'
-                : 'text-ink-muted hover:bg-surface hover:text-ink',
-            )}
-          >
-            <span className="flex items-center gap-2">
-              <Icon name={item.icon} size={13} strokeWidth={1.6} />
+    <nav aria-label="대화 필터" className="shrink-0 border-b border-line bg-surface px-4 pt-4 pb-3">
+      <div className="k-segctrl">
+        {ITEMS.map((item) => {
+          const isActive = item.value === active;
+          const qs = new URLSearchParams();
+          if (item.value !== 'all') qs.set('filter', item.value);
+          if (selected) qs.set('selected', selected);
+          if (q) qs.set('q', q);
+          const href = `/chat${qs.size ? `?${qs.toString()}` : ''}` as Route;
+          const count = item.value === 'unread' ? unreadCount : undefined;
+          return (
+            <Link
+              key={item.value}
+              href={href}
+              aria-current={isActive ? 'page' : undefined}
+              className={cn(isActive && 'on')}
+            >
               {item.label}
-            </span>
-            {count != null && count > 0 && (
-              <span
-                className={cn(
-                  'tabular-nums text-xs',
-                  isActive ? 'text-brand font-semibold' : 'text-ink-dim',
-                )}
-              >
-                {count}
-              </span>
-            )}
-          </Link>
-        );
-      })}
-
-    </aside>
+              {count != null && count > 0 && (
+                <span className={cn('tabular-nums', isActive ? 'text-brand' : 'text-ink-dim')}>
+                  {count}
+                </span>
+              )}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
   );
 }

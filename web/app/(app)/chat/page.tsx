@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import type { Route } from 'next';
 import { PageHeader } from '@/components/shell';
 import {
   ChatFilters,
@@ -9,8 +11,9 @@ import {
 import { EmptyState } from '@/components/ui';
 import { ApiError } from '@/lib/api';
 import { fetchThread, fetchThreadPage, getDeliveryRefreshIds } from '@/lib/chat';
+import { formatPhone, threadDisplayName } from '@/lib/phone';
 
-const VALID_FILTERS = new Set<ChatFilter>(['all', 'unread', 'urgent']);
+const VALID_FILTERS = new Set<ChatFilter>(['all', 'unread']);
 
 function normalizeFilter(raw: string | string[] | undefined): ChatFilter {
   if (typeof raw === 'string' && VALID_FILTERS.has(raw as ChatFilter)) {
@@ -58,8 +61,9 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
     // 0%` 가 `height: calc(...)` 를 덮어써서 앞선 수정이 먹히지 않았다 (flex
     // item 은 basis 가 0% 면 height 를 무시). `.k-page` 를 아예 빼고 padding/
     // min-width 를 Tailwind 로 직접 선언해 specificity 충돌을 원천 제거.
-    // pt-8=32 / px-7=28 / pb-5=20 — `.k-page` 의 32/28/48 에서 bottom 만 축소.
-    <div className="flex h-[calc(100dvh_-_52px)] min-h-0 min-w-0 flex-col px-7 pb-5 pt-8">
+    // 56px = 상단 바(.k-topbar) 높이. 여백은 `.k-page` 와 같은 32px, 아래만 20px.
+    // html 글자 크기가 14px 이라 rem 단위(px-8 등) 대신 px 로 적는다.
+    <div className="flex h-[calc(100dvh_-_56px)] min-h-0 min-w-0 flex-col px-[32px] pb-[20px] pt-[32px]">
       {/* SSE 구독 — 고객 회신, 열린 대화의 전달 대기 메시지 결과를 새로고침 없이 갱신(UI 없음). */}
       <ChatLiveRefresh
         threadId={threadDetail?.id}
@@ -71,15 +75,33 @@ export default async function ChatPage({ searchParams }: ChatPageProps) {
       />
 
       <div className="flex-1 min-h-0 overflow-hidden rounded-lg border border-line bg-surface">
-        <div
-          className="grid h-full"
-          style={{ gridTemplateColumns: '200px 320px 1fr' }}
-        >
-          <ChatFilters active={filter} unreadCount={unreadCount} selected={selected} q={q} />
-          <ThreadList threads={threads} activeId={selected} filter={filter} q={q} page={meta} />
+        {/* v2: 왼쪽 필터 칸을 없애고 필터를 목록 위로 올렸다 → 목록 | 대화 두 칸 */}
+        <div className="grid h-full grid-cols-[340px_minmax(0,1fr)]">
+          <div className="flex min-h-0 flex-col border-r border-line">
+            <ChatFilters active={filter} unreadCount={unreadCount} selected={selected} q={q} />
+            <ThreadList threads={threads} activeId={selected} filter={filter} q={q} page={meta} />
+          </div>
           {threadDetail ? (
-            <div className="flex min-h-0 flex-col bg-surface-subtle p-3">
-              <ThreadView thread={threadDetail} />
+            <div className="flex min-h-0 flex-col bg-surface-subtle">
+              <div className="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-5 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-[15px] font-semibold leading-[22px] text-ink">
+                    {threadDisplayName(threadDetail)}
+                  </div>
+                  <div className="text-xs tabular-nums text-ink-dim">
+                    {formatPhone(threadDetail.phone)} · 메시지 {threadDetail.messages.length}개
+                  </div>
+                </div>
+                <Link
+                  href={`/chat/${encodeURIComponent(threadDetail.id)}` as Route}
+                  className="k-link ml-auto shrink-0 text-md"
+                >
+                  연락처·통화 기록 보기
+                </Link>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col p-3">
+                <ThreadView thread={threadDetail} />
+              </div>
             </div>
           ) : (
             <div className="flex items-center justify-center bg-surface-subtle">

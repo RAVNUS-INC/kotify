@@ -55,3 +55,8 @@ export function threadDisplayName(t: {
   if (t.name && t.name !== t.phone) return t.name;
   return formatPhone(t.phone);
 }
+
+/** 연락처 이름이 붙은 대화인지 — 아니면 화면에는 번호만 있고 아바타에 첫 글자를 쓸 수 없다. */
+export function hasDisplayName(t: { contactName?: string; name?: string; phone: string }): boolean {
+  return Boolean((t.contactName && t.contactName.trim()) || (t.name && t.name !== t.phone));
+}

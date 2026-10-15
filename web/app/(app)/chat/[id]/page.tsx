@@ -45,7 +45,7 @@ export default async function ThreadDetailPage({ params }: PageProps) {
         actions={
           <Link
             href="/chat"
-            className="inline-flex h-8 items-center gap-1 rounded border border-gray-4 bg-surface px-2.5 text-sm text-ink-muted transition-colors duration-fast ease-out hover:bg-gray-1"
+            className="inline-flex h-[36px] items-center gap-1.5 rounded border border-line-strong bg-surface px-[14px] text-md font-semibold text-ink no-underline transition-colors duration-fast ease-out hover:bg-surface-hover"
           >
             <Icon name="arrowLeft" size={12} />
             대화방 목록

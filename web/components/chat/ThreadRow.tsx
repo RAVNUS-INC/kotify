@@ -3,7 +3,8 @@ import type { Route } from 'next';
 import type { ChatThread } from '@/types/chat';
 import { formatThreadTime } from '@/lib/chat';
 import { cn } from '@/lib/cn';
-import { threadDisplayName } from '@/lib/phone';
+import { hasDisplayName, threadDisplayName } from '@/lib/phone';
+import { Icon } from '@/components/ui';
 
 export type ThreadRowProps = {
   thread: ChatThread;
@@ -28,8 +29,9 @@ export function ThreadRow({ thread, today, active = false, href }: ThreadRowProp
       href={href}
       aria-current={active ? 'true' : undefined}
       className={cn(
-        'flex items-start gap-3 border-b border-line px-4 py-3 transition-colors duration-fast ease-out',
-        active ? 'bg-brand-soft' : unread ? 'bg-surface hover:bg-gray-1' : 'bg-surface hover:bg-gray-1',
+        'flex items-start gap-3 border-b border-line px-4 py-3 text-inherit no-underline transition-colors duration-fast ease-out',
+        // 열린 대화: 연보라 바탕 + 왼쪽 3px 브랜드 선(색만이 아니라 aria-current 로도 알린다)
+        active ? 'bg-brand-soft shadow-[inset_3px_0_0_var(--brand)]' : 'bg-surface hover:bg-surface-subtle',
       )}
     >
       {unread && (
@@ -40,8 +42,15 @@ export function ThreadRow({ thread, today, active = false, href }: ThreadRowProp
       )}
       {!unread && <span aria-hidden className="mt-1 inline-block h-1.5 w-1.5 shrink-0" />}
 
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-3 text-xs text-gray-9">
-        {threadDisplayName(thread).charAt(0)}
+      {/* 이름이 있으면 첫 글자, 번호뿐이면 사람 아이콘 — 예전엔 번호 첫 글자 "0" 이 보였다 */}
+      <div
+        aria-hidden
+        className={cn(
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-md font-bold',
+          hasDisplayName(thread) ? 'bg-brand-soft text-brand' : 'bg-surface-hover text-ink-dim',
+        )}
+      >
+        {hasDisplayName(thread) ? threadDisplayName(thread).charAt(0) : <Icon name="user" size={16} />}
       </div>
 
       <div className="min-w-0 flex-1">

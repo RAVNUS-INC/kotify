@@ -18,7 +18,7 @@ export function DashboardActions() {
     <>
       <Button
         variant="ghost"
-        size="sm"
+        size="md"
         icon={<Icon name="refresh" size={12} />}
         onClick={() => router.refresh()}
       >
@@ -26,9 +26,9 @@ export function DashboardActions() {
       </Button>
       <Link
         href="/send/new"
-        className="inline-flex h-8 items-center gap-1.5 rounded border border-brand bg-brand px-3 text-sm font-medium text-white transition-colors duration-fast ease-out hover:bg-brand-hover"
+        className="inline-flex h-[36px] items-center gap-1.5 rounded border border-brand bg-brand px-[14px] text-md font-semibold text-white no-underline transition-colors duration-fast ease-out hover:bg-brand-hover hover:text-white"
       >
-        <Icon name="send" size={12} />
+        <Icon name="send" size={14} />
         새 발송
       </Link>
     </>
