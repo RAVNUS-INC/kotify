@@ -9,7 +9,7 @@ import { fetchCalls, type CallQuery } from '@/lib/pbx';
 import { formatPhone } from '@/lib/phone';
 
 type PageProps = {
-  searchParams?: { phone?: string; from?: string; to?: string; type?: string; offset?: string };
+  searchParams?: { phone?: string; from?: string; to?: string; type?: string; cursor?: string };
 };
 
 const TYPES = ['in', 'out', 'internal', 'transit'] as const;
@@ -19,24 +19,24 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 function readQuery(sp: PageProps['searchParams']): CallQuery {
   const phone = (sp?.phone ?? '').replace(/\D/g, '');
   const type = TYPES.find((t) => t === sp?.type);
-  const offset = Number.parseInt(sp?.offset ?? '0', 10);
+  const cursor = sp?.cursor && /^\d+:[\d.]*$/.test(sp.cursor) ? sp.cursor : undefined;
   return {
     phone: phone || undefined,
     from: sp?.from && DATE.test(sp.from) ? sp.from : undefined,
     to: sp?.to && DATE.test(sp.to) ? sp.to : undefined,
     type,
     limit: PAGE_SIZE,
-    offset: Number.isFinite(offset) && offset > 0 ? offset : 0,
+    cursor,
   };
 }
 
-function pageHref(query: CallQuery, offset: number): Route {
+function pageHref(query: CallQuery, cursor?: string): Route {
   const qs = new URLSearchParams();
   if (query.phone) qs.set('phone', query.phone);
   if (query.from) qs.set('from', query.from);
   if (query.to) qs.set('to', query.to);
   if (query.type) qs.set('type', query.type);
-  if (offset > 0) qs.set('offset', String(offset));
+  if (cursor) qs.set('cursor', cursor);
   return `/calls${qs.size ? `?${qs.toString()}` : ''}` as Route;
 }
 
@@ -60,20 +60,20 @@ export default async function CallsPage({ searchParams }: PageProps) {
     try {
       const res = await fetchCalls(query);
       sub = `${sub} · ${res.meta.from} ~ ${res.meta.to}`;
-      const offset = query.offset ?? 0;
+      // PBX 가 offset 을 지원하지 않아 앞쪽으로만 넘긴다(처음으로 = 커서 없이).
       body = (
         <>
           <CallsTable calls={res.data} />
-          {offset > 0 || res.meta.hasMore ? (
-            <nav aria-label="페이지" className="mt-3 flex justify-end gap-2">
-              {offset > 0 ? (
-                <Link href={pageHref(query, Math.max(0, offset - PAGE_SIZE))} className="text-sm text-ink-muted hover:text-ink">
-                  ← 이전
+          {query.cursor || res.meta.nextCursor ? (
+            <nav aria-label="페이지" className="mt-3 flex justify-end gap-3">
+              {query.cursor ? (
+                <Link href={pageHref(query)} className="text-sm text-ink-muted hover:text-ink">
+                  ← 처음으로
                 </Link>
               ) : null}
-              {res.meta.hasMore ? (
-                <Link href={pageHref(query, offset + PAGE_SIZE)} className="text-sm text-ink-muted hover:text-ink">
-                  다음 →
+              {res.meta.nextCursor ? (
+                <Link href={pageHref(query, res.meta.nextCursor)} className="text-sm text-ink-muted hover:text-ink">
+                  더 이전 통화 →
                 </Link>
               ) : null}
             </nav>

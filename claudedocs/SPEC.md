@@ -569,14 +569,14 @@ web/app/
 | `POST /fax/{id}/resend` | 본인 또는 admin | 같은 PDF·번호로 새 작업 |
 | `GET /fax/{id}/pdf` | 본인 또는 admin | 보낸 PDF 보기 |
 | `GET /pbx/fax-files/{token}.pdf` | 없음(PBX 전용) | HMAC 서명·10분 만료·열린 작업·5회 상한. 실패는 모두 404 |
-| `GET /pbx/calls?phone=&from=&to=&type=&limit=&offset=` | sender 이상, 번호 없는 조회는 admin | PBX CDR 을 조회 시점에 읽어 축약 반환. 기본 최근 30일 |
+| `GET /pbx/calls?phone=&from=&to=&type=&limit=&cursor=` | sender 이상, 번호 없는 조회는 admin | PBX CDR 을 조회 시점에 읽어 축약 반환. 기본 최근 30일(KST), 다음 쪽은 `meta.nextCursor` |
 | `GET /pbx/recordings/{token}` | sender 이상, 토큰 발급 사용자만 | PBX 녹음을 서버가 스트리밍 중계(Range → 206) |
 | `POST /pbx/test` | admin + CSRF | CDR 1건·팩스 장치 조회. 장치 secret·번호는 버림 |
 
 - **팩스 상태**: 접수되면 `SUBMITTED`, 명시적 거부는 `FAILED`, 시간 초과·5xx·연결 끊김처럼 접수 여부를 모르면 `UNKNOWN`이며 **자동 재전송하지 않는다**(이중 발송 방지). 회선 1개를 쓰는 G.711 팩스라 `QUEUED`·`SUBMITTED`가 3건이면 새 발송은 409 `fax_busy`. 재시도는 PBX 의 `retries`·`retry_time`에 맡긴다.
-- **결과 추적**: 60초 주기 루프(`_reconcile_loop`)가 PBX 팩스 로그(`GET /virtual_faxes/log/{id}`)를 마지막으로 확인한 ID(`pbx.fax_log_cursor`)부터 앞으로 한 주기 최대 20건 읽고, 빈 ID 가 3개 이어지면 멈춘다. 발송 응답의 임시 파일 이름(`pbx_file`)으로 맞추고, 없으면 번호 끝 8자리+시각(발송 −5분~+2시간)이 유일할 때만 맞춘다. 찾은 로그는 최종 상태가 될 때까지 그 ID 만 다시 읽는다. 2시간 안에 못 찾은 `SUBMITTED`와 10분 넘게 남은 `QUEUED`는 `UNKNOWN`, 24시간이 지나면 추적을 그만둔다. **이 방식은 PBX 실제 응답으로 아직 확인하지 않았다**(설계 문서 §0).
-- **통화 기록**: kotify DB 에 복제하지 않는다. 고객 번호는 `0` 포함·`0` 제외·`82` 접두 표기를 `extensions` 로 함께 넘긴다(실측 전 가정). 응답은 `{id, at(KST ISO), direction, from, to, durationSec, billSec, disposition, recordingToken}`이고 `recording_url`·`recfile`·채널 정보는 넣지 않는다. 다음 페이지 여부는 `limit+1`건 조회로 판단한다.
-- **녹음**: PBX `/vrecordings/...`는 인증 없이 열리므로 원본 주소를 브라우저에 주지 않는다. `recordingToken`은 `{경로, 사용자, CDR id}`를 마스터 키 Fernet 으로 암호화한 30분 토큰이며(파일 이름에 고객 번호가 들어 있어 서명만으로는 노출된다), 재생 시 경로를 `/vrecordings/<테넌트>/YYYY/MM/DD/<파일>.wav` 형식으로 다시 검사한다. 녹음 요청에는 앱 키를 보내지 않는다. 재생 시작(Range 없음·`bytes=0-`)마다 `RECORDING_PLAY` 감사 로그를 남긴다.
+- **결과 추적**: 60초 주기 루프(`_reconcile_loop`)가 PBX 팩스 로그(`GET /virtual_faxes/log/{id}`)를 마지막으로 확인한 ID(`pbx.fax_log_cursor`)부터 앞으로 한 주기 최대 20건 읽고, 빈 ID 가 3개 이어지면 멈춘다. PBX 는 없는 ID 에도 200 자리표시(`unix_date`·`device_id` null)를 주므로 이를 빈 ID 로 본다. 커서가 없는 첫 추적은 앞쪽 빈 ID 를 300개까지 건너뛴다(운영 로그는 74번부터). 발송 응답의 임시 파일 이름(`pbx_file`)으로 맞추고, 없으면 번호 끝 8자리+시각(발송 −5분~+2시간)이 유일할 때만 맞춘다. 찾은 로그는 최종 상태가 될 때까지 그 ID 만 다시 읽는다. 2시간 안에 못 찾은 `SUBMITTED`와 10분 넘게 남은 `QUEUED`는 `UNKNOWN`, 24시간이 지나면 추적을 그만둔다. 로그 형식은 실측했지만 kotify 발송 1건으로 매칭을 끝까지 확인하지는 않았다(설계 문서 §0).
+- **통화 기록**: kotify DB 에 복제하지 않는다. 운영 PBX 실측에 맞춰 `extensions` 는 0 을 포함한 번호 1개(정확 일치), 날짜는 KST 하루 경계의 UNIX 초, `limit` 는 숫자만 보낸다(`offset,length`·`page`·`YYYY-MM-DD` 는 동작하지 않음). 페이지는 `cursor`=`<마지막 calldate_ts>:<그 초에 이미 보여 준 cdr_id들>`로 `end_date` 를 줄이고(경계 포함) 본 id 만 버리는 키셋 방식이라 이전 쪽 이동은 없다. 시각은 `calldate_ts`(UNIX) 우선이며 `calldate` 문자열은 UTC 다. 응답은 `{id, at(KST ISO), direction, from, to, durationSec, billSec, disposition, recordingToken}`이고 `recording_url`·`recfile`·채널 정보는 넣지 않는다.
+- **녹음**: PBX `/vrecordings/...`는 인증 없이 열리므로 원본 주소를 브라우저에 주지 않는다. `recordingToken`은 `{경로, 사용자, CDR id}`를 마스터 키 Fernet 으로 암호화한 30분 토큰이며(파일 이름에 고객 번호가 들어 있어 서명만으로는 노출된다), 재생 시 경로를 `/vrecordings/<테넌트>/YYYY/MM/DD/<파일>.wav` 형식으로 다시 검사한다. 녹음 요청에는 앱 키를 보내지 않는다. 재생 시작(Range 없음·`bytes=0-`)마다 `RECORDING_PLAY` 감사 로그를 남긴다. 운영 PBX 는 Range 요청에도 200 전체 본문을 주므로 그대로 중계한다.
 - **화면**: `/fax`(발송 폼·이력, 보내는 중이면 15초 갱신·실패/확인 필요 다시 보내기), `/calls`(GET 폼 조건, 녹음은 버튼을 누른 뒤에만 `<audio>` 생성), 대화방 오른쪽 카드의 최근 통화 5건(PBX 를 쓸 수 없으면 섹션만 숨김). `web/lib/access.ts`가 `/fax`·`/calls`를 sender 이상으로 막는다.
 - **감사**: `FAX_SEND`(target `fax:{id}`, detail 은 상태만), `RECORDING_PLAY`(target `cdr:{id}`).
 

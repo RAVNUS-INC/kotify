@@ -203,7 +203,7 @@ class PbxClient:
         return data
 
     async def get_fax_log(self, log_id: int) -> dict | None:
-        """``GET /api/v2/virtual_faxes/log/{id}`` — 없으면 None."""
+        """``GET /api/v2/virtual_faxes/log/{id}`` — 없거나 빈 자리표시 레코드면 None."""
         try:
             data = await self._request(
                 "GET", f"/api/v2/virtual_faxes/log/{log_id}", "virtual_faxes.log",
@@ -216,6 +216,10 @@ class PbxClient:
             return None
         if not isinstance(data, dict):
             raise PbxError("bad_response")
+        # 운영 PBX 는 없는 ID 에도 200 과 빈 자리표시 레코드를 준다(2026-10-15 실측:
+        # status "fax_viewer.status.", file "File Removed", unix_date·device_id null).
+        if not data.get("unix_date") and data.get("device_id") is None:
+            return None
         return data
 
     # ── 녹음 ───────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
 - POST /fax                       : 팩스 발송 (sender 이상, multipart)
 - POST /fax/{id}/resend           : 같은 PDF·번호로 새 작업 (본인 또는 admin)
 - GET  /fax/{id}/pdf              : 보낸 PDF 보기 (본인 또는 admin)
-- GET  /pbx/calls                 : 통화 기록 (sender 이상, 번호 없는 전체 조회는 admin)
+- GET  /pbx/calls                 : 통화 기록 (sender 이상, 번호 없는 전체 조회는 admin, cursor 페이지)
 - GET  /pbx/recordings/{token}    : 녹음 스트리밍 (sender 이상, 토큰 발급 사용자만)
 - POST /pbx/test                  : 연결 테스트 (admin)
 - GET  /pbx/fax-files/{token}.pdf : **PBX 전용** PDF 내려받기 — 로그인 없음, 서명 토큰으로만
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
@@ -225,7 +226,7 @@ async def list_calls(
     date_to: str | None = Query(None, alias="to"),
     call_type: Literal["in", "out", "internal", "transit"] | None = Query(None, alias="type"),
     limit: int = Query(50, ge=1, le=calls_service.MAX_LIMIT),
-    offset: int = Query(0, ge=0),
+    cursor: str | None = Query(None, max_length=1200),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict | JSONResponse:
@@ -234,9 +235,19 @@ async def list_calls(
         return _error("invalid_phone", "번호를 확인하세요", 400)
     if not digits and not user_has_role(user, "admin"):
         return _error("forbidden", "번호 없이 전체 통화 기록은 관리자만 볼 수 있습니다", 403)
+    dates: list[date | None] = []
     for value in (date_from, date_to):
-        if value is not None and not _DATE.fullmatch(value):
+        if value is None or value == "":
+            dates.append(None)
+            continue
+        try:
+            if not _DATE.fullmatch(value):
+                raise ValueError(value)
+            dates.append(date.fromisoformat(value))
+        except ValueError:
             return _error("invalid_date", "날짜는 YYYY-MM-DD 형식입니다", 400)
+    if dates[0] and dates[1] and dates[0] > dates[1]:
+        return _error("invalid_date", "시작일이 종료일보다 늦습니다", 400)
     try:
         config = require_pbx_config(db)
     except PbxNotConfigured:
@@ -246,12 +257,14 @@ async def list_calls(
             config,
             user_sub=user.sub,
             phone=digits or None,
-            date_from=date_from,
-            date_to=date_to,
+            date_from=dates[0],
+            date_to=dates[1],
             call_type=call_type,
             limit=limit,
-            offset=offset,
+            cursor=cursor or None,
         )
+    except ValueError:
+        return _error("invalid_cursor", "페이지 정보가 올바르지 않습니다. 처음부터 다시 조회하세요", 400)
     except PbxError as exc:
         return _pbx_failed(exc)
 

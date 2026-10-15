@@ -205,12 +205,15 @@ def test_calls_for_customer_hide_raw_fields(client, configure, login_as):
         res = client.get("/pbx/calls", params={"phone": "010-0000-0001", "type": "in", "limit": 2})
     assert res.status_code == 200, res.text
     params = route.calls.last.request.url.params
-    assert params["extensions"] == f"{CUSTOMER},{CUSTOMER[1:]},82{CUSTOMER[1:]}"
+    # 운영 PBX 실측: extensions 는 번호 1개 정확 일치, 날짜는 UNIX 초, limit 는 숫자만.
+    assert params["extensions"] == CUSTOMER
     assert params["calltype"] == "2"
-    assert params["limit"] == "0,3"
+    assert params["limit"] == "3"
     assert params["order_type"] == "desc"
+    assert params["start_date"].isdigit() and params["end_date"].isdigit()
     body = res.json()
     assert body["meta"]["hasMore"] is True
+    assert body["meta"]["nextCursor"] == "1760497200:0.1"
     assert len(body["data"]) == 2
     call = body["data"][0]
     assert call["direction"] == "in"
@@ -230,8 +233,11 @@ def test_calls_without_phone_is_admin_only(client, configure, login_as):
         route = mock.get("/api/v2/cdr").mock(return_value=_ok({"result": []}))
         res = client.get("/pbx/calls", params={"from": "2026-10-01", "to": "2026-10-15"})
     assert res.status_code == 200
-    assert "extensions" not in route.calls.last.request.url.params
-    assert route.calls.last.request.url.params["start_date"] == "2026-10-01"
+    params = route.calls.last.request.url.params
+    assert "extensions" not in params
+    # KST 2026-10-01 00:00:00 ~ 2026-10-15 23:59:59
+    assert params["start_date"] == str(int(datetime(2026, 9, 30, 15, tzinfo=UTC).timestamp()))
+    assert params["end_date"] == str(int(datetime(2026, 10, 15, 14, 59, 59, tzinfo=UTC).timestamp()))
 
 
 def test_calls_require_sender_and_configuration(client, configure, login_as):
@@ -243,6 +249,41 @@ def test_calls_require_sender_and_configuration(client, configure, login_as):
     assert res.json()["error"]["code"] == "pbx_not_configured"
     configure()
     assert client.get("/pbx/calls", params={"phone": CUSTOMER, "from": "20261001"}).status_code == 400
+    assert client.get("/pbx/calls", params={"phone": CUSTOMER, "from": "2026-02-30"}).status_code == 400
+    assert client.get(
+        "/pbx/calls", params={"phone": CUSTOMER, "from": "2026-10-15", "to": "2026-10-01"}
+    ).status_code == 400
+    assert client.get("/pbx/calls", params={"phone": CUSTOMER, "cursor": "x:y"}).status_code == 400
+
+
+def test_calls_keyset_pagination_keeps_same_second_rows(client, configure, login_as):
+    """page 파라미터가 무시되는 PBX — end_date 경계를 포함해 다시 받고 본 id 만 버린다."""
+    configure()
+    login_as("sub-sender", "sender")
+    rows = [_cdr_row(cdr_id=10, calldate_ts=300), _cdr_row(cdr_id=9, calldate_ts=200),
+            _cdr_row(cdr_id=8, calldate_ts=200), _cdr_row(cdr_id=7, calldate_ts=100)]
+
+    def _cdr(request: httpx.Request) -> httpx.Response:
+        p = request.url.params
+        end = int(p["end_date"])
+        selected = [r for r in rows if r["calldate_ts"] <= end][: int(p["limit"])]
+        return _ok({"result": selected, "rows": len(rows)})
+
+    with respx.mock(base_url=BASE) as mock:
+        mock.get("/api/v2/cdr").mock(side_effect=_cdr)
+        first = client.get("/pbx/calls", params={"phone": CUSTOMER, "limit": 2}).json()
+        assert [c["id"] for c in first["data"]] == [10, 9]
+        cursor = first["meta"]["nextCursor"]
+        assert cursor == "200:9"
+        second = client.get("/pbx/calls", params={"phone": CUSTOMER, "limit": 2, "cursor": cursor}).json()
+    assert [c["id"] for c in second["data"]] == [8, 7]
+    assert second["meta"]["hasMore"] is False
+    assert second["meta"]["nextCursor"] is None
+
+
+def test_calldate_without_ts_is_utc():
+    row = _cdr_row(calldate_ts=None, calldate="2026-10-15 14:31:46")
+    assert calls_service.summarize_cdr(row, "u")["at"] == "2026-10-15T23:31:46+09:00"
 
 
 def test_calls_pbx_failure_is_502(client, configure, login_as):
@@ -474,7 +515,8 @@ def test_fetch_endpoint_rejects_bad_expired_closed_and_overused(client, db_facto
     db.close()
 
     assert client.get("/pbx/fax-files/garbage.pdf").status_code == 404
-    assert client.get(f"/pbx/fax-files/{good[:-1]}0.pdf").status_code in (404,)
+    tampered = good[:-1] + ("1" if good[-1] == "0" else "0")
+    assert client.get(f"/pbx/fax-files/{tampered}.pdf").status_code == 404
     assert client.get(f"/pbx/fax-files/{old}.pdf").status_code == 404
     res = client.get(f"/pbx/fax-files/{good}.pdf")
     assert res.status_code == 200
@@ -524,10 +566,11 @@ async def test_track_scans_logs_forward_and_matches_by_file(db_factory, configur
     sent = _job(db, pbx_file="1760000000.1.pdf", submitted_at=_now_iso())
     pending = _job(db, pbx_file="1760000000.2.pdf", submitted_at=_now_iso())
     config = load_pbx_config(db)
+    real = {"device_id": 2, "unix_date": str(int(time.time()))}
     logs = {
-        1: {"type": "Incoming", "file": "x.pdf", "status": "Received"},
-        2: {"type": "Outgoing", "file": "1760000000.1.pdf", "status": "Sent", "error": ""},
-        3: {"type": "Outgoing", "file": "1760000000.2.pdf", "status": "Sending"},
+        1: {"type": "Incoming", "file": "x.pdf", "status": "Received", **real},
+        2: {"type": "Outgoing", "file": "1760000000.1.pdf", "status": "Sent", "error": "", **real},
+        3: {"type": "Outgoing", "file": "1760000000.2.pdf", "status": "Sending", **real},
     }
 
     def _log(request: httpx.Request) -> httpx.Response:
@@ -548,7 +591,7 @@ async def test_track_scans_logs_forward_and_matches_by_file(db_factory, configur
         assert route.call_count == 3
 
         logs[3] = {"type": "Outgoing", "file": "1760000000.2.pdf", "status": "Failed",
-                   "error": "The call dropped prematurely"}
+                   "error": "The call dropped prematurely", **real}
         await fax_service.track_fax_jobs(db, config)
         db.refresh(pending)
     assert pending.status == "FAILED"
@@ -562,7 +605,7 @@ async def test_track_falls_back_to_recipient_and_time(db_factory, configure):
     created = datetime.now(UTC) - timedelta(minutes=3)
     job = _job(db, status="UNKNOWN", pbx_file=None, created_at=created.isoformat())
     config = load_pbx_config(db)
-    entry = {"type": "Outgoing", "file": "other.pdf", "recipient": FAX_TO,
+    entry = {"type": "Outgoing", "file": "other.pdf", "recipient": FAX_TO, "device_id": 2,
              "unix_date": str(int(created.timestamp()) + 30), "status": "Sent"}
     with respx.mock(base_url=BASE, assert_all_called=False) as mock:
         mock.get(url__regex=r"/api/v2/virtual_faxes/log/1$").mock(return_value=_ok(entry))
@@ -585,8 +628,8 @@ async def test_track_marks_old_unmatched_and_stale_queued_unknown(db_factory, co
             return_value=httpx.Response(404)
         )
         await fax_service.track_fax_jobs(db, config)
-    # 빈 ID 가 LOG_SCAN_MISSES 개 이어지면 멈추고 커서는 그대로다.
-    assert route.call_count == fax_service.LOG_SCAN_MISSES
+    # 커서가 없을 때(첫 추적)는 앞쪽 빈 ID 를 길게 건너뛰다 멈추고, 커서는 그대로다.
+    assert route.call_count == fax_service.LOG_DISCOVERY_MISSES
     assert SettingsStore(db).get("pbx.fax_log_cursor") == "0"
     db.refresh(submitted)
     db.refresh(queued)
@@ -700,3 +743,46 @@ async def test_submit_survives_pbx_fetch_commit_on_file_wal_db(tmp_path, configu
     check.close()
     db.close()
     engine.dispose()
+
+
+# 운영 PBX 가 없는 ID 에 돌려주는 자리표시 레코드 (2026-10-15 실측 모양)
+_PLACEHOLDER = {"device": None, "device_id": None, "error": None, "file": "File Removed",
+                "recipient": "", "sender": "", "status": "fax_viewer.status.", "type": "Outgoing",
+                "unix_date": None}
+
+
+async def test_track_skips_placeholder_ids_then_uses_short_gap(db_factory, configure):
+    """실제 로그가 74번부터 있고 그 앞·뒤는 200 자리표시인 운영 상황."""
+    configure()
+    db = db_factory()
+    now = int(time.time())
+    job = _job(db, pbx_file="1760000000.1234.pdf", submitted_at=_now_iso())
+    config = load_pbx_config(db)
+    real = {74: {"type": "Incoming", "status": "Received", "error": "OK", "file": "fax-in-1.pdf",
+                 "device_id": 2, "unix_date": str(now - 900)},
+            75: {"type": "Outgoing", "status": "Sent", "error": "OK", "file": "1700000000.1111.pdf",
+                 "recipient": FAX_TO, "device_id": 2, "unix_date": str(now - 800)}}
+    calls: list[int] = []
+
+    def _log(request: httpx.Request) -> httpx.Response:
+        log_id = int(request.url.path.rsplit("/", 1)[1])
+        calls.append(log_id)
+        return _ok(real.get(log_id, _PLACEHOLDER))
+
+    with respx.mock(base_url=BASE) as mock:
+        mock.get(url__regex=r"/api/v2/virtual_faxes/log/\d+").mock(side_effect=_log)
+        await fax_service.track_fax_jobs(db, config)
+        # 74·75 를 찾은 뒤 짧은 빈칸(3)만 보고 멈춘다. 오래된 75(다른 파일)는 매칭하지 않는다.
+        assert max(calls) == 75 + fax_service.LOG_SCAN_MISSES
+        assert SettingsStore(db).get("pbx.fax_log_cursor") == "75"
+        db.refresh(job)
+        assert (job.status, job.pbx_log_id) == ("SUBMITTED", None)
+
+        real[77] = {"type": "Outgoing", "status": "Sent", "error": "OK", "file": "1760000000.1234.pdf",
+                    "recipient": FAX_TO, "device_id": 2, "unix_date": str(now)}
+        calls.clear()
+        await fax_service.track_fax_jobs(db, config)
+    db.refresh(job)
+    assert (job.status, job.pbx_log_id) == ("SENT", 77)
+    assert calls[0] == 76  # 커서 다음부터 읽는다
+    db.close()

@@ -47,6 +47,9 @@ TRACK_WINDOW = timedelta(hours=24)
 # 한 주기에 새로 읽을 로그 수와, 빈 ID 를 몇 개까지 건너뛸지.
 LOG_SCAN_BATCH = 20
 LOG_SCAN_MISSES = 3
+# 커서가 없을 때(첫 추적) 앞쪽의 빈 ID 를 얼마나 건너뛸지. 운영 PBX 는 실제 로그가
+# 74번부터 시작했다(2026-10-15 실측, 1~73 은 빈 자리표시).
+LOG_DISCOVERY_MISSES = 300
 
 _RECIPIENT = re.compile(r"^0\d{8,10}$")
 _SECRET_KEY = "pbx.fax_url_secret"
@@ -342,18 +345,22 @@ async def track_fax_jobs(db: Session, config: PbxConfig) -> int:
     unmatched = [job for job in jobs if job.pbx_log_id is None]
     misses = 0
     next_id = cursor + 1
-    for _ in range(LOG_SCAN_BATCH):
-        if not unmatched:
-            break
+    max_misses = LOG_SCAN_MISSES if cursor > 0 else LOG_DISCOVERY_MISSES
+    # 읽기 상한은 시작할 때 한 번 정한다(첫 추적은 앞쪽 빈 ID 만큼 더 읽는다).
+    budget = LOG_SCAN_BATCH + (LOG_DISCOVERY_MISSES if cursor == 0 else 0)
+    reads = 0
+    while unmatched and reads < budget:
+        reads += 1
         entry = await client.get_fax_log(next_id)
         if entry is None:
             misses += 1
-            if misses >= LOG_SCAN_MISSES:
+            if misses >= max_misses:
                 break
             next_id += 1
             continue
         misses = 0
         cursor = next_id
+        max_misses = LOG_SCAN_MISSES  # 실제 로그를 찾은 뒤에는 짧은 빈칸만 건너뛴다.
         job = _match_job(entry, unmatched)
         if job is not None:
             _apply_log(job, next_id, entry)

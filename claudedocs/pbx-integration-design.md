@@ -5,21 +5,33 @@
 
 > 구현: 2026-10-15 브랜치 `jj/pbx-integration-1f8e12` (`63d830e` 백엔드, `0e576b2` 화면). 확정 동작은 SPEC §8.6 이 기준이고, 이 문서는 설계 근거와 실측 상태를 기록한다.
 
-## 0. 확인된 사실 / 미확인 사항
+## 0. 실측 결과 (2026-10-15~16, 운영 CT → PBX, 읽기 전용 GET)
 
-| 항목 | 상태 | 근거 |
+값은 출력하지 않고 필드 이름·건수·형식만 확인했다. 앱 키는 운영 CT `/root/pbx-app-key`(600)에서 읽었다.
+
+| 항목 | 결과 | 코드 반영 |
 |---|---|---|
-| 운영 CT → `https://10.0.5.10:4430/api/v2/cdr` 도달 | ✅ 키 없이 401 (48ms) | 2026-10-15 CT 에서 curl |
-| 운영 CT httpx | ✅ 0.28.1 (새 의존성 불필요) | CT `.venv` |
-| 팩스 발송 응답 | 문서상 `data.{device, recipients[], file, email, status}` — **로그 ID 없음** | 공식 Postman 예시 |
-| 팩스 로그 | `GET /virtual_faxes/log/{id}` → `{unix_date, device_id, type, recipient, file, status, error}` · **목록 API 없음** | 공식 Postman 예시 |
-| 발송 응답 `file`(`/var/lib/vitalpbx/fax/tmp/<ts>.<n>.pdf`)과 로그 `file`(`<ts>.<n>.pdf`)이 같은 이름인지 | ❓ 키 발급 후 실측 필요 | 문서 예시는 서로 다른 건 |
-| CDR 의 고객 번호 형식(0 포함/+82/숫자만) | ❓ 실측 필요(필드 형태만 본다) | — |
-| 단건 CDR 조회 방법(`search_fields=uniqueid`) | ❓ 실측 필요 | — |
-| PBX(10.0.5.10) → kotify CT `10.0.5.204:3000` 도달(팩스 PDF 내려받기) | ❓ PBX 쪽에서 확인 필요 | — |
-| 팩스 발신 번호 형식(국번 포함·접두 번호 필요 여부) | ❓ 기존 성공 3건 로그로 확인 | — |
+| CT → `10.0.5.10:4430` | ✅ 연결됨 | — |
+| CDR 응답 | `data.result[]` + `data.rows`(조건 전체 건수) | — |
+| CDR `limit` | `N` 만 동작. `offset,length` 는 500 또는 0건, `page` 는 무시(2쪽 = 1쪽) | `end_date` 키셋 페이지(`cursor`) |
+| CDR 날짜 | UNIX 초만 동작(`end_date` 경계 포함). `YYYY-MM-DD` 는 0건, `YYYY-MM-DD HH:mm` 는 500 | KST 하루 경계를 UNIX 초로 보냄 |
+| `calldate` 문자열 | UTC(`calldate_ts` 와 같은 시각, 차이 0시간) | `calldate_ts` 우선, 문자열은 UTC 로 해석 |
+| `extensions` | 번호 1개 **정확 일치**. 쉼표 목록·0 뺀 번호·82 형식·끝 8자리는 0건 | 숫자만(국제 표기는 0 으로) 1개 전달 |
+| 외부 번호 형식 | 0 포함 국내 형식(휴대 11자리, 대표번호 10자리), 내선 3자리 | — |
+| `search`+`search_fields` | 500 | 사용 안 함 |
+| `calltype` | 2·3 필터 동작 | — |
+| 단건 CDR | `search=<uniqueid>&search_fields=uniqueid` 1건(위 500 과 달리 동작) | 사용 안 함 |
+| 응답 `tenant` | 전부 `dipcast-50` (테넌트 2) | — |
+| `recording_url` | 호스트 `time.ravnus.com:4430`, 경로 `/vrecordings/<테넌트 해시>/YYYY/MM/DD/<시각>-OUT-NONE-…wav` — kotify 경로 검사 통과 | — |
+| 녹음 내려받기(키 없이) | 200, `audio/x-wav`, `Accept-Ranges: bytes` 이지만 Range 요청에도 **200 전체 본문** | 중계는 그대로 동작(탐색은 브라우저가 받은 범위 안에서만) |
+| 팩스 장치 | id 2 "RAVNUS", `tenant_id` 2, 발신 번호 10자리 | — |
+| 팩스 로그 | 실제 ID 는 74~85(수신 6·발신 6). **없는 ID 도 200** 에 자리표시(`status "fax_viewer.status."`, `file "File Removed"`, `unix_date`·`device_id` null) | 자리표시 = 없음, 첫 추적은 빈 ID 300개까지 건너뜀 |
+| 팩스 로그 상태 | 발신 `Sent`/수신 `Received`·`Failed`, `error` 는 `OK` 또는 사유 문구 | `map_log_status` 그대로 |
+| 발신 로그 `file` | `<10자리>.<4자리>.pdf` — 발송 응답 임시 파일 이름과 같은 모양 | 파일 이름 매칭 유지(실제 발송으로 최종 확인 필요) |
 
-미확인 항목은 **kotify 전용 API 키를 받은 뒤 운영 CT 에서 읽기 전용 GET 으로만** 확인한다(값은 출력하지 않고 필드 이름·건수·형식 패턴만 본다). 결과에 따라 아래 §3.3 의 로그 추적 방식을 확정한다.
+kotify 코드로 다시 확인(운영 CT 에서 브랜치 코드를 임시 복사해 실행, 읽기 전용): 20건씩 2쪽 겹침 0·누락 없음, 번호 필터 12건 모두 해당 번호, `type=in` 모두 수신, 10-15·10-14 하루 조회가 모두 그 KST 날짜, 응답에 원본 녹음 주소·채널 없음, 팩스 로그 73·86 은 없음·74·85 는 실제, 녹음 스트림 200 `audio/x-wav` RIFF·앱 키 미전송.
+
+**아직 확인하지 못한 것**: 실제 발송 응답의 `file` 이 로그 `file` 과 정확히 같은지, 발신 재시도 때 시도마다 로그가 생기는지, PBX(10.0.5.10) → kotify `10.0.5.204:3000` 도달 — 모두 실제 팩스 1건(사용자 승인 후)으로 확인한다. 실측에 쓴 키가 kotify 전용 키인지 기존 키인지는 사용자 확인이 필요하다.
 
 ## 1. 공통: PBX 클라이언트 (`app/pbx/client.py`)
 
@@ -90,7 +102,7 @@ G.711 팩스라 실패가 잦을 수 있다 → PBX 자체 재시도(`retries`·
 
 - 저장하지 않고 **조회 시 PBX 에서 읽는다**(PBX 가 원본, kotify DB 에 통화 기록 복제 없음).
 - `GET /pbx/calls?phone=&from=&to=&type=&page=&limit=` (권한: §6)
-  - PBX `GET /cdr` 에 `extensions=<번호>`(실측 형식에 맞춰 변환), `start_date`/`end_date`(기본 최근 30일), `calltype`, `limit=offset,length`, `order_by=calldate desc`.
+  - PBX `GET /cdr` 에 `extensions=<번호>`(정확 일치 1개), `start_date`/`end_date`(KST 하루 경계의 UNIX 초, 기본 최근 30일), `calltype`, `limit=N`, `order_by=calldate desc`. 다음 쪽은 `cursor`(마지막 시각 + 그 시각에 보여 준 id)로 `end_date` 를 줄여 받는다(§0).
   - 응답은 kotify 형식으로 줄여서 반환: `{id, at(KST), direction(in/out/internal), from, to, durationSec, billSec, disposition, hasRecording, recordingToken?}`.
   - `recording_url`·`recfile`·`channel`·`lastdata` 는 **절대 응답에 넣지 않는다.**
 - `phone` 없이 전체 조회는 admin 만(업무 전체 통화 이력이라 범위가 큼).

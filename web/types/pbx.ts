@@ -41,8 +41,9 @@ export type CallRecord = {
 
 export type CallListMeta = {
   limit: number;
-  offset: number;
   hasMore: boolean;
+  /** 다음 페이지 커서(PBX 가 offset 을 지원하지 않아 시각 기준), 없으면 null */
+  nextCursor: string | null;
   /** 실제 조회 기간 (YYYY-MM-DD, KST) */
   from: string;
   to: string;

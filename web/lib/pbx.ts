@@ -25,7 +25,7 @@ export type CallQuery = {
   to?: string;
   type?: 'in' | 'out' | 'internal' | 'transit';
   limit?: number;
-  offset?: number;
+  cursor?: string;
 };
 
 export async function fetchCalls(
@@ -40,8 +40,8 @@ export async function fetchCalls(
     data: res.data,
     meta: res.meta ?? {
       limit: query.limit ?? 50,
-      offset: query.offset ?? 0,
       hasMore: false,
+      nextCursor: null,
       from: query.from ?? '',
       to: query.to ?? '',
     },
