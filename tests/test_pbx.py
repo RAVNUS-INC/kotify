@@ -647,3 +647,56 @@ def test_pbx_test_reports_device_without_secret(client, configure, login_as):
     assert FAX_TO not in res.text
     login_as("sub-sender", "sender")
     assert client.post("/pbx/test").status_code == 403
+
+
+async def test_submit_survives_pbx_fetch_commit_on_file_wal_db(tmp_path, configure, db_factory):
+    """운영과 같은 파일 SQLite(WAL)에서, 발송 요청 도중 PBX 의 PDF 내려받기가 다른
+    연결로 커밋해도 발송 결과 저장이 실패하지 않아야 한다(오래된 읽기 스냅샷 쓰기 금지)."""
+    from sqlalchemy import event
+
+    from app.db import Base as _Base
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'wal.db'}", connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def _pragma(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=2000")
+        cur.close()
+
+    _Base.metadata.create_all(engine)
+    # 운영 SessionLocal 과 같은 옵션 (app/db.py).
+    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
+    setup = factory()
+    setup.add(User(sub="sub-sender", email="s@example.com", name="s", roles='["sender"]',
+                   created_at=_now_iso(), last_login_at=_now_iso()))
+    store = SettingsStore(setup)
+    for key, value in {"pbx.tenant": TENANT, "pbx.app_key": APP_KEY, "pbx.fax_device_id": "2",
+                       "pbx.fax_fetch_base_url": "http://10.0.5.204:3000"}.items():
+        store.set(key, value, is_secret=key == "pbx.app_key", updated_by=None)
+    setup.commit()
+    setup.close()
+
+    db = factory()
+    config = load_pbx_config(db)
+    job = fax_service.create_job(db, user_sub="sub-sender", recipient=FAX_TO, filename="a.pdf",
+                                 pdf=PDF, resolution="standard")
+
+    def _pbx_send(request: httpx.Request) -> httpx.Response:
+        token = request.content.decode().split("/api/pbx/fax-files/", 1)[1].split(".pdf", 1)[0]
+        other = factory()
+        assert fax_service.fetch_pdf(other, token) == PDF
+        other.close()
+        return _ok({"file": "/var/lib/vitalpbx/fax/tmp/1.2.pdf"})
+
+    with respx.mock(base_url=BASE) as mock:
+        mock.post("/api/v2/virtual_faxes/2/send").mock(side_effect=_pbx_send)
+        job = await fax_service.submit_job(db, job, config)
+    assert job.status == "SUBMITTED"
+    check = factory()
+    saved = check.get(FaxJob, job.id)
+    assert (saved.status, saved.fetch_count, saved.pbx_file) == ("SUBMITTED", 1, "1.2.pdf")
+    check.close()
+    db.close()
+    engine.dispose()
