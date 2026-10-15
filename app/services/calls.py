@@ -162,15 +162,15 @@ def customer_number(call: dict) -> str:
     return number if len(number) > 4 else ""
 
 
-def attach_names(db: Session, calls: list[dict]) -> None:
-    """고객 번호에 이름을 붙인다(``name``). 하이웍스 CID 주소록 우선, 없으면 kotify 주소록.
+def lookup_display_names(db: Session, numbers: list[str]) -> dict[str, str]:
+    """번호 → 이름. 하이웍스 CID 주소록 우선, 없으면 kotify 주소록(활성 연락처).
 
     대화방과 같은 하이웍스 조회(실패는 격리되어 빈 결과)를 한 번에 하고, kotify 주소록도
-    번호 목록으로 한 번만 조회한다. 이름이 없으면 ``None`` — 화면은 번호만 보인다.
+    번호 목록으로 한 번만 조회한다. 이름이 없는 번호는 키가 없다.
     """
     from app.services.hiworks import lookup_names
 
-    numbers = sorted({n for call in calls if (n := customer_number(call))})
+    numbers = sorted({n for n in numbers if n})
     names: dict[str, str] = {}
     if numbers:
         names = {
@@ -187,6 +187,12 @@ def attach_names(db: Session, calls: list[dict]) -> None:
             ).all():
                 if phone and name and phone not in names:
                     names[phone] = name
+    return names
+
+
+def attach_names(db: Session, calls: list[dict]) -> None:
+    """고객 번호에 이름을 붙인다(``name``). 이름이 없으면 ``None`` — 화면은 번호만 보인다."""
+    names = lookup_display_names(db, [customer_number(call) for call in calls])
     for call in calls:
         call["name"] = names.get(customer_number(call))
 

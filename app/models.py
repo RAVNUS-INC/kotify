@@ -436,3 +436,37 @@ class FaxJob(Base):
         Index("idx_fax_jobs_status", "status"),
         Index("idx_fax_jobs_created_by", "created_by", "id"),
     )
+
+
+class FaxInbox(Base):
+    """PBX 가상 팩스로 받은 팩스 1건 — PBX 팩스 로그 1건과 1:1.
+
+    PDF 는 PBX 에서 읽기 전용 SFTP 로 가져와 영구 보관한다. 수신 실패도 기록해
+    누가 보내려다 실패했는지 보여 준다(PDF 없음).
+    """
+
+    __tablename__ = "fax_inbox"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pbx_log_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    received_at: Mapped[str] = mapped_column(Text, nullable=False)
+    # 숫자만 (PBX sender 의 번호 부분). 모르면 빈 문자열
+    sender_number: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # RECEIVED | FAILED
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pbx_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pdf_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # PENDING | FETCHED | FETCH_FAILED | NONE(가져올 PDF 없음)
+    fetch_status: Mapped[str] = mapped_column(Text, nullable=False)
+    fetch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    first_viewed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_viewed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("pbx_log_id", name="uq_fax_inbox_pbx_log_id"),
+        Index("idx_fax_inbox_received_at", "received_at"),
+        Index("idx_fax_inbox_fetch", "fetch_status"),
+    )

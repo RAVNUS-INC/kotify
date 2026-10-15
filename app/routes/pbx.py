@@ -4,6 +4,9 @@
 - POST /fax                       : 팩스 발송 (sender 이상, multipart)
 - POST /fax/{id}/resend           : 같은 PDF·번호로 새 작업 (본인 또는 admin)
 - GET  /fax/{id}/pdf              : 보낸 PDF 보기 (본인 또는 admin)
+- GET  /fax/inbox                 : 받은 팩스 목록 (sender 이상, 실패 수신 포함)
+- GET  /fax/inbox/{id}/pdf        : 받은 팩스 PDF 보기 (sender 이상, 감사 로그·첫 열람 기록)
+- POST /fax/inbox/{id}/refetch    : PBX 에서 PDF 다시 가져오기 (admin)
 - GET  /pbx/calls                 : 통화 기록 (sender 이상, 번호 없는 전체 조회는 admin, cursor 페이지)
 - GET  /pbx/recordings/{token}    : 녹음 스트리밍 (sender 이상, 토큰 발급 사용자만)
 - POST /pbx/test                  : 연결 테스트 (admin)
@@ -15,13 +18,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.deps import (
@@ -33,7 +36,7 @@ from app.auth.deps import (
     user_has_role,
 )
 from app.db import get_db
-from app.models import FaxJob, User
+from app.models import FaxInbox, FaxJob, User
 from app.pbx.client import (
     PbxClient,
     PbxConfig,
@@ -41,10 +44,12 @@ from app.pbx.client import (
     PbxNotConfigured,
     require_pbx_config,
 )
+from app.pbx.sftp import load_sftp_config
 from app.security.csrf import verify_csrf
 from app.services import audit
 from app.services import calls as calls_service
 from app.services import fax as fax_service
+from app.services import fax_inbox as inbox_service
 
 log = logging.getLogger(__name__)
 
@@ -183,6 +188,115 @@ async def resend_fax(
     except fax_service.FaxInputError as exc:
         return _error(exc.code, str(exc), 409 if exc.code == "fax_busy" else 400)
     return await _send(db, user, job, config, request)
+
+
+# ── 받은 팩스 ───────────────────────────────────────────────────────────────
+# /fax/{job_id} 경로보다 먼저 등록해야 "inbox" 가 job_id 로 해석되지 않는다.
+
+
+@router.get("/fax/inbox", dependencies=[Depends(require_sender)], response_model=None)
+async def list_fax_inbox(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> dict:
+    rows = list(
+        db.execute(
+            select(FaxInbox)
+            .order_by(FaxInbox.received_at.desc(), FaxInbox.id.desc())
+            .offset(offset)
+            .limit(limit + 1)
+        ).scalars()
+    )
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    # 하이웍스 조회는 동기 MySQL — 이벤트 루프를 막지 않게 스레드에서.
+    names = await run_in_threadpool(
+        calls_service.lookup_display_names, db, [r.sender_number for r in rows]
+    )
+    viewers = {r.first_viewed_by for r in rows if r.first_viewed_by}
+    viewer_names: dict[str, str] = {}
+    if viewers:
+        viewer_names = {
+            u.sub: (u.display_name or u.name or "")
+            for u in db.execute(select(User).where(User.sub.in_(viewers))).scalars()
+        }
+    unread = db.execute(
+        select(func.count()).select_from(FaxInbox).where(
+            FaxInbox.status == "RECEIVED", FaxInbox.first_viewed_at.is_(None)
+        )
+    ).scalar_one()
+    return {
+        "data": [
+            inbox_service.serialize(
+                r,
+                name=names.get(r.sender_number),
+                viewer_name=viewer_names.get(r.first_viewed_by or ""),
+            )
+            for r in rows
+        ],
+        "meta": {"limit": limit, "offset": offset, "hasMore": has_more, "unread": int(unread)},
+    }
+
+
+@router.get("/fax/inbox/{inbox_id}/pdf", dependencies=[Depends(require_sender)], response_model=None)
+def view_fax_inbox_pdf(
+    inbox_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    row = db.get(FaxInbox, inbox_id)
+    if row is None:
+        return _error("not_found", "받은 팩스를 찾을 수 없습니다", 404)
+    if row.pdf_blob is None:
+        return _error("not_fetched", "아직 PBX 에서 PDF 를 가져오지 못했습니다", 409)
+    if row.first_viewed_at is None:
+        row.first_viewed_at = datetime.now(UTC).isoformat()
+        row.first_viewed_by = user.sub
+    audit.log(
+        db,
+        actor_sub=user.sub,
+        action=audit.FAX_INBOX_VIEW,
+        target=f"fax_inbox:{row.id}",
+        ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return Response(
+        content=row.pdf_blob,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="fax-in-{row.id}.pdf"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.post(
+    "/fax/inbox/{inbox_id}/refetch",
+    dependencies=[Depends(require_role("admin")), Depends(verify_csrf)],
+    response_model=None,
+)
+async def refetch_fax_inbox(
+    inbox_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict | JSONResponse:
+    row = db.get(FaxInbox, inbox_id)
+    if row is None:
+        return _error("not_found", "받은 팩스를 찾을 수 없습니다", 404)
+    if row.status != "RECEIVED" or not row.pbx_file:
+        return _error("no_file", "가져올 PDF 가 없는 수신 기록입니다", 409)
+    config = load_sftp_config(db)
+    if config is None:
+        return _error("sftp_not_configured", "PBX 팩스 파일 가져오기(SFTP)가 설정되지 않았습니다", 409)
+    row.fetch_status = "PENDING"
+    row.fetch_attempts = 0
+    audit.log(db, actor_sub=user.sub, action=audit.FAX_INBOX_REFETCH, target=f"fax_inbox:{row.id}")
+    db.commit()
+    await inbox_service.fetch_pending(db, config)
+    db.refresh(row)
+    return {"data": inbox_service.serialize(row)}
 
 
 @router.get("/fax/{job_id}/pdf", dependencies=[Depends(require_sender)], response_model=None)
