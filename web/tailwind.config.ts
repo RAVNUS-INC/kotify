@@ -22,37 +22,41 @@ const config: Config = {
           10: 'var(--gray-10)',
           11: 'var(--gray-11)',
         },
+        // 투명도 클래스(bg-danger/5 등)를 쓰는 색은 RGB 채널 변수로 정의해야 Tailwind 가 CSS 를 만든다
         brand: {
-          DEFAULT: 'var(--brand)',
+          DEFAULT: 'rgb(var(--brand-rgb) / <alpha-value>)',
           hover: 'var(--brand-hover)',
-          soft: 'var(--brand-soft)',
+          pressed: 'var(--brand-pressed)',
+          soft: 'rgb(var(--brand-soft-rgb) / <alpha-value>)',
           border: 'var(--brand-border)',
         },
         danger: {
-          DEFAULT: 'var(--danger)',
+          DEFAULT: 'rgb(var(--danger-rgb) / <alpha-value>)',
           bg: 'var(--danger-bg)',
         },
         success: {
-          DEFAULT: 'var(--success)',
+          DEFAULT: 'rgb(var(--success-rgb) / <alpha-value>)',
           bg: 'var(--success-bg)',
         },
         warning: {
-          DEFAULT: 'var(--warning)',
+          DEFAULT: 'rgb(var(--warning-rgb) / <alpha-value>)',
           bg: 'var(--warning-bg)',
         },
         info: {
-          DEFAULT: 'var(--info)',
+          DEFAULT: 'rgb(var(--info-rgb) / <alpha-value>)',
           bg: 'var(--info-bg)',
         },
         ink: {
           DEFAULT: 'var(--text)',
           muted: 'var(--text-muted)',
           dim: 'var(--text-dim)',
+          disabled: 'var(--text-disabled)',
         },
         surface: {
           DEFAULT: 'var(--bg)',
           subtle: 'var(--bg-subtle)',
           muted: 'var(--bg-muted)',
+          hover: 'var(--surface-hover)',
         },
         line: {
           DEFAULT: 'var(--border)',
@@ -67,13 +71,16 @@ const config: Config = {
         xs: 'var(--r-sm)',
         DEFAULT: 'var(--r)',
         lg: 'var(--r-lg)',
+        xl: 'var(--r-xl)',
       },
       boxShadow: {
         xs: 'var(--shadow-xs)',
         sm: 'var(--shadow-sm)',
+        pop: 'var(--shadow-pop)',
       },
       fontSize: {
-        xs: ['11px', '16px'],
+        // 12px 가 제품의 최소 글자 크기 (디자인 시스템 v2 caption)
+        xs: ['12px', '18px'],
         sm: ['12px', '18px'],
         md: ['13px', '20px'],
         base: ['14px', '22px'],

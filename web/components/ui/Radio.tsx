@@ -31,7 +31,7 @@ export const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(
       {label && (
         <span className="flex flex-col">
           <span>{label}</span>
-          {sub && <span className="mt-0.5 text-[11px] text-ink-muted">{sub}</span>}
+          {sub && <span className="mt-0.5 text-xs text-ink-muted">{sub}</span>}
         </span>
       )}
     </label>

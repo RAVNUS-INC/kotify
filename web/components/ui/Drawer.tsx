@@ -33,11 +33,11 @@ export function Drawer({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="k-drawer-overlay fixed inset-0 z-[1040] bg-black/30" />
+        <Dialog.Overlay className="k-drawer-overlay fixed inset-0 z-[1040] bg-[rgba(20,18,26,0.45)]" />
         <Dialog.Content
           className={cn(
             'k-drawer-content fixed right-0 top-0 z-[1040] flex h-full flex-col',
-            'border-l border-line bg-surface shadow-lg focus:outline-none',
+            'border-l border-line bg-surface shadow-pop focus:outline-none',
             className,
           )}
           style={{ width }}
@@ -47,14 +47,14 @@ export function Drawer({
             <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
               <div className="min-w-0 flex-1">
                 {title && (
-                  <Dialog.Title className="m-0 text-base font-semibold tracking-tight text-ink">
+                  <Dialog.Title className="m-0 text-lg font-semibold tracking-tight text-ink">
                     {title}
                   </Dialog.Title>
                 )}
                 {description && (
                   <Dialog.Description
                     id={descId}
-                    className="mt-0.5 text-sm text-ink-muted"
+                    className="mt-0.5 text-md text-ink-muted"
                   >
                     {description}
                   </Dialog.Description>
@@ -63,7 +63,7 @@ export function Drawer({
               <Dialog.Close asChild>
                 <button
                   type="button"
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-muted transition-colors duration-fast ease-out hover:bg-gray-2 hover:text-ink focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(59,0,139,0.12)]"
+                  className="inline-flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded text-ink-muted transition-colors duration-fast ease-out hover:bg-surface-hover hover:text-ink"
                   aria-label="닫기"
                 >
                   <Icon name="x" size={14} />

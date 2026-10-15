@@ -72,7 +72,7 @@ export const Check = forwardRef<HTMLInputElement, CheckProps>(function Check(
       {label && (
         <span className="flex flex-col">
           <span>{label}</span>
-          {sub && <span className="text-[11px] text-ink-muted">{sub}</span>}
+          {sub && <span className="text-xs text-ink-muted">{sub}</span>}
         </span>
       )}
     </label>

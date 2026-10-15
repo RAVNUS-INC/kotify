@@ -30,7 +30,7 @@ export type SidebarProps = {
 // 항목 노출 여부는 lib/access.ts 의 경로별 역할 규칙을 따른다 (middleware 와 동일).
 const GROUPS: ReadonlyArray<NavGroup> = [
   {
-    label: 'Send',
+    label: '발송',
     items: [
       { href: '/', label: '홈', icon: 'home' },
       { href: '/send/new', label: '새 발송', icon: 'send' },
@@ -39,28 +39,28 @@ const GROUPS: ReadonlyArray<NavGroup> = [
     ],
   },
   {
-    label: 'Phone',
+    label: '전화',
     items: [
       { href: '/calls', label: '통화 기록', icon: 'phone' },
       { href: '/fax', label: '팩스', icon: 'file' },
     ],
   },
   {
-    label: 'People',
+    label: '연락처',
     items: [
       { href: '/contacts', label: '주소록', icon: 'users' },
       { href: '/groups', label: '그룹', icon: 'user2' },
     ],
   },
   {
-    label: 'Analytics',
+    label: '분석',
     items: [
       { href: '/reports', label: '리포트', icon: 'barChart' },
       { href: '/notifications', label: '알림', icon: 'bell' },
     ],
   },
   {
-    label: 'Admin',
+    label: '관리',
     items: [
       // 발신번호 조회는 전원 허용, 등록/삭제 등 관리만 admin (페이지에서 분기).
       { href: '/numbers', label: '발신번호', icon: 'phone' },

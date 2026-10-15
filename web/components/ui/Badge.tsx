@@ -16,11 +16,11 @@ export type BadgeProps = HTMLAttributes<HTMLSpanElement> & {
 };
 
 const base =
-  'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 ' +
-  'font-mono text-xs font-medium leading-[16px]';
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-[2px] ' +
+  'text-xs font-semibold';
 
 const kinds: Record<BadgeKind, string> = {
-  neutral: 'border-line bg-gray-1 text-gray-8',
+  neutral: 'border-line bg-surface-hover text-ink-muted',
   success: 'border-success/25 bg-success-bg text-success',
   warning: 'border-warning/25 bg-warning-bg text-warning',
   danger: 'border-danger/25 bg-danger-bg text-danger',

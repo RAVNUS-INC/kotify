@@ -25,13 +25,26 @@
     box-sizing: border-box;
   }
 
+  /* v2 포커스 링: 2px 브랜드 실선 + 2px 간격. 흰·연회색 바탕 모두 13:1 이상 */
   :focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(59, 0, 139, 0.12);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
   }
 
-  /* 강제 색상 모드(Windows 고대비)는 위 box-shadow 를 none 으로 바꾸고 outline:none 은 그대로 둬 포커스 표시가 사라진다
-     → 버튼(outline-none 이 Highlight 로 칠해짐)과 같은 outline 링을 그린다.
+  /* 글자 입력칸은 테두리 brand + 3px brand-soft 링(tokens.css :focus)으로 포커스를 보이므로 바깥 링을 겹쳐 그리지 않는다.
+     강제 색상 모드에서는 그 링이 사라지므로 아래 forced-colors 규칙의 outline 을 그대로 둔다. */
+  @media (forced-colors: none) {
+    .k-input:focus-visible,
+    .k-textarea:focus-visible,
+    .k-editor-body:focus-visible,
+    .k-chipfield-input:focus-visible,
+    .k-select:focus-visible {
+      outline: none;
+    }
+  }
+
+  /* 강제 색상 모드(Windows 고대비)는 box-shadow 링(입력칸의 brand-soft 링 등)을 없애므로
+     모든 요소에 Highlight outline 링을 그린다.
      tokens.css 가 이 레이어보다 앞에 들어오므로 같은 특이도의 .k-input 등 outline:none 도 이 규칙이 이긴다. */
   @media (forced-colors: active) {
     :focus-visible {

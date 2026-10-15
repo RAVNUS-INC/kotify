@@ -57,7 +57,7 @@ export function LinkSegmented({
           >
             <span>{o.label}</span>
             {o.count != null && (
-              <span className="ml-1 font-mono text-[10.5px] opacity-70">
+              <span className="font-medium tabular-nums text-ink-dim">
                 {o.count}
               </span>
             )}

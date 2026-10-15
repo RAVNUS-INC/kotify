@@ -59,12 +59,12 @@ export function Field({
       {children}
       {error && (
         <div className="k-err" role="alert">
-          <span className="font-mono">✗</span> {error}
+          <span aria-hidden>✗</span> {error}
         </div>
       )}
       {ok && (
         <div className="k-ok">
-          <span className="font-mono">✓</span> {ok}
+          <span aria-hidden>✓</span> {ok}
         </div>
       )}
       {hint && !error && !ok && <div className="k-hint">{hint}</div>}

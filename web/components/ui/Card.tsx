@@ -6,7 +6,7 @@ export type CardProps = HTMLAttributes<HTMLDivElement>;
 export function Card({ className, children, ...rest }: CardProps) {
   return (
     <div
-      className={cn('rounded-lg border border-line bg-surface', className)}
+      className={cn('rounded-lg border border-line bg-surface shadow-sm', className)}
       {...rest}
     >
       {children}
@@ -40,16 +40,16 @@ export function CardHeader({
     >
       <div className="min-w-0">
         {eyebrow && (
-          <div className="mb-0.5 font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-dim">
+          <div className="mb-0.5 text-xs font-semibold text-ink-muted">
             {eyebrow}
           </div>
         )}
         {title && (
-          <h3 className="m-0 text-[13.5px] font-semibold tracking-[-0.01em] text-ink">
+          <h3 className="m-0 text-[15px] font-semibold leading-[22px] tracking-[-0.01em] text-ink">
             {title}
           </h3>
         )}
-        {subtitle && <p className="mt-0.5 text-sm text-ink-muted">{subtitle}</p>}
+        {subtitle && <p className="mt-0.5 text-md text-ink-muted">{subtitle}</p>}
         {children}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

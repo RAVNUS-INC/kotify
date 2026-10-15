@@ -9,11 +9,11 @@ export type PillProps = HTMLAttributes<HTMLSpanElement> & {
 };
 
 const base =
-  'inline-flex items-center gap-1 h-[18px] px-1.5 rounded-full ' +
-  'text-[11px] leading-none font-medium';
+  'inline-flex items-center gap-1 h-[22px] px-2 rounded-full whitespace-nowrap ' +
+  'text-xs font-semibold';
 
 const tones: Record<PillTone, string> = {
-  neutral: 'bg-gray-2 text-gray-9',
+  neutral: 'bg-surface-hover text-ink-muted',
   brand: 'bg-brand-soft text-brand',
   success: 'bg-success-bg text-success',
   warning: 'bg-warning-bg text-warning',

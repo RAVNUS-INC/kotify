@@ -38,14 +38,14 @@ export function EmptyState({
       )}
     >
       <div
-        className="mb-1.5 flex items-center justify-center rounded-full bg-gray-1 text-gray-6"
+        className="mb-1.5 flex items-center justify-center rounded-full bg-surface-hover text-ink-dim"
         style={{ width: iconSize * 2, height: iconSize * 2 }}
       >
         <Icon name={icon} size={iconSize} />
       </div>
-      {title && <div className="text-base font-semibold text-ink">{title}</div>}
+      {title && <div className="text-[15px] font-semibold leading-[22px] text-ink">{title}</div>}
       {description && (
-        <div className="max-w-[320px] text-sm leading-relaxed text-ink-muted">
+        <div className="max-w-[320px] text-md text-ink-muted">
           {description}
         </div>
       )}

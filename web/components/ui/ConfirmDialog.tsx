@@ -108,22 +108,22 @@ function ConfirmDialog({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="k-confirm-overlay fixed inset-0 z-[1050] bg-black/30" />
+        <Dialog.Overlay className="k-confirm-overlay fixed inset-0 z-[1050] bg-[rgba(20,18,26,0.45)]" />
         <Dialog.Content
           className={cn(
             'k-confirm-content fixed left-1/2 top-1/2 z-[1050] w-[min(92vw,400px)]',
-            '-translate-x-1/2 -translate-y-1/2 rounded-lg border border-line bg-surface p-5',
-            'shadow-lg focus:outline-none',
+            '-translate-x-1/2 -translate-y-1/2 rounded-xl border border-line bg-surface p-6',
+            'shadow-pop focus:outline-none',
           )}
           aria-describedby={hasDescription ? descId : undefined}
         >
-          <Dialog.Title className="m-0 text-base font-semibold tracking-tight text-ink">
+          <Dialog.Title className="m-0 text-lg font-semibold tracking-tight text-ink">
             {title}
           </Dialog.Title>
           {hasDescription && (
             <Dialog.Description
               id={descId}
-              className="mt-1.5 whitespace-pre-line text-sm text-ink-muted"
+              className="mt-1.5 whitespace-pre-line text-md text-ink-muted"
             >
               {description}
             </Dialog.Description>
@@ -134,7 +134,7 @@ function ConfirmDialog({
             </Button>
             <Button
               type="button"
-              variant={tone === 'danger' ? 'danger' : 'primary'}
+              variant={tone === 'danger' ? 'danger-solid' : 'primary'}
               onClick={onConfirm}
             >
               {resolvedConfirmLabel}
