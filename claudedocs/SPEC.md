@@ -560,7 +560,7 @@ web/app/
 
 ### 8.6 사내 PBX 연동 (팩스·통화 기록·녹음)
 
-설계 근거와 실측 상태는 [`pbx-integration-design.md`](./pbx-integration-design.md). 대상은 DIPCAST(VitalPBX 4.5) API v2이며 `app/pbx/client.py`가 사내 주소(`pbx.api_base_url`, 기본 `https://10.0.5.10:4430`)로만 요청한다. 앱 키·테넌트가 없으면 모든 PBX API가 HTTP 409 `pbx_not_configured`이다. PBX 오류는 HTTP 502 `pbx_error`이며 로그와 응답에 전화번호·녹음 경로·키를 넣지 않는다.
+설계 근거와 실측 상태는 [`pbx-integration-design.md`](./pbx-integration-design.md). API 키는 kotify 전용 키를 새로 만들지 않고 PBX 의 기존 애플리케이션 키 "RAVNUS"(테넌트 2)를 쓴다(2026-10-16 사용자 결정 — 이 키를 쓰는 다른 연동이 없음). 값은 `pbx.app_key` 에 암호화 저장하며 문서·로그에 남기지 않는다. 대상은 DIPCAST(VitalPBX 4.5) API v2이며 `app/pbx/client.py`가 사내 주소(`pbx.api_base_url`, 기본 `https://10.0.5.10:4430`)로만 요청한다. 앱 키·테넌트가 없으면 모든 PBX API가 HTTP 409 `pbx_not_configured`이다. PBX 오류는 HTTP 502 `pbx_error`이며 로그와 응답에 전화번호·녹음 경로·키를 넣지 않는다.
 
 | API | 권한 | 동작 |
 |---|---|---|
