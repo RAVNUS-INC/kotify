@@ -310,6 +310,10 @@ else
 fi
 
 # 9b. Next.js (kotify-web.service)
+# 종료 유예 preload 는 unit 이 --require 로 부르므로 unit 보다 먼저, 저장소 밖에 둔다
+# (git 롤백으로 저장소 사본이 사라져도 node 가 기동하도록).
+install -D -m 0644 "${INSTALL_DIR}/deploy/kotify-web-shutdown.cjs" \
+    /usr/local/lib/kotify/kotify-web-shutdown.cjs
 SERVICE_WEB_FILE="/etc/systemd/system/kotify-web.service"
 if [[ -f "${INSTALL_DIR}/deploy/kotify-web.service" ]]; then
     cp "${INSTALL_DIR}/deploy/kotify-web.service" "${SERVICE_WEB_FILE}"
