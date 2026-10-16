@@ -1,5 +1,7 @@
 # msghub API 결과 코드 전체 레퍼런스
 
+> 현행 공식 문서(doc.msghub.uplus.co.kr, 2026-10-16 확인) 기준 정리본은 [msghub-api/](msghub-api/00-README.md) 에 있다. 둘이 다르면 그쪽을 따른다.
+
 > 출처: msghub API 가이드 > 공통 > 결과 코드
 > 최종 업데이트: 2026-02-20
 

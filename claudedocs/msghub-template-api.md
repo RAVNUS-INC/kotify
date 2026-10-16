@@ -1,5 +1,7 @@
 # msghub 통합발송 템플릿 관리 API
 
+> 현행 공식 문서(doc.msghub.uplus.co.kr, 2026-10-16 확인) 기준 정리본은 [msghub-api/](msghub-api/00-README.md) 에 있다. 둘이 다르면 그쪽을 따른다.
+
 > 출처: msghub API 가이드 > 통합발송 연동관리
 > 최종 업데이트: 2026-02-23
 

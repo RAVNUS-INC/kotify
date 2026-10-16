@@ -1,5 +1,7 @@
 # U+ msghub API 가이드
 
+> 현행 공식 문서(doc.msghub.uplus.co.kr, 2026-10-16 확인) 기준 정리본은 [msghub-api/](msghub-api/00-README.md) 에 있다. 둘이 다르면 그쪽을 따른다.
+
 > 작성일: 2026-04-16
 > 참조: https://docs2.msghub.uplus.co.kr/api/intro
 
