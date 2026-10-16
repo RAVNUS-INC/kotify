@@ -32,7 +32,8 @@ log = logging.getLogger(__name__)
 
 MAX_PDF_BYTES = 10 * 1024 * 1024
 RESOLUTIONS = ("standard", "medium", "high")
-DEFAULT_RESOLUTION = "standard"
+# 기본은 선명(medium) — 사용자 요청(2026-10-16). 화면 FaxComposer 기본값과 같게 둔다.
+DEFAULT_RESOLUTION = "medium"
 DEFAULT_RETRIES = 2
 DEFAULT_RETRY_TIME = 300
 

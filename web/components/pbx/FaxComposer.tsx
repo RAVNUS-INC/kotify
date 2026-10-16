@@ -29,7 +29,8 @@ export function FaxComposer() {
   const fileId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
   const [recipient, setRecipient] = useState('');
-  const [resolution, setResolution] = useState<FaxResolution>('standard');
+  // 기본은 선명(사용자 요청, 2026-10-16) — 서버 DEFAULT_RESOLUTION 과 같게 둔다
+  const [resolution, setResolution] = useState<FaxResolution>('medium');
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);

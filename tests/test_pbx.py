@@ -496,6 +496,26 @@ def test_fax_send_submits_signed_url_and_pbx_can_fetch(client, configure, login_
     db.close()
 
 
+def test_fax_resolution_defaults_to_medium(client, configure, login_as, db_factory):
+    """해상도를 빼고 보내면 선명(medium) — 화면 기본값과 같다(2026-10-16 사용자 요청)."""
+    configure()
+    login_as("sub-sender", "sender")
+    with respx.mock(base_url=BASE) as mock:
+        route = mock.post("/api/v2/virtual_faxes/2/send").mock(
+            return_value=_ok({"device": "ttyIAX2", "recipients": [FAX_TO], "file": "/x/1.pdf", "status": "ok"})
+        )
+        res = client.post(
+            "/fax",
+            data={"recipient": "02-0000-0001"},
+            files={"file": ("견적서.pdf", PDF, "application/pdf")},
+        )
+    assert res.status_code == 200, res.text
+    assert 'name="resolution"\r\n\r\nmedium' in route.calls.last.request.content.decode()
+    db = db_factory()
+    assert db.execute(select(FaxJob)).scalar_one().resolution == "medium"
+    db.close()
+
+
 @pytest.mark.parametrize(
     ("response", "status"),
     [
