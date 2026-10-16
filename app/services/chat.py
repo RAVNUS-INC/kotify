@@ -788,6 +788,7 @@ async def send_reply(
             send_channel=send_channel,
             idempotency_key=idempotency_key,
             retry_rejected=False,
+            validate_recipients=False,
         )
     except MsghubAuthError as exc:
         # 인증 오류도 캠페인은 실패로 확정돼 있다 — 500 대신 실패 말풍선(502)으로.

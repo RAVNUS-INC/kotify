@@ -31,6 +31,7 @@ from app.auth.deps import (
 )
 from app.db import get_db
 from app.models import Attachment, Campaign, Message, MsghubRequest, User
+from app.msghub.auth import AuthError
 from app.msghub.codes import DELIVERED_CODES, PRICE_TABLE, estimate_cost, is_delivered, is_uncertain
 from app.msghub.schemas import MsghubBadRequest, MsghubError
 from app.security.csrf import verify_csrf
@@ -738,7 +739,12 @@ async def _cancel_reservation_chunks(
     elif not cancelled:
         # 이번 요청에서 바뀐 것이 없다.
         if error is not None:
-            reason = str(error) if isinstance(error, MsghubError) else "msghub 통신 오류"
+            if isinstance(error, AuthError):
+                reason = "msghub 인증 오류 — 관리자에게 설정 점검을 요청하세요"
+            elif isinstance(error, MsghubError):
+                reason = str(error)
+            else:
+                reason = "msghub 통신 오류"
             return JSONResponse(
                 {"error": {"code": "cancel_failed", "message": f"예약 취소 실패: {reason}"}},
                 status_code=502,
@@ -970,8 +976,13 @@ async def upload_attachment(
             channel="rcs", file_id=f"rcs-{file_id}", file_bytes=processed, content_type="image/jpeg",
         )
     except MsghubError as exc:
+        # 토큰 발급 실패(AuthError) 문구엔 httpx 예외 내용이 섞일 수 있어 응답엔 싣지 않는다.
+        reason = "msghub 인증 오류 — 관리자에게 설정 점검을 요청하세요" if isinstance(exc, AuthError) else str(exc)
+        if isinstance(exc, AuthError):
+            import logging
+            logging.getLogger(__name__).error("첨부 업로드 msghub 인증 오류: %s", exc)
         return JSONResponse(
-            {"error": {"code": "upload_failed", "message": f"msghub 업로드 실패: {exc}"}},
+            {"error": {"code": "upload_failed", "message": f"msghub 업로드 실패: {reason}"}},
             status_code=502,
         )
 

@@ -27,6 +27,10 @@ MAYBE_DELIVERED_CODES: frozenset[str] = frozenset({"41007", "54004", "55806", "5
 
 RETRYABLE_CODES: frozenset[str] = RESEND_CODES | MAYBE_DELIVERED_CODES | {RATE_LIMIT_CODE}
 
+# 토큰 자체가 문제인 인증 오류 — 토큰을 다시 받으면 풀릴 수 있다. 20000(미발급 키)·20001·29025(IP)·
+# 20002(비밀번호)·29011(권한)은 재발급해도 같고, 재발급을 반복하면 발급 횟수 제한(50010)에 걸린다.
+TOKEN_REJECT_CODES: frozenset[str] = frozenset({"20003", "20004"})
+
 SUCCESS_CODE = "10000"
 
 # 리포트 결과 코드 중 전달 성공으로 보는 것. 30124 는 코드표 설명이 "성공" 이다.

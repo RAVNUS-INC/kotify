@@ -61,11 +61,34 @@ async def test_rejected_token_is_reissued_once_and_request_retried():
 
 @pytest.mark.asyncio
 async def test_second_token_rejection_raises():
-    client, seen = _client(lambda r, n: httpx.Response(401, json={"code": "29011", "message": "권한 없음"}))
+    client, seen = _client(lambda r, n: httpx.Response(401, json={"code": "20004", "message": "헤더 오류"}))
     with pytest.raises(MsghubAuthError):
         await _send(client)
     assert seen["auth"] == 2
     assert len(seen["send_tokens"]) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["20000", "20001", "20002", "29011", "29025"])
+async def test_non_token_auth_error_is_not_reissued(code):
+    """키·IP·비밀번호·권한 오류는 재발급해도 같다 — 공유 토큰을 버리지 않고 바로 올린다(M5)."""
+    client, seen = _client(lambda r, n: httpx.Response(401, json={"code": code, "message": "거부"}))
+    with pytest.raises(MsghubAuthError):
+        await _send(client)
+    assert (seen["auth"], len(seen["send_tokens"])) == (1, 1)
+    assert client._token_mgr._state is not None  # 캐시 토큰 유지
+
+
+def test_only_the_rejected_token_is_dropped():
+    """동시 요청 중 하나가 이미 새 토큰을 받았으면 늦게 온 거부가 그 새 토큰을 버리지 않는다."""
+    from app.msghub.auth import TokenManager, _TokenState
+
+    tm = TokenManager("https://x.test", "k", "p", httpx.AsyncClient())
+    tm._state = _TokenState("new-token", "ref", 1e12, 1e12)
+    assert tm.invalidate_token("old-token") is False
+    assert tm._state.access_token == "new-token"
+    assert tm.invalidate_token("new-token") is True
+    assert tm._state is None
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,7 @@ from urllib.parse import quote
 import httpx
 
 from app.msghub.auth import TokenManager
-from app.msghub.codes import SUCCESS_CODE, is_retryable
+from app.msghub.codes import SUCCESS_CODE, TOKEN_REJECT_CODES, is_retryable
 from app.msghub.schemas import (
     FbInfo,
     MsghubAuthError,
@@ -177,15 +177,27 @@ class MsghubClient:
             "Content-Type": "application/json",
         }
 
+    def _retry_after_token_reject(self, exc: MsghubAuthError, headers: dict[str, str]) -> bool:
+        """토큰 오류면 그 토큰을 버리고 다시 보낼지 True. 다른 인증 오류는 False(그대로 올림)."""
+        if exc.code not in TOKEN_REJECT_CODES:
+            return False
+        token = headers.get("Authorization", "").removeprefix("Bearer ")
+        dropped = self._token_mgr.invalidate_token(token)
+        log.warning(
+            "msghub 가 토큰을 거부함 [%s] — %s 1회 재시도", exc.code, "토큰 재발급 후" if dropped else "새 토큰으로",
+        )
+        return True
+
     async def _call(
         self, method: str, url: str, *, json_content: bool = True, **kwargs,
     ) -> tuple[dict, int]:
         """토큰을 붙여 요청하고 결과 코드를 검사한다. (응답 JSON, HTTP 상태) 를 돌려준다.
 
-        서버가 인증 오류(20xxx·29011·29025)로 거부하면 캐시한 토큰을 버리고 한 번만 새로 발급받아
-        다시 보낸다 — 로컬 만료 시각 전에 서버가 토큰을 무효화하면(무효화 조건은 문서에 없음)
-        예전엔 만료까지 최대 ~50분 같은 토큰으로 계속 실패했다. 거부된 요청은 접수되지 않았으므로
-        다시 보내도 중복이 없다. 두 번째도 거부되면 MsghubAuthError 를 그대로 올린다.
+        서버가 토큰 오류(codes.TOKEN_REJECT_CODES: 20003·20004)로 거부하면 그 토큰을 버리고 한 번만 새로
+        받아 다시 보낸다 — 로컬 만료 시각 전에 서버가 토큰을 무효화하면(무효화 조건은 문서에 없음) 예전엔
+        만료까지 최대 ~50분 같은 토큰으로 계속 실패했다. 거부된 요청은 접수되지 않았으므로 다시 보내도
+        중복이 없다. 키·IP·비밀번호·권한 오류는 재발급해도 같아 바로 올린다(재발급 반복 → 50010 방지).
+        버리는 것은 거부된 토큰이 지금 캐시한 것과 같을 때뿐이다(_retry_after_token_reject).
         """
         for attempt in range(2):
             headers = await self._auth_headers()
@@ -196,10 +208,8 @@ class MsghubClient:
             try:
                 _raise_for_response(data, resp.status_code)
             except MsghubAuthError as exc:
-                if attempt:
+                if attempt or not self._retry_after_token_reject(exc, headers):
                     raise
-                log.warning("msghub 가 토큰을 거부함 [%s] — 토큰 재발급 후 1회 재시도", exc.code)
-                self._token_mgr.invalidate()
                 continue
             return data, resp.status_code
         raise AssertionError("unreachable")
@@ -483,10 +493,9 @@ class MsghubClient:
                 raise MsghubServerError("MO 컨텐츠 응답 형식 오류", code="PARSE_ERROR", status_code=status_code)
             try:
                 _raise_for_response(data, status_code)
-            except MsghubAuthError:
-                if attempt:
+            except MsghubAuthError as exc:
+                if attempt or not self._retry_after_token_reject(exc, headers):
                     raise
-                self._token_mgr.invalidate()
                 continue
             raise MsghubServerError(
                 "MO 컨텐츠 대신 JSON 성공 응답이 옴", code="PARSE_ERROR", status_code=status_code,

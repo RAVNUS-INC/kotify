@@ -50,8 +50,9 @@ def normalize_phone(raw: str) -> str | None:
 
 
 # 발송 수신번호로 받는 국내 번호 — 휴대폰(위 규칙), 0 으로 시작하는 유선·인터넷 전화 9~11자리,
-# 15xx~19xx 대표번호 8자리. msghub recvInfoLst[].phone 은 20자 이내라 이 형식이면 늘 들어간다.
-_DOMESTIC_PATTERN = re.compile(r"^(?:0\d{8,10}|1[5-9]\d{6})$")
+# 050 안심번호 12자리(0505-1234-5678), 15xx~19xx 대표번호 8자리. msghub recvInfoLst[].phone 은
+# 20자 이내라 이 형식이면 늘 들어간다.
+_DOMESTIC_PATTERN = re.compile(r"^(?:0\d{8,10}|050\d{9}|1[5-9]\d{6})$")
 
 
 def normalize_recipient(raw: str) -> str | None:

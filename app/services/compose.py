@@ -531,6 +531,7 @@ async def dispatch_campaign(
     idempotency_key: str | None = None,
     send_channel: str = "rcs",
     retry_rejected: bool = True,
+    validate_recipients: bool = True,
 ) -> Campaign:
     """캠페인을 생성하고 msghub를 통해 발송한다.
 
@@ -545,7 +546,11 @@ async def dispatch_campaign(
     """
     # 0. 수신자 중복 제거 (C2) — 한도 판정 전에 수행해 실제 발송 건수 기준으로 검증.
     original_count = len(recipients)
-    recipients = normalize_recipients(recipients)
+    if validate_recipients:
+        recipients = normalize_recipients(recipients)
+    else:
+        # 대화방 답장 — 이미 받은 회신·보낸 기록의 번호라 형식 검사로 막지 않는다(숫자만 남김).
+        recipients = list(dict.fromkeys(d for d in (_norm_to_number(r) for r in recipients) if d))
     deduped_count = original_count - len(recipients)
 
     # 0.1 수신자 수 제한 (중복 제거 후 기준)

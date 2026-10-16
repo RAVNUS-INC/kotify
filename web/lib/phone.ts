@@ -64,11 +64,11 @@ export function hasDisplayName(t: { contactName?: string; name?: string; phone: 
 /**
  * 발송 수신번호로 받는 국내 번호인가 — 서버 normalize_recipient(app/util/phone.py)와 같은 규칙.
  * 구분자(공백·-·.·괄호)를 지우고 +82/82 를 0 으로 바꾼 뒤 휴대폰·0 으로 시작하는 9~11자리·
- * 15xx~19xx 8자리만 받는다. 이름이나 국제번호는 false.
+ * 050 안심번호 12자리·15xx~19xx 8자리만 받는다. 이름이나 국제번호는 false.
  */
 export function isSendableNumber(raw: string): boolean {
   let d = raw.trim().replace(/[\s\-.()]/g, '');
   if (d.startsWith('+82')) d = `0${d.slice(3)}`;
   else if (d.startsWith('82') && d.length >= 11) d = `0${d.slice(2)}`;
-  return /^(?:0\d{8,10}|1[5-9]\d{6})$/.test(d);
+  return /^(?:0\d{8,10}|050\d{9}|1[5-9]\d{6})$/.test(d);
 }

@@ -194,6 +194,16 @@ class TokenManager:
         self._state = None
         self._renew_retry_at = 0.0
 
+    def invalidate_token(self, token: str) -> bool:
+        """서버가 거부한 토큰이 지금 캐시한 토큰일 때만 버린다. 버렸으면 True.
+
+        동시 요청 중 하나가 이미 새로 받았으면 그 새 토큰까지 버리지 않는다.
+        """
+        if self._state is not None and self._state.access_token == token:
+            self.invalidate()
+            return True
+        return False
+
     async def _authenticate(self) -> None:
         """apiKey + apiPwd로 토큰 발급. 일시 장애 시 재시도."""
         last_err: Exception | None = None
