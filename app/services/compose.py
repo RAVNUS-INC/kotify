@@ -80,6 +80,9 @@ def validate_message(
 # 1회 발송 최대 수신자 수
 MAX_RECIPIENTS_PER_CAMPAIGN = 1000
 
+# 29002(CPS 초과) 뒤 같은 청크를 다시 보내기 전 대기 (초). RCS·일반 모드 모두 한 번만 재시도한다.
+_RATE_LIMIT_WAIT = 30
+
 # 청크를 보내는 중인 캠페인 id. 캠페인은 첫 청크 전에 RESERVED 로 커밋돼 목록에서 취소할 수
 # 있는데, 그때 취소가 끼면 이미 접수된 청크 행만 보고 전체 취소로 마무리해 뒤 청크가 예약
 # 시각에 발송된다. 단일 uvicorn 워커 전제(deploy/kotify.service --workers 1, events·reconcile 과
@@ -321,7 +324,7 @@ async def _dispatch_rcs_chunks(
             # 재발송이 이미 접수된 수신자에게 중복 발송할 일이 없다(부분수락은 HTTP 200 +
             # data[].code 경로 — 여기와 무관). 검증: claudedocs/review/c3-verification.md
             db.rollback()
-            await asyncio.sleep(30)
+            await asyncio.sleep(_RATE_LIMIT_WAIT)
             sent_at = reserve_utc_iso if is_reserved else _now_iso()
             try:
                 resp = await _send_chunk_direct(
@@ -896,10 +899,23 @@ async def _dispatch_direct_chunks(
                 RecvInfo(cli_key=_make_cli_key(campaign.id, chunk_idx, i), phone=phone)
                 for i, phone in enumerate(chunk)
             ]
-            resp = await _send_direct(
-                client, callback, content, subject, recv_list,
-                msg_type, mms_file_id, is_reserved, msghub_reserve_time,
-            )
+            try:
+                resp = await _send_direct(
+                    client, callback, content, subject, recv_list,
+                    msg_type, mms_file_id, is_reserved, msghub_reserve_time,
+                )
+            except MsghubRateLimited:
+                # 29002 는 요청 전체를 ingress 에서 거부해 접수분이 0이다(_dispatch_rcs_chunks 와 같은
+                # 근거) → 잠시 뒤 같은 cliKey 로 한 번 더 보내도 중복이 없다. 예전엔 바로 명시 거부로
+                # FAILED 확정해 재조정에서도 빠져 그 청크가 영구 미발송이었다. 재시도도 실패하면 아래
+                # 공통 처리로 기록한다.
+                log.warning("일반 발송 29002(CPS 초과) — %d초 뒤 재시도: chunk=%d", _RATE_LIMIT_WAIT, chunk_idx)
+                await asyncio.sleep(_RATE_LIMIT_WAIT)
+                sent_at = reserve_utc_iso if is_reserved else _now_iso()
+                resp = await _send_direct(
+                    client, callback, content, subject, recv_list,
+                    msg_type, mms_file_id, is_reserved, msghub_reserve_time,
+                )
             msghub_req = MsghubRequest(
                 campaign_id=campaign.id,
                 chunk_index=chunk_idx,

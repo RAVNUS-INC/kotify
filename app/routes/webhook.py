@@ -329,6 +329,7 @@ async def receive_mo(
     rejected = 0
     saved_mos: list[MoMessage] = []  # n8n 알림 대상 (신규 저장분만)
     delivery_ids: list[int] = []
+    batch_keys: set[str] = set()  # 이 배치에서 이미 저장 대기 중인 moKey
     active_callbacks = _active_caller_callbacks(db)
 
     try:
@@ -385,12 +386,19 @@ async def receive_mo(
                 item.number, item.mo_recv_dt, item.mo_msg, item.callback
             )
 
+            # 같은 배치에 같은 moKey(또는 같은 대체 키)가 두 번 오면 아래 조회는 아직 flush 하지
+            # 않은 앞 행을 못 본다(autoflush=False). 그대로 두 행을 넣으면 UNIQUE 위반으로 배치
+            # 전체가 롤백되고, msghub 가 같은 배치를 재전송할 때마다 또 실패한다.
+            if mo_key in batch_keys:
+                duplicates += 1
+                continue
             exists = db.execute(
                 select(MoMessage.id).where(MoMessage.mo_key == mo_key)
             ).scalar_one_or_none()
             if exists is not None:
                 duplicates += 1
                 continue
+            batch_keys.add(mo_key)
 
             mo = MoMessage(
                 mo_key=mo_key,

@@ -139,3 +139,24 @@ def test_receive_rcs_mo_accepts_registered_chatbot_alias(db_session):
     mo = db_session.query(MoMessage).filter_by(mo_key="rcs-alias-1").one()
     assert mo.mo_number == "01011112222"
     assert mo.mo_callback == "0212345678"
+
+
+def test_receive_mo_dedupes_same_key_within_batch(db_session):
+    """같은 배치에 같은 moKey·같은 대체 키가 두 번 와도 배치 전체가 롤백되지 않는다.
+
+    autoflush=False 라 사전 조회가 아직 flush 하지 않은 앞 행을 못 봐, 예전엔 UNIQUE 위반으로
+    20004 를 돌려 같은 배치의 정상 MO 까지 저장되지 않았다(msghub 재전송마다 반복)."""
+    _setup_token(db_session)
+    _add_caller(db_session, "0212345678")
+    dup = {"moKey": "k-dup", "moNumber": "0212345678", "moCallback": "01011112222", "moMsg": "중복"}
+    no_key = {"moNumber": "0212345678", "moCallback": "01033334444", "moMsg": "키없음",
+              "moRecvDt": "2026-01-01 10:00:00"}
+    ok = {"moKey": "k-ok", "moNumber": "0212345678", "moCallback": "01055556666", "moMsg": "정상"}
+    body = {"moCnt": 5, "moLst": [dup, dict(dup), no_key, dict(no_key), ok]}
+
+    resp = asyncio.run(receive_mo("wtok", _mo_request(body), db_session))
+
+    assert resp.status_code == 200
+    rows = db_session.execute(select(MoMessage).order_by(MoMessage.id)).scalars().all()
+    assert [r.mo_msg for r in rows] == ["중복", "키없음", "정상"]
+    assert rows[1].mo_key.startswith("syn-")

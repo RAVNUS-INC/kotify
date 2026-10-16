@@ -21,16 +21,25 @@ from dataclasses import dataclass
 
 import httpx
 
+from app.msghub.schemas import MsghubAuthError
+
 log = logging.getLogger(__name__)
 
+# 재시도할 일시 장애. TransportError 는 연결·타임아웃 외에 ReadError·RemoteProtocolError
+# (응답 도중 끊김)도 포함한다.
+_TRANSIENT_ERRORS = (httpx.TransportError, OSError)
 
-class AuthError(Exception):
-    """인증 실패."""
+
+class AuthError(MsghubAuthError):
+    """토큰 발급·갱신 실패.
+
+    MsghubAuthError 계열이라 발송 루프가 캠페인을 멈춘다 — 그대로 두면 청크마다 재인증해
+    발급 횟수 제한(50010)에 걸린다. 발송 요청 전에 실패한 것이라 status_code 는 없다.
+    """
 
     def __init__(self, code: str, message: str) -> None:
-        self.code = code
         self.message = message
-        super().__init__(f"[{code}] {message}")
+        super().__init__(message, code=code)
 
 
 @dataclass
@@ -75,7 +84,18 @@ def _parse_response(resp: httpx.Response) -> dict:
         body = resp.json()
     except Exception as exc:
         raise AuthError("PARSE_ERROR", f"응답 파싱 실패 (HTTP {resp.status_code})") from exc
+    if not isinstance(body, dict):
+        raise AuthError("PARSE_ERROR", f"응답 형식 오류 (HTTP {resp.status_code})")
     return body
+
+
+def _token_from(body: dict) -> str:
+    """응답 data.token. 없으면 AuthError — KeyError·TypeError 로 새지 않게 한다."""
+    data = body.get("data")
+    token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(token, str) or not token:
+        raise AuthError("PARSE_ERROR", "응답에 토큰이 없습니다")
+    return token
 
 
 _MAX_RETRIES = 2
@@ -95,6 +115,10 @@ class TokenManager:
     REFRESH_LIFETIME = 90000     # 25시간
     ACCESS_RENEW_BEFORE = 600    # 만료 10분 전 갱신
     REFRESH_RENEW_BEFORE = 1800  # 만료 30분 전 재인증
+    # 사전 갱신이 실패해도 지금 토큰이 아직 유효하면 계속 쓴다. 만료 직전 토큰은 요청 도중
+    # 만료될 수 있어 이만큼 남았을 때까지만 쓰고, 갱신 재시도는 RENEW_RETRY_AFTER 마다 한다.
+    ACCESS_MIN_REMAINING = 30
+    RENEW_RETRY_AFTER = 30
 
     def __init__(
         self,
@@ -109,6 +133,10 @@ class TokenManager:
         self._http = http
         self._state: _TokenState | None = None
         self._lock = asyncio.Lock()
+        self._renew_retry_at = 0.0  # 사전 갱신 실패 후 다음 시도 시각 (monotonic)
+
+    def _still_usable(self, state: _TokenState | None, now: float) -> bool:
+        return state is not None and now < state.access_expires_at - self.ACCESS_MIN_REMAINING
 
     async def get_token(self) -> str:
         """유효한 access token을 반환. 필요 시 자동 갱신/재발급."""
@@ -121,6 +149,8 @@ class TokenManager:
             and now < state.access_expires_at - self.ACCESS_RENEW_BEFORE
         ):
             return state.access_token
+        if now < self._renew_retry_at and self._still_usable(state, now):
+            return state.access_token  # type: ignore[union-attr]
 
         # Slow path: 갱신 필요 — lock으로 stampede 방지
         async with self._lock:
@@ -132,14 +162,26 @@ class TokenManager:
                 and now < state.access_expires_at - self.ACCESS_RENEW_BEFORE
             ):
                 return state.access_token
+            if now < self._renew_retry_at and self._still_usable(state, now):
+                return state.access_token  # type: ignore[union-attr]
 
-            if state is None:
-                await self._authenticate()
-            elif now >= state.refresh_expires_at - self.REFRESH_RENEW_BEFORE:
-                await self._authenticate()
-            else:
-                await self._refresh()
+            try:
+                if state is None:
+                    await self._authenticate()
+                elif now >= state.refresh_expires_at - self.REFRESH_RENEW_BEFORE:
+                    await self._authenticate()
+                else:
+                    await self._refresh()
+            except AuthError as exc:
+                # 사전 갱신은 권장 사항이다. 인증 서버 순간 장애로 아직 유효한 토큰까지 버리면
+                # 그동안 모든 발송이 실패한다. 실제로 토큰이 거부되면 발송 응답이 20xxx 로 알린다.
+                if not self._still_usable(state, time.monotonic()):
+                    raise
+                self._renew_retry_at = time.monotonic() + self.RENEW_RETRY_AFTER
+                log.warning("msghub 토큰 사전 갱신 실패 — 남은 기간 동안 기존 토큰 사용: %s", exc)
+                return state.access_token  # type: ignore[union-attr]
 
+            self._renew_retry_at = 0.0
             return self._state.access_token  # type: ignore[union-attr]
 
     async def test_auth(self) -> bool:
@@ -150,6 +192,7 @@ class TokenManager:
     def invalidate(self) -> None:
         """토큰 상태 초기화 (자격증명 변경 시)."""
         self._state = None
+        self._renew_retry_at = 0.0
 
     async def _authenticate(self) -> None:
         """apiKey + apiPwd로 토큰 발급. 일시 장애 시 재시도."""
@@ -172,11 +215,14 @@ class TokenManager:
                 if code != "10000":
                     raise AuthError(code, body.get("message", "인증 실패"))
 
-                data = body["data"]
+                token = _token_from(body)
+                refresh_token = body["data"].get("refreshToken")
+                if not isinstance(refresh_token, str) or not refresh_token:
+                    raise AuthError("PARSE_ERROR", "응답에 refresh 토큰이 없습니다")
                 now = time.monotonic()
                 self._state = _TokenState(
-                    access_token=data["token"],
-                    refresh_token=data["refreshToken"],
+                    access_token=token,
+                    refresh_token=refresh_token,
                     access_expires_at=now + self.ACCESS_LIFETIME,
                     refresh_expires_at=now + self.REFRESH_LIFETIME,
                 )
@@ -184,7 +230,7 @@ class TokenManager:
 
             except AuthError:
                 raise  # 인증 에러는 재시도하지 않음
-            except (httpx.TimeoutException, httpx.ConnectError, OSError) as exc:
+            except _TRANSIENT_ERRORS as exc:
                 last_err = exc
                 log.warning(
                     "msghub 인증 시도 %d/%d 실패: %s",
@@ -227,14 +273,15 @@ class TokenManager:
                 await self._authenticate()
                 return
 
+            token = _token_from(body)
             now = time.monotonic()
             self._state = _TokenState(
-                access_token=body["data"]["token"],
+                access_token=token,
                 refresh_token=self._state.refresh_token,
                 access_expires_at=now + self.ACCESS_LIFETIME,
                 refresh_expires_at=self._state.refresh_expires_at,
             )
 
-        except (httpx.TimeoutException, httpx.ConnectError, OSError) as exc:
+        except _TRANSIENT_ERRORS as exc:
             log.warning("msghub 토큰 갱신 네트워크 오류: %s — 전체 재인증 시도", exc)
             await self._authenticate()

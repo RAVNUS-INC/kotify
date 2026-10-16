@@ -83,3 +83,79 @@ async def test_rate_limited_retry_no_duplicate(db_session, sample_user, sample_c
     # 재시도 SMS 전건 접수 성공 → 실패 0, 전건 pending(배달 리포트 대기)
     assert campaign.fail_count == 0
     assert campaign.pending_count == len(recipients)
+
+
+class _DirectRateLimitedClient:
+    """일반(sms) 모드 send_sms — 앞의 limited 번 호출은 29002, 그 뒤는 성공."""
+
+    def __init__(self, limited: int):
+        self.limited = limited
+        self.cli_keys: list[list[str]] = []
+
+    async def send_sms(self, *, callback, msg, recv_list, resv_yn=None, resv_req_dt=None):
+        self.cli_keys.append([r.cli_key for r in recv_list])
+        if len(self.cli_keys) <= self.limited:
+            raise MsghubRateLimited("[29002] CPS 초과", code="29002", status_code=400)
+        items = [
+            SendResultItem(
+                cli_key=r.cli_key, msg_key=f"mk-{r.cli_key}",
+                phone=r.phone, code=SUCCESS_CODE, message="성공",
+            )
+            for r in recv_list
+        ]
+        return SendResponse(code="10000", message="OK", items=items)
+
+
+async def _dispatch_direct(db_session, sample_user, sample_caller, client, recipients):
+    return await dispatch_campaign(
+        db=db_session,
+        msghub_client=client,
+        created_by=sample_user.sub,
+        caller_number=sample_caller.number,
+        content="안내 메시지",
+        recipients=recipients,
+        message_type="SMS",
+        send_channel="sms",
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_retries_rate_limited_chunk(db_session, sample_user, sample_caller, monkeypatch):
+    """일반 모드도 29002 청크를 잠시 뒤 같은 cliKey 로 한 번 더 보낸다 — 예전엔 명시 거부로 FAILED 확정."""
+    waits: list[float] = []
+
+    async def _record_sleep(seconds):
+        waits.append(seconds)
+    monkeypatch.setattr("app.services.compose.asyncio.sleep", _record_sleep)
+
+    recipients = ["01000000001", "01000000002"]
+    client = _DirectRateLimitedClient(limited=1)
+    campaign = await _dispatch_direct(db_session, sample_user, sample_caller, client, recipients)
+
+    assert waits == [30]
+    assert len(client.cli_keys) == 2 and client.cli_keys[0] == client.cli_keys[1]
+    rows = db_session.execute(
+        select(Message).where(Message.campaign_id == campaign.id).order_by(Message.id)
+    ).scalars().all()
+    assert [m.cli_key for m in rows] == client.cli_keys[0]  # 수신자당 1행, -fb 아님
+    assert all(m.status == "REG" for m in rows)
+    assert (campaign.state, campaign.fail_count, campaign.pending_count) == ("DISPATCHED", 0, 2)
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_rate_limited_twice_fails_chunk(db_session, sample_user, sample_caller, monkeypatch):
+    """재시도도 29002 면 그 청크만 명시 거부로 기록하고 다음 청크는 계속 보낸다."""
+    async def _instant_sleep(_seconds):
+        return None
+    monkeypatch.setattr("app.services.compose.asyncio.sleep", _instant_sleep)
+
+    recipients = [f"010000000{i:02d}" for i in range(11)]  # 청크 0: 10명, 청크 1: 1명
+    client = _DirectRateLimitedClient(limited=2)
+    campaign = await _dispatch_direct(db_session, sample_user, sample_caller, client, recipients)
+
+    assert len(client.cli_keys) == 3
+    failed = db_session.execute(
+        select(Message).where(Message.campaign_id == campaign.id, Message.status == "FAILED")
+    ).scalars().all()
+    assert len(failed) == 10 and all(m.result_code == "29002" for m in failed)
+    assert (campaign.state, campaign.fail_count, campaign.pending_count) == ("PARTIAL_FAILED", 10, 1)
