@@ -24,6 +24,18 @@ export type ChatMessage = {
   status?: DeliveryStatus;
   /** 발신(us) 전용. 캠페인 작성자의 현재 표시명. */
   senderName?: string;
+  /** 수신(them) 전용. 고객이 보낸 파일(RCS fileMessage). 없으면 생략. */
+  attachment?: MessageAttachment;
+};
+
+/**
+ * 고객이 보낸 파일. 서버가 통신사 주소에서 한 번 내려받아 보관한다.
+ * ready 만 url(인증된 `/api/chat/media/{moId}`)이 있다. failed 는 주소가 만료·소진돼 다시 받을 수 없는 것.
+ */
+export type MessageAttachment = {
+  kind: 'image';
+  status: 'ready' | 'pending' | 'failed' | 'unsupported';
+  url?: string;
 };
 
 export type ChatThread = {

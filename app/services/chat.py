@@ -23,6 +23,7 @@ from app.msghub.codes import (
     REPLY_ID_VALID_HOURS,
     SUCCESS_CODE,
 )
+from app.services import mo_media
 from app.services.compose import (
     dispatch_campaign,
     dispatch_chat_reply,
@@ -53,6 +54,8 @@ class ChatMessage:
     campaign_id: int | None = None
     msg_id: int | None = None
     sender_name: str | None = None    # OUT 전용: 캠페인 작성자의 현재 표시명
+    # IN 전용: 첨부 파일 상태(mo_media.fetch_status). 첨부가 없으면 None.
+    attachment: str | None = None
 
 
 @dataclass
@@ -241,6 +244,24 @@ def _latest_bodies(candidates: list) -> dict[str, str]:
     return {phone: body for phone, (_, body) in best.items()}
 
 
+def _mo_preview_body() -> ColumnElement[str]:
+    """목록 미리보기용 회신 본문 — 글 없이 파일만 온 회신은 [사진]/[첨부 파일].
+
+    mo_media.display_text 와 같은 규칙을 SQL 로 옮긴 것(JSON 을 행마다 파이썬으로 풀지 않게).
+    """
+    mime = func.json_extract(MoMessage.content_info_lst, "$.fileMessage.fileMIMEType")
+    url = func.json_extract(MoMessage.content_info_lst, "$.fileMessage.fileUrl")
+    return func.coalesce(
+        func.nullif(MoMessage.mo_msg, ""),
+        case(
+            (func.json_valid(MoMessage.content_info_lst) != 1, ""),
+            (func.coalesce(url, "") == "", ""),
+            (func.lower(func.coalesce(mime, "")).like("image/%"), mo_media.IMAGE_LABEL),
+            else_=mo_media.FILE_LABEL,
+        ),
+    )
+
+
 def _batch_last_mo_bodies(db: Session, phones: list[str]) -> dict[str, str]:
     """phone → 가장 최근 고객 수신(MO) 본문. 번호마다 쿼리하지 않고 창 함수로 한 번에 고른다.
 
@@ -269,7 +290,7 @@ def _batch_last_mo_bodies(db: Session, phones: list[str]) -> dict[str, str]:
                 MoMessage.mo_number.label("phone"),
                 MoMessage.id,
                 ts.label("ts"),
-                MoMessage.mo_msg.label("body"),
+                _mo_preview_body().label("body"),
             )
             .select_from(ranked)
             .join(MoMessage, MoMessage.id == ranked.c.id)
@@ -525,6 +546,7 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
     mo_rows = db.execute(
         select(MoMessage).where(MoMessage.mo_number == phone)
     ).scalars().all()
+    media = mo_media.statuses(db, [mo.id for mo in mo_rows])
     for mo in mo_rows:
         ts = _coalesce_ts(mo.mo_recv_dt, mo.received_at)
         out.append(
@@ -535,6 +557,7 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
                 telco=mo.telco,
                 product_code=mo.product_code,
                 mo_id=mo.id,
+                attachment=media.get(mo.id),
             )
         )
 

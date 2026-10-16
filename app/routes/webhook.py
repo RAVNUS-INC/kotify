@@ -37,7 +37,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from starlette.background import BackgroundTask
+from starlette.background import BackgroundTasks
 
 from app.config import settings
 from app.db import get_db
@@ -49,7 +49,7 @@ from app.msghub.schemas import (
     json_type,
 )
 from app.security.settings_store import SettingsStore
-from app.services import events
+from app.services import events, mo_media
 from app.services.report import (
     awaiting_record,
     process_report,
@@ -329,6 +329,8 @@ async def receive_mo(
     rejected = 0
     saved_mos: list[MoMessage] = []  # n8n 알림 대상 (신규 저장분만)
     delivery_ids: list[int] = []
+    media_rows: list = []
+    media_ids: list[int] = []
     active_callbacks = _active_caller_callbacks(db)
 
     try:
@@ -423,6 +425,8 @@ async def receive_mo(
         # 다시 받는다. 이로써 저장된 회신만 있고 알림 요청은 없는 상태를 막는다.
         if saved_mos:
             db.flush()
+            # 첨부 이미지 행도 같은 트랜잭션에 — 커밋되면 내려받기 대상이 유실되지 않는다.
+            media_rows = [r for r in (mo_media.record_for(db, mo) for mo in saved_mos) if r]
             from app.services.notify import enqueue_n8n_delivery, prepare_n8n_delivery
 
             n8n_url, n8n_payloads = prepare_n8n_delivery(db, saved_mos)
@@ -431,6 +435,7 @@ async def receive_mo(
                     db, saved_mos, n8n_url, n8n_payloads
                 )
         db.commit()
+        media_ids = [r.id for r in media_rows if r.fetch_status == "PENDING"]
     except Exception:
         db.rollback()
         log.exception("MO 저장 실패")
@@ -459,14 +464,18 @@ async def receive_mo(
 
     # outbox HTTP 전송은 응답 반환 후 수행한다. 네트워크 장애면 FAILED로 남고
     # 주기 작업이 재시도한다. 같은 MO는 UNIQUE(mo_id)라 중복 알림 행이 생기지 않는다.
-    background: BackgroundTask | None = None
+    # 첨부 이미지는 통신사 주소가 일회성·단기 유효일 수 있어 응답 직후 바로 내려받는다.
+    # 실패·재시작으로 남은 PENDING 은 주기 작업(main._reconcile_loop)이 다시 줍는다.
+    background = BackgroundTasks()
     if delivery_ids:
         from app.services.notify import process_n8n_outbox
 
-        background = BackgroundTask(process_n8n_outbox, db)
+        background.add_task(process_n8n_outbox, db)
+    if media_ids:
+        background.add_task(mo_media.fetch_new, media_ids)
 
     return JSONResponse(
         {"code": "10000", "message": "success"},
         status_code=200,
-        background=background,
+        background=background if background.tasks else None,
     )

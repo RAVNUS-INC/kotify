@@ -46,6 +46,7 @@ from app.services.contacts import (
 from app.services.contacts import (
     update_contact as svc_update_contact,
 )
+from app.services.mo_media import display_text
 
 router = APIRouter(
     dependencies=[Depends(require_user), Depends(require_setup_complete)],
@@ -336,7 +337,7 @@ def get_contact_route(cid: str, db: Session = Depends(get_db)) -> dict | JSONRes
             replies.append({
                 "id": f"mo-{m.id}",
                 "campaignName": approx_camp,
-                "text": m.mo_msg or "",
+                "text": display_text(m.mo_msg, m.content_info_lst),
                 "at": _fmt_kst_dt(m.mo_recv_dt),
             })
 

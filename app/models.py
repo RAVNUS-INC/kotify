@@ -350,6 +350,39 @@ class MoMessage(Base):
     )
 
 
+class MoMedia(Base):
+    """고객 회신(MO)에 붙은 파일 1건 — RCS 양방향 contentInfo.fileMessage 와 1:1.
+
+    fileUrl 은 통신사 서버 주소이고 일회성·단기 유효일 수 있어(msghub MMS MO 는 24시간·1회)
+    수신 직후 한 번 내려받아 영구 보관한다. 원본 주소는 mo_messages.content_info_lst 에만 둔다.
+    상태: PENDING(가져올 차례) → FETCHING(가져오는 중) → FETCHED / FAILED,
+    이미지가 아닌 첨부는 UNSUPPORTED(내려받지 않음).
+    """
+
+    __tablename__ = "mo_media"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("mo_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    # 통신사가 알려 준 형식(fileMIMEType). 실제 응답 형식은 content_type.
+    declared_mime: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fetch_status: Mapped[str] = mapped_column(Text, nullable=False)
+    fetch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    fetched_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("mo_id", name="uq_mo_media_mo_id"),
+        Index("idx_mo_media_fetch", "fetch_status"),
+    )
+
+
 class NotificationDelivery(Base):
     """고객 회신 알림의 내구성 있는 n8n 전송 대기열."""
 

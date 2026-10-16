@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { ChatThreadDetail } from '@/types/chat';
 import { markReadClient, withDateDividers } from '@/lib/chat';
 import { ChatDateDivider } from './ChatDateDivider';
+import { MessageAttachment } from './MessageAttachment';
 import { MessageBubble } from './MessageBubble';
 import { ThreadComposer } from './ThreadComposer';
 
@@ -68,7 +69,9 @@ export function ThreadView({ thread }: ThreadViewProps) {
                 timestamp={m.time}
                 senderName={m.senderName}
               >
-                {m.text}
+                {m.attachment && <MessageAttachment attachment={m.attachment} />}
+                {/* 사진과 글이 함께 오면 글은 사진 아래 한 줄 띄워서. */}
+                {m.attachment && m.text ? <span className="mt-1.5 block">{m.text}</span> : m.text}
               </MessageBubble>
             </Fragment>
           ))

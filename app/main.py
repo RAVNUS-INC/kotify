@@ -134,6 +134,13 @@ async def _reconcile_loop() -> None:
                     logger.exception("n8n 알림 outbox 처리 실패")
 
                 try:
+                    from app.services.mo_media import fetch_pending as fetch_mo_media
+
+                    await fetch_mo_media(db)
+                except Exception:  # noqa: BLE001
+                    logger.exception("회신 이미지 가져오기 실패")
+
+                try:
                     await _track_fax(db)
                 except Exception:  # noqa: BLE001
                     logger.exception("PBX 팩스 결과 추적 실패")

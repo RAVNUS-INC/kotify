@@ -27,6 +27,7 @@ from app.db import SessionLocal
 from app.models import Campaign, Message, MsghubRequest, NotificationDelivery, User
 from app.msghub.codes import SUCCESS_CODE
 from app.security.settings_store import SettingsStore
+from app.services.mo_media import display_text
 from app.util.time import parse_mixed_ts
 
 log = logging.getLogger(__name__)
@@ -163,7 +164,8 @@ def _mo_to_payload(mo, last_sender: dict | None = None) -> dict:
         "fromDisplay": _format_phone_display(mo.mo_number),
         # 우리 발신번호(고객이 답장한 대상). 없을 수 있음.
         "to": mo.mo_callback or "",
-        "text": mo.mo_msg or "",
+        # 글 없이 사진만 온 회신은 [사진] — 빈 알림이 되지 않게.
+        "text": display_text(mo.mo_msg, mo.content_info_lst),
         "title": mo.mo_title or "",
         "channel": mo.mo_type or "",
         "telco": mo.telco or "",

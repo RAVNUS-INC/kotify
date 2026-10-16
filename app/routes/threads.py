@@ -16,7 +16,7 @@ from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.dialects.sqlite import insert
@@ -24,8 +24,9 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_sender, require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, Message, MoMessage, ThreadRead, User
+from app.models import Campaign, Message, MoMedia, MoMessage, ThreadRead, User
 from app.security.csrf import verify_csrf
+from app.services import mo_media
 from app.services.chat import (
     ChatMessage as ServiceChatMessage,
 )
@@ -190,7 +191,59 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
         row["status"] = m.delivery
     if m.direction == "OUT":
         row["senderName"] = m.sender_name or "알 수 없음"
+    if m.attachment and m.mo_id:
+        status = _ATTACHMENT_STATUS.get(m.attachment, "failed")
+        attachment: dict = {"kind": "image", "status": status}
+        if status == "ready":
+            attachment["url"] = f"/api/chat/media/{m.mo_id}"
+        row["attachment"] = attachment
     return row
+
+
+# mo_media.fetch_status → 화면 상태. 가져오는 중(FETCHING)도 아직 기다리는 중이다.
+_ATTACHMENT_STATUS = {
+    "FETCHED": "ready",
+    "PENDING": "pending",
+    "FETCHING": "pending",
+    "FAILED": "failed",
+    "UNSUPPORTED": "unsupported",
+}
+
+
+def _attachment_preview(m: ServiceChatMessage) -> str:
+    """글 없이 파일만 온 회신의 미리보기 — 목록(_mo_preview_body)과 같은 문구."""
+    if not m.attachment:
+        return ""
+    return mo_media.FILE_LABEL if m.attachment == "UNSUPPORTED" else mo_media.IMAGE_LABEL
+
+
+@router.get("/chat/media/{mo_id}", response_model=None)
+def api_get_mo_media(mo_id: int, db: Session = Depends(get_db)) -> Response | JSONResponse:
+    """고객 회신에 붙은 이미지 원본 — 대화방을 볼 수 있는 사용자(require_user)만.
+
+    본문은 형식을 직접 확인한 이미지뿐이지만 nosniff·sandbox 로 문서로 해석될 여지를 막는다.
+    """
+    row = db.execute(
+        select(MoMedia.content_blob, MoMedia.content_type).where(
+            MoMedia.mo_id == mo_id, MoMedia.fetch_status == "FETCHED"
+        )
+    ).first()
+    if row is None or row.content_blob is None or not row.content_type:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "이미지를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    return Response(
+        content=row.content_blob,
+        media_type=row.content_type,
+        headers={
+            # 보관한 원본은 바뀌지 않는다 — 같은 사용자 브라우저에서만 재사용.
+            "Cache-Control": "private, max-age=86400, immutable",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Content-Disposition": f'inline; filename="reply-{mo_id}"',
+        },
+    )
 
 
 def _campaign_label(subject: str | None, content: str | None, cid: int) -> str:
@@ -334,7 +387,7 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         "id": tid,
         "name": phone,
         "phone": phone,
-        "preview": (last.body or "")[:60],
+        "preview": (last.body or _attachment_preview(last))[:60],
         "time": fmt_kst_hhmm(last.timestamp),
         "date": fmt_kst_date(last.timestamp),
         "channel": last_channel,
