@@ -8,13 +8,22 @@
 - 배포 시: `0026` 이 기존 MO 중 `content_cnt > 0`·실제 moKey 인 행을 PENDING 으로 표시한다. 받은 지 7일 지난 건은 첫 주기에 EXPIRED 로 닫히고(요청 안 함), 7일 안의 건은 재조정 루프가 20건씩 받는다.
 - 남은 확인 필요(코드 변경 없음): mnt-api 토큰 공용 여부, chatbotId 다중 채널, 직접 LMS/MMS 빈 제목 허용 여부, 본문 `#{..}`·`{{..}}` 치환 여부. 인증 실패로 멈춘 캠페인이 DISPATCHING 으로 남는 기존 한계도 그대로다.
 
+## 2026-10-16 — kotify-web 재시작 지연(SIGTERM 90초 → SIGKILL) 원인·종료 유예 (`2c24502`, main 푸시·운영 적용 보류)
+
+- 증상: `e056dfe`(2026-10-15 17:32 UTC)·`bb5e4c3`(2026-10-16 05:09 UTC) 배포 재시작에서 `kotify-web.service: State 'stop-sigterm' timed out. Killing.` → status=9/KILL, 재시작 단계만 90초. 새 버전은 정상 기동했다.
+- 원인(운영 CT 읽기 전용 확인 + 로컬 재현): unit `TimeoutStopSec` 기본 90초. Next 14.2.35 `start-server.js` 는 SIGTERM 에 `server.close(() => process.exit(0))` 만 해서 열린 요청이 끝날 때까지 남는다. 대화방 SSE `/api/chat/stream`(rewrite 로 FastAPI 프록시, 25초 ping 무한 스트림)은 끝나지 않고, `After=kotify.service` 때문에 정지는 web 이 먼저라 FastAPI 쪽에서도 안 끊긴다. 코드 회귀가 아니라 **대화방 탭이 열려 있을 때마다** 생긴다 — 07f6d1d(02:19 KST) 등은 탭이 없어 11ms 만에 종료됐고, 05:09 UTC 직전 access log 에는 여러 IP 의 `/chat/stream` 200 이 있다. 그 90초 동안 :3000 이 새 연결을 거절하므로(재현: Connection refused) 사용자에게는 사이트 다운이었다. post-restart 의 기동 확인 120초는 `systemctl restart` 가 끝난 뒤부터라 롤백 위험은 없었다.
+- 수정(사용자 선택 A안): `deploy/kotify-web-shutdown.cjs` preload — SIGTERM 뒤 5초(`KOTIFY_WEB_SHUTDOWN_GRACE_MS` 로 테스트 조정) 유예 후 남은 연결을 끊고 `exit 0`, 열린 연결이 없으면 Next 가 바로 종료, 다른 SIGTERM 처리기가 없는 자식 node 는 기본 동작 유지. `kotify-web.service` 에 `TimeoutStopSec=15`(안전망)·`NODE_OPTIONS=--require=/usr/local/lib/kotify/kotify-web-shutdown.cjs`. preload 는 저장소 밖 사본을 쓴다(`--require` 대상이 없으면 node 가 기동 실패 — 실측, git 롤백 대비). `ct-bootstrap.sh` 가 사본을 설치, `deploy/README.md` "kotify-web 종료 유예" 에 수동 설치 절차.
+- 정지 순서 변경(kotify 먼저)은 uvicorn 도 열린 스트림을 기다릴 가능성이 커 택하지 않았다(미검증).
+- 검증(로컬): `tests/test_web_shutdown_preload.py` 5개 통과(Next 와 같은 종료 처리를 흉내 낸 node 서버 — SSE 열림 시 유예 뒤 rc=0, 유예 중 새 연결 거절, 연결 없으면 즉시 종료, 자식 기본 종료, unit·bootstrap 경로 일치). preload 를 빈 파일로 바꾸면 SSE 테스트 2개 실패 확인. 로컬 node 는 v25(운영 v20.20.2).
+- **남은 일**: 운영 적용(사용자 지시로 보류, 2026-10-16). 업데이트 버튼은 unit 을 설치하지 않으므로 apply 뒤 CT 에서 README 절차(사본 설치·unit 복사·`daemon-reload`)를 한 번 실행. 첫 재시작은 기존 프로세스라 최대 15초 뒤 SIGKILL 될 수 있고, **그다음 재시작(대화방 탭 열린 상태)에서 `Killing` 없이 `kotify-web: SIGTERM — …` 로그로 끝나는지 확인**해야 완료.
+- 곁가지(범위 밖): 일부 IP 에서 `/chat/stream` 303 이 반복된다(로그아웃된 탭의 재연결로 보임).
 ## 2026-10-16 — 녹음 재생 팝업·팩스 기본 해상도 선명 운영 배포(`bb5e4c3`)
 
 - 사용자 요청: 칸 안에서 펼치는 재생기가 밀려 이상하니 팝업으로 통화 정보와 함께 한 번에 하나씩 재생, 팩스 기본 옵션은 선명.
 - `27f316c`: 목록에는 "재생" 버튼만 두고 누르면 가운데 팝업(Radix Dialog)에 상대·시각·구분·내선·결과·통화 시간과 재생기를 띄운다. 한 번에 하나, 닫으면 `<audio>` 가 사라져 재생이 멈춘다. 통화 기록 표·대화방 최근 통화 공통(`RecordingPlayer({ call })`). `bb5e4c3`: 화면 기본 선택과 API 기본값(`DEFAULT_RESOLUTION`)을 `medium`(선명)으로.
 - 검증(로컬): 가짜 PBX 로 재생 시 표 행 높이 그대로(57px), 팝업 막대 가운데 클릭 → 21초, Esc 로 닫으면 팝업·재생 모두 사라짐, 팩스 기본 선택 "선명". 백엔드 848개(기본 해상도 테스트 추가), 웹 Vitest 226개, `next build` 20/20.
 - 배포: 2026-10-16 05:06:57 UTC `apply` → 05:10:39 `post-restart: 정상 기동 — bb5e4c3`, 두 서비스 active·`NRestarts=0`, healthz `bb5e4c3`, DB ok, 운영 번들·`DEFAULT_RESOLUTION` 반영 확인. **로그인 화면 확인은 안 함.**
-- 관찰: 재시작 때 `kotify-web` 이 SIGTERM 에 제때 끝나지 않아 systemd 가 강제 종료(`stop-sigterm timed out`) — `e056dfe`(심야)·`bb5e4c3`(낮) 배포 두 번 연속, 이번엔 배포가 약 3분 40초로 길어졌다. 열린 대화방 실시간 연결(SSE) 때문으로 추정(미확인). 서비스는 매번 정상 기동했다. 후속: 원인 확인 후 `TimeoutStopSec` 단축이나 종료 처리 검토.
+- 관찰: 재시작 때 `kotify-web` 이 SIGTERM 에 제때 끝나지 않아 systemd 가 강제 종료(`stop-sigterm timed out`) — `e056dfe`(심야)·`bb5e4c3`(낮) 배포 두 번 연속, 이번엔 배포가 약 3분 40초로 길어졌다. 열린 대화방 실시간 연결(SSE) 때문으로 추정(미확인). 서비스는 매번 정상 기동했다. → 원인 확인·수정은 위 "kotify-web 재시작 지연" 항목.
 
 ## 2026-10-16 — 통화 녹음 재생 바 수정·통화 기록/팩스 화면 정리 운영 배포(`e056dfe`)
 

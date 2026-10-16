@@ -154,6 +154,7 @@ claudedocs/E2E-CHECKLIST.md
 | `ct-bootstrap.sh` | CT 초기 설정 자동화 스크립트 (Python + Node + 빌드 + systemd 전부 처리) |
 | `kotify.service` | systemd 유닛 — FastAPI (uvicorn 8080) |
 | `kotify-web.service` | systemd 유닛 — Next.js (node server 3000) |
+| `kotify-web-shutdown.cjs` | kotify-web 종료 유예 preload — SIGTERM 뒤 5초 지나면 남은 연결(대화방 SSE)을 끊고 정상 종료 |
 | `kotify-sudoers` | 웹 UI 원클릭 업데이트 허용용 sudoers fragment |
 | `kotify-update.sh` | `/settings` → System → Update 에서 호출하는 스크립트 (git pull 후 worker 로 넘김) |
 | `kotify-update-worker.sh` | 실제 업데이트 (의존성·마이그레이션·빌드, 실패 시 git·DB 롤백) + 재시작 예약 |
@@ -302,6 +303,35 @@ sqlite3 /var/lib/kotify/sms.db ".tables"
 
   정상 처리 후 새 행은 `DELIVERED`여야 한다. `FAILED`가 계속 쌓이면
   `/var/log/kotify/stderr.log`의 `n8n 알림 outbox 실패`와 n8n 실행 기록을 함께 확인한다.
+
+### kotify-web 종료 유예
+
+Next 14.2 standalone 서버는 SIGTERM 을 받으면 새 연결을 바로 거절하고, 열린 요청이
+끝날 때까지 종료하지 않는다. 대화방 화면의 SSE(`/api/chat/stream`)는 끝나지 않는
+스트림이다. 게다가 `kotify-web` 이 `kotify` 보다 먼저 정지하므로 FastAPI 쪽에서도
+끊기지 않는다. 그래서 대화방 탭이 하나라도 열려 있으면 재시작 때 90초(TimeoutStopSec
+기본값) 동안 사이트가 새 연결을 거절하다가 SIGKILL 로 끝났다
+(journal `State 'stop-sigterm' timed out. Killing.`).
+
+`kotify-web-shutdown.cjs` 를 `NODE_OPTIONS=--require` 로 먼저 불러온다. 이 파일은
+SIGTERM 뒤 5초 동안 Next 가 일반 요청을 마치게 두고, 남은 연결은 끊은 뒤 `exit 0` 한다.
+끊긴 대화방은 프론트 백오프로 새 서버에 다시 연결한다. `TimeoutStopSec=15` 는 안전망이다.
+5초 넘게 걸리는 요청(긴 녹음 재생 스트림 등)은 재시작 때 끊긴다.
+
+**unit 과 preload 는 업데이트 버튼(`kotify-update.sh`)이 설치하지 않는다.** 이 파일들이
+바뀌면 CT 에서 root 로 한 번 설치한다. preload 는 저장소 밖에 복사한다 — `--require` 대상이
+없으면 node 가 기동하지 못하는데, git 롤백으로 이 파일이 없는 커밋이 체크아웃될 수 있기 때문이다.
+
+```bash
+install -D -m 0644 /opt/kotify/deploy/kotify-web-shutdown.cjs /usr/local/lib/kotify/kotify-web-shutdown.cjs
+cp /opt/kotify/deploy/kotify-web.service /etc/systemd/system/kotify-web.service
+systemctl daemon-reload
+systemctl show kotify-web -p TimeoutStopUSec -p Environment   # 15s, NODE_OPTIONS 확인
+```
+
+새 설정은 다음 재시작부터 적용된다. 첫 재시작에서는 기존 프로세스(preload 없음)를 멈추므로
+최대 15초 뒤 SIGKILL 될 수 있다. 그다음 재시작부터 journal 에
+`kotify-web: SIGTERM — 열린 요청을 최대 5000ms 기다린 뒤 종료` 가 찍히고 `Killing` 은 없어야 한다.
 
 ### CT SSH 재로딩 실패
 
