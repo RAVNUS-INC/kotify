@@ -25,6 +25,9 @@ RestartSec=5
 # 그래도 안 끝날 때의 안전망이다. preload 는 저장소 밖 사본을 쓴다(git 롤백에 안 지워지게).
 TimeoutStopSec=15
 Environment=NODE_OPTIONS=--require=/usr/local/lib/kotify/kotify-web-shutdown.cjs
+# preload 사본이 없으면 node 가 MODULE_NOT_FOUND 로 재시작을 반복한다 — 그 전에 원인이 보이게 멈춘다.
+# 사본은 배포 때 kotify-post-restart.sh 가 갱신한다. 처음 한 번은 deploy/README 순서대로 직접 설치.
+ExecStartPre=/usr/bin/test -r /usr/local/lib/kotify/kotify-web-shutdown.cjs
 
 # 로그 — journalctl 로 확인 (별도 stdout 파일 없음, Next.js 콘솔 로그는 전부 journal 로)
 StandardOutput=journal

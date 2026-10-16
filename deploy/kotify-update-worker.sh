@@ -12,12 +12,15 @@
 # worker 가 하는 일:
 #   - pip install
 #   - SQLite .backup (pre-migrate)
-#   - alembic upgrade (kotify 사용자로)  → 실패 시 ERR trap 이 백업 복원 + git rollback
+#   - alembic upgrade (kotify 사용자로)  → 이후 실패 시 ERR trap 이 git rollback + (서비스를
+#     멈춘 뒤) 백업 복원. 마이그레이션 전 단계에서 실패하면 DB 는 건드리지 않는다
 #   - pnpm install + build
 #   - .next/static / public merge-copy (race 회피)
 #   - chown — 서비스 사용자가 읽을 수 있게
-#   - 재시작 예약 (2초 딜레이 비동기) — kotify-post-restart.sh 가 재시작 후
-#     기동을 확인하고, 실패하면 이전 커밋으로 롤백한다
+#   - 재시작 예약 (2초 딜레이 비동기) — kotify-post-restart.sh 가 web 종료 유예 preload 사본을
+#     갱신하고 재시작 후 기동을 확인하며, 실패하면 이전 커밋으로 롤백한다
+#
+# KOTIFY_* 환경변수는 테스트(tests/test_update_worker_script.py)에서 경로와 명령을 바꾸기 위한 것.
 
 set -euo pipefail
 
@@ -41,15 +44,18 @@ set -euo pipefail
 # 만드는데 이 경로는 ReadWritePaths 에 포함되므로 모든 배포판/모든 invoke
 # 경로에서 확실히 동작. pnpm 은 내부적으로 `fs.mkdir` 를 `recursive:false`
 # 로 호출하니 조부모 (`.local`, `.cache`) 까지는 미리 만들어야 한다.
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-export HOME="/opt/kotify/.worker-home"
+export PATH="${KOTIFY_TEST_PATH:+${KOTIFY_TEST_PATH}:}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+INSTALL_DIR="${KOTIFY_INSTALL_DIR:-/opt/kotify}"
+export HOME="${INSTALL_DIR}/.worker-home"
 mkdir -p "${HOME}/.local/share" "${HOME}/.cache"
 
-INSTALL_DIR="/opt/kotify"
 WEB_DIR="${INSTALL_DIR}/web"
-VENV="${INSTALL_DIR}/.venv"
-DB_PATH="/var/lib/kotify/sms.db"
-DB_BACKUP="/var/lib/kotify/pre-migrate.db"
+VENV="${KOTIFY_VENV:-${INSTALL_DIR}/.venv}"
+DB_PATH="${KOTIFY_DB_PATH:-/var/lib/kotify/sms.db}"
+DB_BACKUP="${KOTIFY_DB_BACKUP:-/var/lib/kotify/pre-migrate.db}"
+SYSTEMD_RUN="${KOTIFY_SYSTEMD_RUN:-systemd-run}"
+# 마이그레이션을 시작했는가 — 그 전 단계 실패면 DB 는 그대로라 복원하지 않는다.
+MIGRATE_STARTED=0
 SERVICE_API="kotify"
 SERVICE_WEB="kotify-web"
 SERVICE_USER="kotify"
@@ -69,12 +75,23 @@ cleanup_on_error() {
     echo "{\"phase\": \"error\", \"rollback\": true, \"to\": \"${PREV_HEAD:0:7}\"}"
     # 1. git 코드 rollback.
     git -C "${INSTALL_DIR}" reset --hard "${PREV_HEAD}" >/dev/null 2>&1 || true
-    # 2. DB 롤백 — 사전 백업이 있으면 복원.
-    if [[ -f "${DB_BACKUP}" ]]; then
-        cp -f "${DB_BACKUP}" "${DB_PATH}" 2>/dev/null || true
-        # WAL / SHM 정리 — 복원 후 남은 journal 이 DB 와 불일치할 수 있음.
-        rm -f "${DB_PATH}-wal" "${DB_PATH}-shm" 2>/dev/null || true
-        chown "${SERVICE_USER}:${SERVICE_GROUP}" "${DB_PATH}" 2>/dev/null || true
+    # 2. DB 롤백 — 마이그레이션을 시작한 뒤의 실패만 사전 백업으로 복원한다. 그 전 단계(pip·백업)
+    #    실패면 스키마가 그대로라 복원하면 백업 이후 받은 회신·리포트만 잃는다.
+    #    복원은 API 를 **멈춘 뒤** 한다 — 도는 중에 sms.db 를 덮고 WAL·SHM 을 지우면 열린 연결이 DB 를
+    #    망가뜨린다. 이 worker 는 웹 업데이트 버튼이면 kotify 서비스의 cgroup 안에서 돌아 직접
+    #    `systemctl stop kotify` 하면 자기도 죽으므로, post-restart 처럼 systemd-run 별도 unit 에 맡긴다.
+    if [[ "${MIGRATE_STARTED}" == 1 && -f "${DB_BACKUP}" ]]; then
+        local q_backup q_db
+        printf -v q_backup '%q' "${DB_BACKUP}"
+        printf -v q_db '%q' "${DB_PATH}"
+        local restore="set -e; systemctl stop ${SERVICE_API}; cp -f ${q_backup} ${q_db};"
+        restore+=" rm -f ${q_db}-wal ${q_db}-shm; chown ${SERVICE_USER}:${SERVICE_GROUP} ${q_db} || true;"
+        restore+=" systemctl start ${SERVICE_API}"
+        if "${SYSTEMD_RUN}" --unit="kotify-db-restore-$(date +%s)-$$" /bin/bash -c "${restore}" >/dev/null 2>&1; then
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] DB 복원 예약 — ${SERVICE_API} 정지 뒤 ${DB_BACKUP} 로" >&2
+        else
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] DB 복원을 예약하지 못함 — 서비스를 멈춘 뒤 수동 복원 필요: ${DB_BACKUP}" >&2
+        fi
     fi
     # 3. .next/standalone 은 **건드리지 않는다**.
     #    과거엔 "rollback 후 미완 빌드 제거" 명분으로 `rm -rf` 했는데 오히려
@@ -107,6 +124,7 @@ echo '{"phase": "migrate"}'
 # `if ! cmd; then exit 1; fi` 로 감싸면 조건 컨텍스트라 set -e·ERR trap 이
 # 발동하지 않아 exit 1 이 롤백을 건너뛴다(rollback 누락). pip/pnpm/build 와
 # 동일하게 bare 명령으로 두어 실패가 cleanup_on_error 로 흐르게 한다.
+MIGRATE_STARTED=1
 runuser -u "${SERVICE_USER}" -- \
     "${VENV}/bin/alembic" -c "${INSTALL_DIR}/alembic.ini" upgrade head 2>&1
 
@@ -156,8 +174,8 @@ NEW_HASH=$(git -C "${INSTALL_DIR}" rev-parse --short HEAD)
 # 함께 종료되므로 기동 확인 없이 재시작만 한다.
 echo '{"phase": "restart_scheduled"}'
 UNIT_NAME="kotify-restart-$(date +%s)-$$"
-if command -v systemd-run >/dev/null 2>&1; then
-    systemd-run --on-active=2s --unit="${UNIT_NAME}" \
+if command -v "${SYSTEMD_RUN}" >/dev/null 2>&1; then
+    "${SYSTEMD_RUN}" --on-active=2s --unit="${UNIT_NAME}" \
         /bin/bash "${INSTALL_DIR}/deploy/kotify-post-restart.sh" "${PREV_HEAD}" "${NEW_HEAD}" >/dev/null 2>&1 || \
         (nohup bash -c "sleep 2 && systemctl restart ${SERVICE_API} ${SERVICE_WEB}" >/dev/null 2>&1 &)
 else

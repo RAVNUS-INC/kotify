@@ -7,6 +7,9 @@
 # 띄우는 별도 unit 에서 한다.
 #
 # 하는 일:
+#   0) kotify-web 종료 유예 preload 사본(/usr/local/lib/kotify/kotify-web-shutdown.cjs)을 매 배포
+#      갱신 — worker 는 웹 버튼 경로에서 kotify 서비스의 ProtectSystem=strict 안이라 /usr/local 에
+#      쓸 수 없어, systemd-run 으로 뜬 이 스크립트가 맡는다. 저장소 밖 사본이라 git 롤백에 안 지워진다.
 #   1) kotify / kotify-web 재시작
 #   2) 기동 확인 — API /healthz 가 status=ok 이고 새 커밋 버전을 내는지, 웹이
 #      /api/healthz 를 프록시하는지. 제한 시간 안에 안 되면
@@ -33,6 +36,7 @@ WEB_HEALTH_URL="${KOTIFY_WEB_HEALTH_URL:-http://127.0.0.1:3000/api/healthz}"
 HEALTH_TIMEOUT_SEC="${KOTIFY_HEALTH_TIMEOUT_SEC:-120}"
 HEALTH_INTERVAL_SEC="${KOTIFY_HEALTH_INTERVAL_SEC:-2}"
 SYSTEMCTL="${KOTIFY_SYSTEMCTL:-systemctl}"
+PRELOAD_DIR="${KOTIFY_PRELOAD_DIR:-/usr/local/lib/kotify}"
 FLOCK="${KOTIFY_FLOCK:-flock}"
 SERVICE_API="kotify"
 SERVICE_WEB="kotify-web"
@@ -88,6 +92,20 @@ wait_healthy() {
     done
 }
 
+# web unit 의 NODE_OPTIONS --require 대상. 실패해도 재시작은 한다(사본이 이미 있으면 그대로 쓴다).
+install_preload() {
+    local src="${INSTALL_DIR}/deploy/kotify-web-shutdown.cjs"
+    if [[ ! -f "${src}" ]]; then
+        log "preload 원본 없음 — 사본 갱신 건너뜀"
+        return 0
+    fi
+    if install -d -m 0755 "${PRELOAD_DIR}" && install -m 0644 "${src}" "${PRELOAD_DIR}/kotify-web-shutdown.cjs"; then
+        log "preload 사본 갱신 — ${PRELOAD_DIR}/kotify-web-shutdown.cjs"
+    else
+        log "preload 사본 갱신 실패 — ${PRELOAD_DIR}"
+    fi
+}
+
 migrations_changed() {
     ! git -C "${INSTALL_DIR}" diff --quiet "$1" "$2" -- alembic/versions
 }
@@ -129,6 +147,7 @@ main() {
     prev_short=$(git -C "${INSTALL_DIR}" rev-parse --short "${prev}")
     new_short=$(git -C "${INSTALL_DIR}" rev-parse --short "${new}")
 
+    install_preload
     log "재시작 — ${new_short} 기동 확인 (최대 ${HEALTH_TIMEOUT_SEC}s)"
     "${SYSTEMCTL}" restart "${SERVICE_API}" "${SERVICE_WEB}"
     if wait_healthy "${new_short}"; then

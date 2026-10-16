@@ -299,3 +299,29 @@ def test_rollback_that_still_fails_asks_for_manual_check(deploy: Deploy):
     assert deploy.run() == 1
     assert _git(deploy.repo, "rev-parse", "HEAD") == deploy.prev
     assert "롤백 후에도 기동 확인 실패" in deploy.log_text()
+
+
+def test_preload_copy_is_refreshed_before_restart(deploy: Deploy, tmp_path: Path):
+    """배포마다 web 종료 유예 preload 사본을 갱신한다(M2) — 재시작 전에, 0755 폴더·0644 파일로."""
+    (deploy.repo / "deploy").mkdir()
+    (deploy.repo / "deploy" / "kotify-web-shutdown.cjs").write_text("// preload v2\n")
+    preload_dir = tmp_path / "usr-local-lib-kotify"
+    deploy.env["KOTIFY_PRELOAD_DIR"] = str(preload_dir)
+    deploy.health.healthy_short = deploy.short(deploy.new)
+
+    assert deploy.run() == 0, deploy.log_text()
+
+    copy = preload_dir / "kotify-web-shutdown.cjs"
+    assert copy.read_text() == "// preload v2\n"
+    assert oct(copy.stat().st_mode & 0o777) == "0o644"
+    assert oct(preload_dir.stat().st_mode & 0o777) == "0o755"
+    log = deploy.log_text()
+    assert log.index("preload 사본 갱신") < log.index("재시작 —")
+
+
+def test_missing_preload_source_does_not_block_restart(deploy: Deploy, tmp_path: Path):
+    deploy.env["KOTIFY_PRELOAD_DIR"] = str(tmp_path / "preload")
+    deploy.health.healthy_short = deploy.short(deploy.new)
+    assert deploy.run() == 0
+    assert "preload 원본 없음" in deploy.log_text()
+    assert any(line.startswith("systemctl restart") for line in deploy.call_lines())
