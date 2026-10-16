@@ -68,7 +68,7 @@ kotify 코드로 다시 확인(운영 CT 에서 브랜치 코드를 임시 복�
 | original_filename | text | |
 | pdf_blob | blob | 최대 10MB, `%PDF-` 시그니처 검사 (첨부 이미지와 같이 DB 저장 → 기존 백업에 포함, **영구 보관**) |
 | file_size_bytes | int | |
-| resolution | text | standard/medium/high (기본 `high`) |
+| resolution | text | standard/medium/high (기본 `medium` — 화면·API 모두, 2026-10-16) |
 | retries / retry_time | int | 기본 2회 / 300초 |
 | status | text | `QUEUED`→`SUBMITTED`→`SENT` / `FAILED` / `UNKNOWN` |
 | pbx_file | text | 발송 응답의 파일 이름(로그 매칭 키) |
@@ -129,7 +129,7 @@ G.711 팩스라 실패가 잦을 수 있다 → PBX 자체 재시도(`retries`·
 ## 7. 화면 (Next.js)
 
 - **`/fax`** (사이드바 "팩스", sender 이상): 위 발송 폼(받는 번호·PDF·해상도) + 아래 이력 표(상태 배지, 실패 사유, 다시 보내기). `SUBMITTED` 가 있으면 15초 간격으로 새로고침(`router.refresh`).
-- **`/calls`** (사이드바 "통화 기록"): 번호·기간·유형 필터(URL state), 표 + 녹음 있는 행에 재생 버튼(누르면 `/api/pbx/recordings/{token}` 을 여는 재생/멈춤·끌 수 있는 막대·시간 재생기, sender 이상).
+- **`/calls`** (사이드바 "통화 기록"): 번호·기간·유형 필터(URL state), 표 + 녹음 있는 행에 재생 버튼(누르면 통화 정보와 `/api/pbx/recordings/{token}` 재생기를 가운데 팝업으로 띄움, 한 번에 하나, sender 이상).
 - **대화방 오른쪽 카드**(`ThreadRecipientCard`): "최근 통화" 5건 + `/calls?phone=…` 링크. PBX 미설정·오류면 섹션 숨김(하이웍스와 같이 실패 격리 — 대화방은 계속 동작).
 - `web/lib/access.ts` 에 `/fax`·`/calls` 규칙 추가(백엔드와 동일 조건).
 

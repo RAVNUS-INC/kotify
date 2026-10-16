@@ -64,7 +64,7 @@ export function CallsTable({ calls }: { calls: ReadonlyArray<CallRecord> }) {
                   <td className="num tabular-nums">{formatDuration(call.billSec)}</td>
                   <td className="num">
                     {call.recordingToken ? (
-                      <RecordingPlayer token={call.recordingToken} label={`${time} 통화`} />
+                      <RecordingPlayer call={call} />
                     ) : (
                       <span className="text-ink-dim">—</span>
                     )}

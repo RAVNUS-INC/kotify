@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import type { CallRecord, FaxInboxItem } from '@/types/pbx';
@@ -45,11 +45,13 @@ describe('CallsTable', () => {
     const { container } = render(<CallsTable calls={[call(), call({ id: 2, recordingToken: null })]} />);
     expect(container.querySelector('audio')).toBeNull();
     expect(screen.getAllByRole('button', { name: /녹음 재생/ })).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: /녹음 재생/ }));
-    const audio = container.querySelector('audio');
-    expect(audio?.getAttribute('src')).toBe('/api/pbx/recordings/tok-1');
     expect(screen.getAllByText('010-0000-0001')).toHaveLength(2);
     expect(screen.getAllByText('1:15')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /녹음 재생/ }));
+    // 재생은 팝업(포털)으로 열려 표 밖에 그려진다 — 표 행은 밀리지 않는다
+    expect(container.querySelector('audio')).toBeNull();
+    const audio = document.querySelector('audio');
+    expect(audio?.getAttribute('src')).toBe('/api/pbx/recordings/tok-1');
   });
 });
 
@@ -115,22 +117,30 @@ describe('FaxInboxTable', () => {
 });
 
 describe('RecordingPlayer', () => {
-  it('펼치면 재생 버튼·끌 수 있는 막대·시간을 직접 그리고, 막대를 옮기면 그 위치로 간다', () => {
-    const { container } = render(<CallsTable calls={[call()]} />);
+  it('재생을 누르면 통화 정보와 재생기를 팝업으로 띄우고, 닫으면 재생기가 사라진다', () => {
+    render(<CallsTable calls={[call({ name: '가상 고객' })]} />);
     fireEvent.click(screen.getByRole('button', { name: /녹음 재생/ }));
-    const audio = container.querySelector('audio')!;
-    // 브라우저 기본 재생기는 쓰지 않는다(표 칸에서 찌그러져 끌 수 없었다)
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: '가상 고객' })).toBeInTheDocument();
+    expect(within(dialog).getByText('통화 시간')).toBeInTheDocument();
+    const audio = document.querySelector('audio')!;
+    // 브라우저 기본 재생기는 쓰지 않는다(찌그러져 끌 수 없었다)
     expect(audio.hasAttribute('controls')).toBe(false);
 
-    const slider = screen.getByRole('slider', { name: /재생 위치/ });
+    const slider = within(dialog).getByRole('slider', { name: '녹음 재생 위치' });
     expect(slider).toBeDisabled(); // 길이를 알기 전에는 끌 수 없다
     Object.defineProperty(audio, 'duration', { configurable: true, value: 62 });
     fireEvent(audio, new Event('loadedmetadata'));
     expect(slider).toBeEnabled();
-    expect(screen.getByText('0:00 / 1:02')).toBeInTheDocument();
+    expect(within(dialog).getByText('1:02')).toBeInTheDocument();
 
     fireEvent.change(slider, { target: { value: '30' } });
     expect(audio.currentTime).toBe(30);
-    expect(screen.getByText('0:30 / 1:02')).toBeInTheDocument();
+    expect(within(dialog).getByText('0:30')).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '닫기' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.querySelector('audio')).toBeNull();
   });
 });

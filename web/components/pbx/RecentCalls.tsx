@@ -37,10 +37,10 @@ export function RecentCalls({ phone, result }: { phone: string; result: RecentCa
                   <span className="tabular-nums text-sm text-ink-muted">{formatDuration(call.billSec)}</span>
                 </div>
                 <div className="mt-0.5 tabular-nums text-xs text-ink-dim">{time}</div>
-                {/* 재생기는 펼치면 칸 폭을 다 쓰므로 시각과 같은 줄에 두지 않는다 */}
+                {/* 재생은 통화 정보와 함께 팝업으로 연다 */}
                 {call.recordingToken ? (
-                  <div className="mt-1.5 -ml-2">
-                    <RecordingPlayer token={call.recordingToken} label={`${time} 통화`} />
+                  <div className="mt-1 -ml-2">
+                    <RecordingPlayer call={call} />
                   </div>
                 ) : null}
               </li>
