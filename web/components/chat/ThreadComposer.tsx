@@ -49,9 +49,16 @@ export function ThreadComposer({
   const [validationAttempt, setValidationAttempt] = useState(0);
   const validationGeneration = useRef(0);
   const sendingRef = useRef(false);
+  // 같은 답장의 재시도는 같은 키 — 응답이 늦거나 끊겨 다시 눌러도 서버가 두 번 보내지 않는다.
+  // 본문·전송 방식이 바뀌거나 접수 거부(send_failed)로 확정되면 새 답장이라 키를 버린다.
+  const idemKeyRef = useRef<string | null>(null);
   const lengthHintId = useId();
   const validationErrorId = useId();
   const trimmed = text.trim();
+
+  useEffect(() => {
+    idemKeyRef.current = null;
+  }, [trimmed, sendChannel]);
 
   useEffect(() => {
     const generation = ++validationGeneration.current;
@@ -106,13 +113,20 @@ export function ThreadComposer({
     sendingRef.current = true;
     setSending(true);
     setError(null);
+    const idemKey = idemKeyRef.current ?? crypto.randomUUID();
+    idemKeyRef.current = idemKey;
     try {
-      await sendMessageClient(threadId, trimmed, sendChannel);
+      await sendMessageClient(threadId, trimmed, sendChannel, idemKey);
+      idemKeyRef.current = null;
       setText('');
       router.refresh();
       textareaRef.current?.focus();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      if (err instanceof ApiError && err.code === 'send_failed') {
+        // 접수되지 않았다고 확정 — 다시 보내기는 새 답장이다(같은 키면 서버가 같은 실패만 돌려준다).
+        idemKeyRef.current = null;
+      }
       if (err instanceof ApiError && ['send_failed', 'send_status_unknown'].includes(err.code)) {
         // 서버에 남은 발송 이력을 표시한다. 접수 미확정 응답은 재발송하지 않는다.
         router.refresh();

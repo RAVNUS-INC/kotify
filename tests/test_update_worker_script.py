@@ -11,7 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_post_restart_script import _git, _isolate_from_parent_git  # noqa: F401 — autouse fixture
+from tests.test_post_restart_script import (  # noqa: F401 — autouse fixture
+    _git,
+    _isolate_from_parent_git,
+)
 
 SCRIPT = Path(__file__).resolve().parent.parent / "deploy" / "kotify-update-worker.sh"
 

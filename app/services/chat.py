@@ -717,6 +717,7 @@ async def send_reply(
     phone: str,
     content: str,
     send_channel: str = "rcs",
+    idempotency_key: str | None = None,
 ) -> Campaign:
     """답장을 대화방에서 고른 전송 방식(send_channel)으로 발송한다.
 
@@ -726,8 +727,22 @@ async def send_reply(
       SMS 로 대체 발송한다(report.send_sms_fallback). 접수 여부 미확정은 기록을 보존해
       확인하고 즉시 재발송하지 않는다. 대체 경로도 실패할 수 있어 전달을 보장하지 않는다.
     - "sms"(일반): RCS 를 쓰지 않고 직접 SMS(9원)로 보낸다.
+
+    웹 요청 안의 단건이라 29002·[재전송] 코드도 기다려 다시 보내지 않고 실패로 응답한다(retry_rejected=False).
+    idempotency_key(브라우저가 같은 답장을 다시 보낼 때 같은 값)가 이미 쓰였으면 새로 보내지 않고 그 결과를
+    돌려준다 — 응답이 늦어 다시 눌러도 같은 답장이 두 번 가지 않는다.
     """
+    from app.msghub.schemas import MsghubAuthError
     from app.services.compose import ChatReplyRejected, ReplySendFailed
+
+    if idempotency_key:
+        existing = db.execute(
+            select(Campaign).where(
+                Campaign.created_by == user.sub, Campaign.idempotency_key == idempotency_key
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return _reply_result(db, existing)
 
     if send_channel not in SEND_CHANNELS:
         raise ValueError(f"전송 방식은 'rcs' 또는 'sms' 여야 합니다: {send_channel}")
@@ -749,6 +764,7 @@ async def send_reply(
                 content=content,
                 phone=phone,
                 reply_id=reply_id,
+                idempotency_key=idempotency_key,
             )
         except ChatReplyRejected:
             log.warning(
@@ -759,20 +775,38 @@ async def send_reply(
 
     # rcs: reply_id 없음(세션 밖) 또는 양방향 명시 거부 → 단방향 RCS(17원).
     # sms: 일반 직접 발송(9원).
-    campaign = await dispatch_campaign(
-        db=db,
-        msghub_client=msghub_client,
-        created_by=user.sub,
-        caller_number=caller,
-        content=content,
-        recipients=[phone],
-        message_type="SMS",
-        subject=None,
-        send_channel=send_channel,
-    )
+    try:
+        campaign = await dispatch_campaign(
+            db=db,
+            msghub_client=msghub_client,
+            created_by=user.sub,
+            caller_number=caller,
+            content=content,
+            recipients=[phone],
+            message_type="SMS",
+            subject=None,
+            send_channel=send_channel,
+            idempotency_key=idempotency_key,
+            retry_rejected=False,
+        )
+    except MsghubAuthError as exc:
+        # 인증 오류도 캠페인은 실패로 확정돼 있다 — 500 대신 실패 말풍선(502)으로.
+        campaign_id = getattr(exc, "campaign_id", None)
+        if campaign_id is None:
+            raise
+        raise ReplySendFailed(campaign_id) from exc
+    return _reply_result(db, campaign)
+
+
+def _reply_result(db: Session, campaign: Campaign) -> Campaign:
+    """답장 캠페인 결과 — 실패로 확정됐으면 ReplySendFailed.
+
+    dispatch_campaign 은 실패도 기록한 캠페인을 반환한다. 단건 답장은 이를 성공 응답으로 내보내면 프런트가
+    작성한 본문을 지우므로 오류를 구분한다. 결과 코드가 없으면 접수 여부가 불확실하다.
+    """
+    from app.services.compose import ReplySendFailed
+
     if campaign.state == "FAILED":
-        # dispatch_campaign 은 실패도 기록한 캠페인을 반환한다. 단건 답장은 이를
-        # 성공 응답으로 내보내면 프런트가 작성한 본문을 지우므로 오류를 구분한다.
         result_code = db.execute(
             select(Message.result_code).where(Message.campaign_id == campaign.id)
         ).scalar_one_or_none()

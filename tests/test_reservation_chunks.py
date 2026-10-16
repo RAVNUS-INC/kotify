@@ -247,8 +247,8 @@ async def test_cancel_waits_while_reservation_dispatch_is_in_flight(
 async def test_dispatch_aborted_by_auth_error_can_still_be_cancelled(
     db_session, sample_user, sample_caller, monkeypatch
 ):
-    """인증 오류로 발송이 중단되면 뒤 청크는 행조차 없이 RESERVED 로 남는다 — 진행 중 표시는
-    풀려야 하고, 접수된 청크만 취소하면 발송될 행이 없어 전체 취소로 마무리된다."""
+    """인증 오류로 발송이 중단되면 이 청크와 남은 청크를 명시 거부 실패로 기록하고 집계를 확정한다(M4) —
+    예전엔 뒤 청크가 행조차 없이 RESERVED·pending=전체로 남았다. 접수된 청크는 여전히 취소할 수 있다."""
     client = _ReservingMsghub(
         rcs_errors={1: MsghubAuthError("[20001] 인증 실패", code="20001", status_code=401)}
     )
@@ -259,11 +259,15 @@ async def test_dispatch_aborted_by_auth_error_can_still_be_cancelled(
             reserve_time_local=_reserve_at(), send_channel="rcs",
         )
     campaign = db_session.execute(select(Campaign)).scalar_one()
-    assert campaign.state == "RESERVED"
+    assert (campaign.state, campaign.fail_count, campaign.pending_count) == ("PARTIAL_FAILED", 15, 10)
+    rows = db_session.execute(
+        select(Message.status, Message.result_code).where(Message.campaign_id == campaign.id)
+    ).all()
+    assert sorted(set(rows)) == [("FAILED", "20001"), ("PENDING", None)]
 
     resp = await cancel_campaign(str(campaign.id), user=sample_user, db=db_session)
 
-    assert client.cancelled == ["RCS0"]  # 청크 1 은 실패 행, 청크 2 는 접수되지 않음
+    assert client.cancelled == ["RCS0"]  # 청크 1·2 는 접수되지 않은 실패 행
     assert resp["data"]["status"] == "cancelled"
 
 
@@ -379,7 +383,7 @@ async def test_interrupted_reservation_does_not_hide_accepted_but_unconfirmed_ch
             reserve_time_local=_reserve_at(), send_channel="rcs",
         )
     campaign = db_session.scalar(select(Campaign))
-    assert campaign.state == "RESERVED"
+    assert campaign.state == "PARTIAL_FAILED"
 
     response = await cancel_campaign(str(campaign.id), user=sample_user, db=db_session)
 

@@ -128,12 +128,17 @@ export async function sendMessageClient(
   id: string,
   text: string,
   sendChannel: SendChannel,
+  idempotencyKey?: string,
 ): Promise<ChatMessage> {
   const res = await apiSend(
     `/api/threads/${encodeURIComponent(id)}/messages`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // 같은 답장을 다시 보내면(응답 지연·오류 뒤 재클릭) 서버가 첫 결과를 돌려주고 새로 보내지 않는다.
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      },
       body: JSON.stringify({ text, sendChannel }),
     },
   );

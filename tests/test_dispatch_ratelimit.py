@@ -132,7 +132,7 @@ async def test_direct_mode_retries_rate_limited_chunk(db_session, sample_user, s
     client = _DirectRateLimitedClient(limited=1)
     campaign = await _dispatch_direct(db_session, sample_user, sample_caller, client, recipients)
 
-    assert waits == [30]
+    assert waits == [5]  # 웹 요청 안이라 프록시 시간 제한 안에서 짧게(M3)
     assert len(client.cli_keys) == 2 and client.cli_keys[0] == client.cli_keys[1]
     rows = db_session.execute(
         select(Message).where(Message.campaign_id == campaign.id).order_by(Message.id)

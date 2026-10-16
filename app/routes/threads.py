@@ -15,11 +15,12 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.deps import require_sender, require_setup_complete, require_user
@@ -482,6 +483,7 @@ async def api_post_message(
     body: MessageCreateBody,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> dict | JSONResponse:
     """답장 발송 — 단건 캠페인 생성 후 msghub 로 전송.
 
@@ -516,7 +518,15 @@ async def api_post_message(
             phone=phone,
             content=body.text,
             send_channel=body.sendChannel,
+            idempotency_key=idempotency_key or None,
         )
+    except IntegrityError as exc:
+        # 같은 멱등키로 동시에 온 두 번째 요청 — 첫 요청이 보낸다.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "duplicate_request", "message": "같은 답장을 이미 보내는 중입니다"},
+        ) from exc
     except ReplySendFailed as exc:
         return JSONResponse(
             {"error": {

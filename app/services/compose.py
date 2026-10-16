@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Attachment, Caller, Campaign, Message, MsghubRequest
+from app.msghub.auth import AuthError
 from app.msghub.client import CHUNK_SIZE
 from app.msghub.codes import RESEND_CODES, SUCCESS_CODE
 from app.msghub.schemas import (
@@ -81,7 +82,9 @@ def validate_message(
 MAX_RECIPIENTS_PER_CAMPAIGN = 1000
 
 # 29002(CPS 초과) 뒤 같은 청크를 다시 보내기 전 대기 (초). RCS·일반 모드 모두 한 번만 재시도한다.
-_RATE_LIMIT_WAIT = 30
+# 발송은 웹 요청 안에서 돈다 — Next rewrite 프록시 시간 제한(next.config.mjs proxyTimeout) 안에 끝나도록
+# 짧게 둔다. 예전 30초는 그 자체로 기본 프록시 제한(30초)을 넘겨 브라우저에 500 이 났다.
+_RATE_LIMIT_WAIT = 5
 # 요청 단위 [재전송] 내부 오류(codes.RESEND_CODES) 뒤 다시 보내기 전 대기 (초).
 _RESEND_WAIT = 5
 
@@ -259,23 +262,23 @@ def _one_line_title(text: str) -> str:
     return first[:20].strip() or "알림"
 
 
-async def _send_with_resend(call, chunk_idx: int, *, retry_rate_limit: bool):
+async def _send_with_resend(call, chunk_idx: int, *, retry_rate_limit: bool, retry: bool = True):
     """청크 요청을 보내고, 공식 코드표가 [재전송] 이라 한 요청 단위 거부면 잠시 뒤 한 번 더 보낸다.
 
     (응답, 재시도했는가) 를 돌려준다. 내부 오류(RESEND_CODES)는 요청이 접수되지 않은 것이라 같은 cliKey 로
     다시 보내도 중복이 없다 — 예전엔 접수 불확실(FAILED, 코드 없음)로 두고 재조정에만 맡겼다. 29002 는
     retry_rate_limit 일 때만 여기서 다시 보낸다(RCS 경로는 직접 발송으로 바꿔 보내는 처리가 따로 있다).
     단말 전달 가능성이 있는 코드(codes.MAYBE_DELIVERED_CODES)는 이중 수신 우려로 다시 보내지 않는다.
-    재시도도 실패하면 그 예외를 그대로 올린다.
+    재시도도 실패하면 그 예외를 그대로 올린다. retry=False(대화방 단건 답장)면 다시 보내지 않는다.
     """
     try:
         return await call(), False
     except MsghubRateLimited:
-        if not retry_rate_limit:
+        if not (retry and retry_rate_limit):
             raise
         wait, reason = _RATE_LIMIT_WAIT, "29002(CPS 초과)"
     except MsghubServerError as exc:
-        if exc.code not in RESEND_CODES:
+        if not retry or exc.code not in RESEND_CODES:
             raise
         wait, reason = _RESEND_WAIT, f"[재전송] {exc.code}"
     log.warning("청크 요청 %s — %d초 뒤 재시도: chunk=%d", reason, wait, chunk_idx)
@@ -313,13 +316,16 @@ async def _dispatch_rcs_chunks(
     is_reserved: bool,
     reserve_utc_iso: str | None,
     msghub_reserve_time: str | None,
-) -> tuple[list[int], list[int], int]:
+    retry: bool = True,
+) -> tuple[list[int], list[int], int, MsghubAuthError | None]:
     """단방향 RCS + fbInfoLst 청크 발송 (장문/이미지).
 
     Returns:
-        (failed_chunk_indices, failed_chunk_sizes, item_failed)
+        (failed_chunk_indices, failed_chunk_sizes, item_failed, auth_error)
         item_failed 는 청크 전송은 성공(HTTP 200)했으나 응답 내 item 단위로
         실패한 수신자 수 — 청크 전체 실패(failed_chunk_sizes)와 서로소다 (H1).
+        auth_error 는 인증 오류로 멈췄을 때의 예외(_stop_on_auth_error) — 호출자가 집계를 확정한 뒤 올린다.
+        retry=False(대화방 단건 답장)면 29002·[재전송] 코드를 다시 보내지 않고 실패로 기록한다.
     """
     chunks = [recipients[i : i + CHUNK_SIZE] for i in range(0, len(recipients), CHUNK_SIZE)]
     failed_chunks: list[int] = []
@@ -352,6 +358,7 @@ async def _dispatch_rcs_chunks(
                 ),
                 chunk_idx,
                 retry_rate_limit=False,
+                retry=retry,
             )
             if retried and not is_reserved:
                 sent_at = _now_iso()
@@ -383,6 +390,14 @@ async def _dispatch_rcs_chunks(
             # 재발송이 이미 접수된 수신자에게 중복 발송할 일이 없다(부분수락은 HTTP 200 +
             # data[].code 경로 — 여기와 무관). 검증: claudedocs/review/c3-verification.md
             db.rollback()
+            if not retry:
+                _record_failed_chunk(
+                    db, campaign.id, chunk_idx, chunk, sent_at, "[29002] CPS 초과", rejection_code="29002",
+                )
+                db.commit()
+                failed_chunks.append(chunk_idx)
+                failed_chunk_sizes.append(len(chunk))
+                continue
             await asyncio.sleep(_RATE_LIMIT_WAIT)
             sent_at = reserve_utc_iso if is_reserved else _now_iso()
             try:
@@ -462,12 +477,8 @@ async def _dispatch_rcs_chunks(
 
         except MsghubAuthError as exc:
             db.rollback()
-            _record_failed_chunk(
-                db, campaign.id, chunk_idx, chunk, sent_at, "인증 오류",
-                rejection_code=_explicit_rejection_code(exc),
-            )
-            db.commit()
-            raise
+            _stop_on_auth_error(db, campaign.id, chunks, chunk_idx, sent_at, exc, failed_chunks, failed_chunk_sizes)
+            return failed_chunks, failed_chunk_sizes, item_failed, exc
 
         except (MsghubServerError, MsghubError, Exception) as exc:
             db.rollback()
@@ -479,7 +490,31 @@ async def _dispatch_rcs_chunks(
             failed_chunks.append(chunk_idx)
             failed_chunk_sizes.append(len(chunk))
 
-    return failed_chunks, failed_chunk_sizes, item_failed
+    return failed_chunks, failed_chunk_sizes, item_failed, None
+
+
+def _stop_on_auth_error(
+    db: Session,
+    campaign_id: int,
+    chunks: list[list[str]],
+    chunk_idx: int,
+    sent_at: str,
+    exc: MsghubAuthError,
+    failed_chunks: list[int],
+    failed_chunk_sizes: list[int],
+) -> None:
+    """인증 오류로 캠페인을 멈춘다 — 이 청크와 보내지 않은 남은 청크를 모두 명시 거부 FAILED 로 기록한다.
+
+    예전엔 이 청크만 기록하고 예외를 올려 캠페인이 DISPATCHING·pending=전체로 멈췄고, 남은 청크는 행이 없어
+    재조정도 못 했다. 인증 거부는 접수되지 않은 것이라 거부 코드를 남겨 재조정에서 뺀다.
+    """
+    code = _explicit_rejection_code(exc) or exc.code or "AUTH_ERROR"
+    for idx in range(chunk_idx, len(chunks)):
+        reason = "인증 오류" if idx == chunk_idx else "인증 오류로 발송 중단"
+        _record_failed_chunk(db, campaign_id, idx, chunks[idx], sent_at, reason, rejection_code=code)
+        failed_chunks.append(idx)
+        failed_chunk_sizes.append(len(chunks[idx]))
+    db.commit()
 
 
 async def dispatch_campaign(
@@ -495,6 +530,7 @@ async def dispatch_campaign(
     attachment_id: int | None = None,
     idempotency_key: str | None = None,
     send_channel: str = "rcs",
+    retry_rejected: bool = True,
 ) -> Campaign:
     """캠페인을 생성하고 msghub를 통해 발송한다.
 
@@ -615,16 +651,16 @@ async def dispatch_campaign(
     try:
         with awaiting_record([campaign.id]):
             if is_rcs:
-                failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_rcs_chunks(
+                failed_chunks, failed_chunk_sizes, item_failed, auth_error = await _dispatch_rcs_chunks(
                     db, msghub_client, campaign, caller_number, content, subject,
                     recipients, msg_type, messagebase_id, mms_file_id, rcs_file_id,
-                    is_reserved, reserve_utc_iso, msghub_reserve_time,
+                    is_reserved, reserve_utc_iso, msghub_reserve_time, retry_rejected,
                 )
             else:
-                failed_chunks, failed_chunk_sizes, item_failed = await _dispatch_direct_chunks(
+                failed_chunks, failed_chunk_sizes, item_failed, auth_error = await _dispatch_direct_chunks(
                     db, msghub_client, campaign, caller_number, content, subject,
                     recipients, msg_type, mms_file_id,
-                    is_reserved, reserve_utc_iso, msghub_reserve_time,
+                    is_reserved, reserve_utc_iso, msghub_reserve_time, retry_rejected,
                 )
     finally:
         _dispatching.discard(campaign.id)
@@ -681,6 +717,11 @@ async def dispatch_campaign(
     )
 
     db.commit()
+    if auth_error is not None:
+        # 집계·state 를 확정한 뒤 올린다 — 라우트는 인증 오류로 응답하고(단건 답장은 실패 말풍선),
+        # 같은 멱등키 재시도는 FAILED 로 확정된 이 캠페인을 돌려받는다.
+        auth_error.campaign_id = campaign.id
+        raise auth_error
     return campaign
 
 
@@ -725,6 +766,7 @@ async def dispatch_chat_reply(
     content: str,
     phone: str,
     reply_id: str,
+    idempotency_key: str | None = None,
 ) -> Campaign:
     """RCS 양방향(CHAT, 8원) 단건 응답 발송 — 고객 MO 에 대한 답장 전용.
 
@@ -763,7 +805,8 @@ async def dispatch_chat_reply(
         total_cost=0,
         rcs_count=0,
         fallback_count=0,
-        idempotency_key=None,
+        # 명시 거부로 롤백되면 이 키도 사라지고 단방향 fallback 캠페인이 같은 키를 받는다.
+        idempotency_key=idempotency_key,
     )
     db.add(campaign)
     db.flush()  # id 할당 (명시 거부일 때만 rollback 으로 폐기)
@@ -939,7 +982,8 @@ async def _dispatch_direct_chunks(
     is_reserved: bool,
     reserve_utc_iso: str | None,
     msghub_reserve_time: str | None,
-) -> tuple[list[int], list[int], int]:
+    retry: bool = True,
+) -> tuple[list[int], list[int], int, MsghubAuthError | None]:
     """일반 직접(SMS/LMS/MMS) 청크 발송 — RCS 미사용.
 
     RCS→직접 전환 fallback 이 없어 _dispatch_rcs_chunks 보다 단순하다(성공 +
@@ -965,6 +1009,7 @@ async def _dispatch_direct_chunks(
                 ),
                 chunk_idx,
                 retry_rate_limit=True,
+                retry=retry,
             )
             if retried and not is_reserved:
                 sent_at = _now_iso()
@@ -989,12 +1034,8 @@ async def _dispatch_direct_chunks(
 
         except MsghubAuthError as exc:
             db.rollback()
-            _record_failed_chunk(
-                db, campaign.id, chunk_idx, chunk, sent_at, "인증 오류",
-                rejection_code=_explicit_rejection_code(exc),
-            )
-            db.commit()
-            raise
+            _stop_on_auth_error(db, campaign.id, chunks, chunk_idx, sent_at, exc, failed_chunks, failed_chunk_sizes)
+            return failed_chunks, failed_chunk_sizes, item_failed, exc
 
         except Exception as exc:
             db.rollback()
@@ -1006,7 +1047,7 @@ async def _dispatch_direct_chunks(
             failed_chunks.append(chunk_idx)
             failed_chunk_sizes.append(len(chunk))
 
-    return failed_chunks, failed_chunk_sizes, item_failed
+    return failed_chunks, failed_chunk_sizes, item_failed, None
 
 
 def _create_messages_from_response(
@@ -1069,7 +1110,12 @@ def _create_messages_from_response(
 
 
 def _explicit_rejection_code(exc: Exception) -> str | None:
-    """접수되지 않은 명시적 4xx 거부만 확정한다. 타임아웃·5xx·파싱 오류는 불확실하다."""
+    """접수되지 않은 명시적 4xx 거부만 확정한다. 타임아웃·5xx·파싱 오류는 불확실하다.
+
+    토큰 발급·갱신 실패(AuthError)는 발송 요청을 보내기 전이라 확실히 접수되지 않았다.
+    """
+    if isinstance(exc, AuthError):
+        return exc.code or "AUTH_ERROR"
     if (
         isinstance(exc, (MsghubBadRequest, MsghubAuthError, MsghubRateLimited))
         and exc.status_code in (400, 401, 403, 429)

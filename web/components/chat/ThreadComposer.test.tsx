@@ -63,6 +63,7 @@ describe('ThreadComposer 전송 방식', () => {
         '0212345678:01099998888',
         '안녕하세요',
         'sms',
+        expect.any(String),
       ),
     );
     expect(mocks.refresh).toHaveBeenCalled();
@@ -81,7 +82,7 @@ describe('ThreadComposer 전송 방식', () => {
     await user.click(sendButton());
 
     await waitFor(() =>
-      expect(mocks.sendMessageClient).toHaveBeenCalledWith('t1', '확인했습니다', 'sms'),
+      expect(mocks.sendMessageClient).toHaveBeenCalledWith('t1', '확인했습니다', 'sms', expect.any(String)),
     );
   });
 
@@ -98,7 +99,7 @@ describe('ThreadComposer 전송 방식', () => {
     await user.click(sendButton());
 
     await waitFor(() =>
-      expect(mocks.sendMessageClient).toHaveBeenCalledWith('t1', '안녕하세요', 'rcs'),
+      expect(mocks.sendMessageClient).toHaveBeenCalledWith('t1', '안녕하세요', 'rcs', expect.any(String)),
     );
   });
 
@@ -111,7 +112,7 @@ describe('ThreadComposer 전송 방식', () => {
     await user.keyboard('{Shift>}{Enter}{/Shift}');
 
     await waitFor(() =>
-      expect(mocks.sendMessageClient).toHaveBeenCalledWith('t1', '안녕하세요', 'sms'),
+      expect(mocks.sendMessageClient).toHaveBeenCalledWith('t1', '안녕하세요', 'sms', expect.any(String)),
     );
   });
 });
@@ -142,7 +143,7 @@ describe('ThreadComposer 서버 바이트 검증', () => {
     expect(mocks.validateReplyClient).toHaveBeenCalledWith('앞뒤 공백', expect.any(AbortSignal));
     expect(screen.getByRole('status')).toHaveTextContent('현재 10 / 90바이트');
     await act(async () => fireEvent.submit(textbox().closest('form')!));
-    expect(mocks.sendMessageClient).toHaveBeenCalledWith('t1', '앞뒤 공백', 'rcs');
+    expect(mocks.sendMessageClient).toHaveBeenCalledWith('t1', '앞뒤 공백', 'rcs', expect.any(String));
     expect(textbox()).toHaveValue('');
   });
 
@@ -280,5 +281,32 @@ describe('ThreadComposer 발송 오류 이력 갱신', () => {
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
     await act(() => vi.advanceTimersByTimeAsync(60_000));
     expect(mocks.sendMessageClient).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ThreadComposer 멱등키', () => {
+  async function sendTwice(firstError: Error) {
+    vi.useFakeTimers();
+    mocks.sendMessageClient.mockRejectedValueOnce(firstError);
+    render(<ThreadComposer threadId="t1" />);
+    fireEvent.change(textbox(), { target: { value: '같은 답장' } });
+    await act(() => vi.advanceTimersByTimeAsync(300));
+    fireEvent.click(sendButton());
+    await act(async () => {});
+    fireEvent.click(sendButton());
+    await act(async () => {});
+    const [first, second] = mocks.sendMessageClient.mock.calls.map((call) => call[3] as string);
+    return { first, second };
+  }
+
+  it('응답을 못 받은 뒤 다시 보내면 같은 키 — 서버가 두 번 보내지 않는다', async () => {
+    const { first, second } = await sendTwice(new ApiError(500, 'send_failed_500', '오류'));
+    expect(first).toBeTruthy();
+    expect(second).toBe(first);
+  });
+
+  it('접수 거부로 확정되면 다시 보내기는 새 키', async () => {
+    const { first, second } = await sendTwice(new ApiError(502, 'send_failed', '거부'));
+    expect(second).not.toBe(first);
   });
 });

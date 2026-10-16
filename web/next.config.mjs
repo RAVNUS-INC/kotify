@@ -21,6 +21,12 @@ const nextConfig = {
   output: 'standalone',
   experimental: {
     typedRoutes: true,
+    // /api rewrite 프록시가 FastAPI 응답을 기다리는 시간. 기본 30초(next/dist/server/lib/router-utils/
+    // proxy-request.js)는 캠페인 발송(POST /campaigns)에 짧다 — 1,000명은 10명씩 100번 msghub 를
+    // 순서대로 부르고, 29002·[재전송] 코드면 청크마다 5초 기다려 한 번 더 보낸다. 넘기면 브라우저는 500 을
+    // 받는데 백엔드는 계속 보내 사용자가 다시 누르게 된다. 앞단 프록시(NPM)의 읽기 시간 제한(기본 60초)도
+    // 이보다 짧으면 그쪽이 먼저 끊는다 — deploy/README "발송 요청 시간 제한" 참고.
+    proxyTimeout: 120_000,
   },
   async rewrites() {
     return [
