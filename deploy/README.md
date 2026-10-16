@@ -321,45 +321,83 @@ SIGTERM 뒤 5초 동안 Next 가 일반 요청을 마치게 두고, 남은 연�
 끊긴 대화방은 프론트 백오프로 새 서버에 다시 연결한다. `TimeoutStopSec=15` 는 안전망이다.
 5초 넘게 걸리는 요청(긴 녹음 재생 스트림 등)은 재시작 때 끊긴다.
 
-**unit 과 preload 는 업데이트 버튼(`kotify-update.sh`)이 설치하지 않는다.** 이 파일들이
-바뀌면 CT 에서 root 로 한 번 설치한다. preload 는 저장소 밖에 복사한다 — `--require` 대상이
-없으면 node 가 기동하지 못하는데, git 롤백으로 이 파일이 없는 커밋이 체크아웃될 수 있기 때문이다.
+**preload 사본은 배포마다 갱신되지만 unit 은 업데이트 버튼(`kotify-update.sh`)이 설치하지 않는다.**
+`kotify-post-restart.sh` 가 재시작 직전에 `/usr/local/lib/kotify/kotify-web-shutdown.cjs` 를
+`install -d -m 0755` / `install -m 0644` 로 갱신한다(worker 는 웹 버튼 경로에서 kotify 서비스의
+`ProtectSystem=strict` 안이라 `/usr/local` 에 쓸 수 없어 systemd-run 으로 뜬 post-restart 가 맡는다).
+사본은 저장소 밖이라 git 롤백에 지워지지 않는다. unit 은 `ExecStartPre=/usr/bin/test -r <사본>` 으로
+사본이 없으면 node 를 띄우기 전에 멈춘다(`MODULE_NOT_FOUND` 재시작 반복 대신 원인이 보이게).
+
+**처음 한 번은 CT 에서 root 로 이 순서대로 설치한다 — 사본이 먼저, unit 이 나중.** unit 을 먼저 넣고
+재시작하면 사본이 없어 kotify-web 이 뜨지 않는다.
 
 ```bash
-install -D -m 0644 /opt/kotify/deploy/kotify-web-shutdown.cjs /usr/local/lib/kotify/kotify-web-shutdown.cjs
+# 1) preload 사본 (업데이트 버튼을 누른 뒤면 post-restart 가 이미 만들어 두었을 수 있다)
+install -d -m 0755 /usr/local/lib/kotify
+install -m 0644 /opt/kotify/deploy/kotify-web-shutdown.cjs /usr/local/lib/kotify/kotify-web-shutdown.cjs
+test -r /usr/local/lib/kotify/kotify-web-shutdown.cjs && echo preload-ok
+# 2) unit — 사본을 확인한 뒤에만
 cp /opt/kotify/deploy/kotify-web.service /etc/systemd/system/kotify-web.service
 systemctl daemon-reload
-systemctl show kotify-web -p TimeoutStopUSec -p Environment   # 15s, NODE_OPTIONS 확인
+systemctl show kotify-web -p TimeoutStopUSec -p Environment -p ExecStartPre   # 15s, NODE_OPTIONS, test -r
 ```
 
 새 설정은 다음 재시작부터 적용된다. 첫 재시작에서는 기존 프로세스(preload 없음)를 멈추므로
 최대 15초 뒤 SIGKILL 될 수 있다. 그다음 재시작부터 journal 에
 `kotify-web: SIGTERM — 열린 요청을 최대 5000ms 기다린 뒤 종료` 가 찍히고 `Killing` 은 없어야 한다.
 
-### 회신 사진 보관 0026 배포·확인
+### 배포 실패 때 DB 복원
 
-`0026_mo_media.py` 는 `mo_media` 테이블(회신 1건당 첨부 1행, 원본 BLOB)을 만들고, 이미 저장된
-회신 중 `content_info_lst.fileMessage` 가 있는 행을 소급해 넣는다(이미지는 `PENDING`, 그 밖의
-형식은 `UNSUPPORTED`). 마이그레이션은 네트워크를 쓰지 않는다.
+worker(`kotify-update-worker.sh`)는 마이그레이션을 시작하기 **전** 단계(pip·백업)에서 실패하면 git 만
+되돌리고 DB 는 그대로 둔다. 마이그레이션을 시작한 **뒤**(마이그레이션·웹 빌드) 실패하면 `pre-migrate.db`
+로 되돌리는데, 도는 중에 `sms.db` 를 덮고 WAL·SHM 을 지우면 DB 가 망가질 수 있어 systemd-run 별도 unit
+(`kotify-db-restore-*`)이 `systemctl stop kotify` → 복원 → `systemctl start kotify` 순서로 한다. 백업 이후
+받은 회신·리포트는 복원으로 사라진다(msghub 가 재전송하는 리포트는 다시 들어온다). 복원 결과는
+`journalctl -u 'kotify-db-restore-*'` 와 `update.log` 의 `DB 복원 예약` 줄로 확인한다. 예약조차 못 하면
+`update.log` 에 `수동 복원 필요` 가 남는다 — 그때는 kotify 를 멈춘 뒤 직접 복원한다.
 
-- 내려받기: 새 회신은 웹훅 응답 직후, 남은 `PENDING` 은 60초 주기 작업이 한 번에 5건씩 가져온다.
-  배포 직후 소급 행은 몇 분 안에 처리된다. 통신사 주소는 일회성·단기 유효일 수 있어(msghub 문서:
-  MMS MO 컨텐츠 URL 24시간·1회, 원본 7일 보관) 응답을 받은 4xx 는 다시 열지 않고 `FAILED` 로 남긴다.
-  연결 실패·5xx 만 최대 3회 다시 시도한다. 오래된 소급 행은 대부분 `FAILED`(화면 "사진을 불러올 수
-  없습니다")가 정상이다.
-- 안전장치: https·공인 IP 주소만(리다이렉트 단계마다 다시 검사), 10MB 상한, 파일 앞부분으로
-  JPEG·PNG·GIF·WebP·BMP 인지 확인한다. 화면은 `GET /api/chat/media/{mo_id}`(로그인 필요,
-  `nosniff`·`sandbox`)로만 원본을 받고 통신사 주소는 브라우저에 보내지 않는다.
-- 확인(주소·본문 출력 없이 집계만):
+### 발송 요청 시간 제한
+
+캠페인 발송(`POST /api/campaigns`)은 웹 요청 안에서 10명씩 msghub 를 차례로 부른다. Next 의 `/api` 프록시
+제한은 120초(`web/next.config.mjs` `experimental.proxyTimeout`, 기본 30초)다. 앞단 Nginx Proxy Manager 의
+`proxy_read_timeout`(기본 60초)이 더 짧으면 1,000명 발송이 그 전에 끊길 수 있다 — 끊겨도 백엔드는 끝까지
+보내므로 캠페인 목록에서 결과를 확인하고 다시 누르지 않는다. NPM 설정은 이 저장소 밖이라 운영에서 확인한다.
+
+### 회신 첨부 보관 0026 배포·확인
+
+`0026_mo_media.py` 는 `mo_media` 테이블(회신 1건당 첨부 1행, 원본 BLOB)을 만들고 기존 회신을 소급해
+넣는다. `mo_messages` 는 바꾸지 않는다. 마이그레이션은 네트워크를 쓰지 않는다.
+
+- RCS 사진(`source=RCS_URL`): `content_info_lst.fileMessage` 가 있는 회신 — 이미지는 `PENDING`, 그 밖은
+  `UNSUPPORTED`. 통신사 주소를 인증 없이 받는다(문서에 규정 없음, 실주소로 받아 본 적 없음).
+- MMS 첨부(`source=MMS_API`): RCS 가 아니고 실제 moKey 이며 `content_cnt > 0` 인 회신 — `PENDING`.
+  msghub `GET /mo/v1/file/{moKey}` 로 받고 사진이 아니어도 보관해 내려받기로 준다. msghub 보관 7일.
+- 내려받기: 새 회신은 웹훅 응답 직후, 남은 `PENDING` 은 60초 주기 작업이 한 번에 5건씩, 한 건 60초 안.
+  일시 실패는 1·2·4…분(최대 6시간) 간격으로 RCS 3회·MMS 12회까지, MMS 는 7일 지나면 `FAILED`. 응답을
+  받은 RCS 4xx(401·403 제외)는 다시 열지 않는다. 오래된 소급 행은 대부분 `FAILED` 가 정상이다.
+- 안전장치: RCS 는 https·공인 IP 주소만(리다이렉트 단계마다 다시 검사), 둘 다 10MB 상한, 파일 앞부분으로
+  JPEG·PNG·GIF·WebP·BMP 인지 확인한다. 화면은 `GET /api/chat/media/{mo_id}`(로그인 필요, `nosniff`·
+  `sandbox`)로만 받는다 — 사진은 inline, 그 밖은 `application/octet-stream` 내려받기.
+- **배포 직후 확인**(주소·본문 출력 없이 집계만, 몇 분 뒤 한 번 더):
 
   ```bash
   runuser -u kotify -- sqlite3 -readonly /var/lib/kotify/sms.db \
-    "SELECT fetch_status, error, COUNT(*) FROM mo_media GROUP BY 1, 2;"
+    "SELECT source, fetch_status, error, COUNT(*) FROM mo_media GROUP BY 1, 2, 3;"
   ```
 
-  새 사진 회신이 `FETCHED` 가 되지 않고 `FAILED`(`공인 주소가 아님`·연결 오류)가 쌓이면 CT 의
-  HTTPS 아웃바운드와 DNS 를 먼저 확인하고 `/var/log/kotify/stderr.log` 의 `회신 이미지 가져오기` 를 본다.
-- 되돌리기: `alembic downgrade 0025` 는 `mo_media` 를 지운다(보관한 사진도 사라진다). 원래 회신과
+  - `error` 가 `인증 거부 HTTP 401`·`인증 거부 HTTP 403` 이면 통신사 주소를 인증 없이 받을 수 없는 것이다
+    (RCS 3회 뒤 `FAILED`). 받는 방법을 고친 배포 뒤 아래로 다시 받게 한다(주소가 아직 유효한 것만 받힌다).
+
+    ```bash
+    runuser -u kotify -- sqlite3 /var/lib/kotify/sms.db \
+      "UPDATE mo_media SET fetch_status='PENDING', fetch_attempts=0, next_fetch_at=NULL, error=NULL
+       WHERE source='RCS_URL' AND fetch_status IN ('PENDING','FAILED') AND error LIKE '인증 거부%';"
+    ```
+
+  - `공인 주소가 아님`·연결 오류가 쌓이면 CT 의 HTTPS 아웃바운드와 DNS 를 먼저 확인한다.
+  - MMS 가 `권한 없음 [29011]` 이면 msghub 콘솔에서 이 API 키의 MO 컨텐츠 조회 권한을 확인한다.
+  - 로그는 `/var/log/kotify/stderr.log` 의 `회신 첨부 가져오기`.
+- 되돌리기: `alembic downgrade 0025` 는 `mo_media` 를 지운다(보관한 첨부도 사라진다). 원래 회신과
   `content_info_lst` 는 그대로다.
 
 ### CT SSH 재로딩 실패

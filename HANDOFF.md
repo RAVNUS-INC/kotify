@@ -1,12 +1,13 @@
 # Handoff — 현재 상황 요약
 
-## 2026-10-16 — msghub 코드 리뷰 지적 전부 수정 (브랜치 `fix/msghub-review-deterministic`, 푸시·main 미머지)
+## 2026-10-16 — 배포 후보 통합: fix + main + RCS 사진, 배포 전 리뷰 M1~M7 수정 (브랜치 `fix/msghub-review-deterministic`, 푸시·main 병합·배포 안 함)
 
-- 근거·항목별 결과: [claudedocs/review/msghub-code-review-20261016.md](claudedocs/review/msghub-code-review-20261016.md) 맨 위 "처리 결과". 1차 커밋 `5062ecd`(리뷰 #1·#2·#5·#8), 2차 커밋은 나머지 전부(#3·#4·#6·#7·참고 항목). 보류였던 제품 결정은 리뷰 세션이 정한 기본안대로 했다.
-- 주요 동작 변화: 토큰 거부 시 1회 재발급·재요청(#3) / `30124` 성공, 성공 불확실·단말 전달 가능 코드는 실패지만 대체 SMS 없음·'결과 불확실' 표시(#4) / MMS MO 첨부를 받아 DB 보관·대화방 표시, `moTitle` 표시(#6, **alembic `0026` 마이그레이션**) / 수신번호를 서버가 정규화·검증, 틀리면 400 `invalid_recipients`(#7) / health check 별도 태스크 50초 / 요청 단위 [재전송] 코드 5초 뒤 1회 재발송 / 리포트 형식 오류는 200(정상 항목은 반영).
-- 검증(로컬): pytest 915개·ruff, 웹 typecheck·lint·Vitest 26파일 233개. 새 테스트 `test_msghub_token_manager`·`test_msghub_client_retry`·`test_report_result_codes`·`test_recipient_normalization`·`test_mo_content`·`test_webhook_report_format`, 기존 `test_dispatch_ratelimit`·`test_mo_webhook`·`test_pii_masking`(리포트 형식 오류 200 으로 기대값 변경)·`test_thread_read_migration`(head 0026). **운영·msghub 실제 응답으로는 확인하지 않았다** — 특히 `/mo/v1/file` 응답 형식(파일 본문/JSON 오류)과 한 MO 에 첨부가 여럿일 때 동작은 문서에 없다.
-- 배포 시: `0026` 이 기존 MO 중 `content_cnt > 0`·실제 moKey 인 행을 PENDING 으로 표시한다. 받은 지 7일 지난 건은 첫 주기에 EXPIRED 로 닫히고(요청 안 함), 7일 안의 건은 재조정 루프가 20건씩 받는다.
-- 남은 확인 필요(코드 변경 없음): mnt-api 토큰 공용 여부, chatbotId 다중 채널, 직접 LMS/MMS 빈 제목 허용 여부, 본문 `#{..}`·`{{..}}` 치환 여부. 인증 실패로 멈춘 캠페인이 DISPATCHING 으로 남는 기존 한계도 그대로다.
+- 범위: msghub 리뷰 수정(`5062ecd`·`0c8d74c`) 위에 `origin/main` 4c0bc57(웹 종료 유예) 병합 `bf0bba5`, RCS 사진 브랜치 249ecc6 병합·첨부 통합 `bd593fc`, 배포 전 리뷰 M1·M2 `cf78bac`, M3·M4 `61899e5`, M5·M6·낮음 `cba2b80`. 항목별 결과: [claudedocs/review/deploy-review-20261016.md](claudedocs/review/deploy-review-20261016.md) "처리 결과", [msghub-code-review-20261016.md](claudedocs/review/msghub-code-review-20261016.md) "처리 결과".
+- 회신 첨부는 `mo_media` 하나(alembic `0026`, RCS 사진 + MMS 첨부, `mo_messages` 는 그대로). 조회는 `/api/chat/media/{mo_id}` 하나.
+- 검증(로컬): pytest 969·ruff, 웹 typecheck·lint·Vitest 239. alembic 0025 DB 에서 upgrade head → downgrade 0025 → upgrade head 실측(단일 head 0026).
+- **배포 때 할 일**(deploy/README): ① 업데이트 버튼 뒤 post-restart 가 preload 사본을 만든다 — 그다음 CT 에서 unit 설치(사본 먼저·unit 나중), ② 배포 직후 `mo_media` 집계로 RCS `인증 거부` 여부 확인, ③ NPM `proxy_read_timeout` 이 120초보다 짧은지 확인(1,000명 발송이 먼저 끊길 수 있음).
+- 남은 위험: 통신사 RCS 주소·msghub `/mo/v1/file` 실제 응답 미확인, 리포트 성공불확실 코드가 실제로 오는지 미확인, 실패 롤백 DB 복원은 백업 이후 데이터 유실(기존), 청크 간 속도 조절 없음.
+- 확인 필요(코드 변경 없음): mnt-api 토큰 공용, chatbotId 다중 채널, 직접 LMS/MMS 빈 제목, 본문 `#{..}`·`{{..}}` 치환.
 
 ## 2026-10-16 — kotify-web 재시작 지연(SIGTERM 90초 → SIGKILL) 원인·종료 유예 (`2c24502`, main 푸시·운영 적용 보류)
 
@@ -24,7 +25,7 @@
 - 운영 실측(값 가림, 읽기 전용): 회신 151건 중 사진 7건. 형태는 `contentInfo.fileMessage = {fileMIMEType, fileUrl}`(jpeg 6·png 1), `textMessage` 는 null. `fileUrl` 은 SKT·LG U+·KT MaaP 서버. 이전에는 이 7건이 빈 말풍선이었다. 주소가 지금도 열리는지는 확인하지 않았다(운영에서 고객 사진 주소를 여는 요청이 권한 검사에서 막힘). msghub 문서(다른 워크트리 `claudedocs/msghub-api/19-mo.md`)는 MMS MO 컨텐츠 URL 을 "일회성·24시간", 원본 7일 보관으로 적는다. RCS `fileUrl` 규정은 없다.
 - 구현: `mo_media` 테이블(alembic `0026`, 기존 회신 소급 INSERT) + `app/services/mo_media.py`(PENDING→FETCHING 조건부 선점으로 같은 주소를 두 번 열지 않음, 응답받은 4xx 는 바로 FAILED, 연결 실패·5xx 는 3회까지 재시도, https·공인 IP·리다이렉트 재검사·10MB·이미지 형식 확인). 웹훅은 같은 트랜잭션에 행을 만들고 응답 직후 내려받으며, 60초 주기 작업이 남은 행을 줍는다. 끝나면 SSE `message.new` 를 보낸다. `GET /api/chat/media/{mo_id}`(require_user, nosniff·sandbox). 대화방 메시지에 `attachment {kind, status, url?}`. 목록 미리보기·n8n 알림·연락처 회신 문구는 글 없는 회신을 `[사진]`/`[첨부 파일]` 로 표시. 웹 `MessageAttachment`(사진·불러오는 중·불러올 수 없음·이미지 아님, 누르면 원본 새 탭).
 - 검증(로컬): 백엔드 870개·ruff(새 테스트 22개: 웹훅 기록, 4xx 재시도 안 함, 5xx 3회, SSRF·리다이렉트, 동시 실행 시 1회만 요청, 화면 상태, 엔드포인트 헤더, 소급 마이그레이션), 웹 typecheck·lint·Vitest 231개. scratch DB 로 대화방 화면 확인: 사진 2장(글 함께 포함)과 나머지 세 상태 문구 표시, `/api/chat/media` 200 image/jpeg·비로그인 303·미보관 404, 목록 미리보기 `[첨부 파일]`. **실제 통신사 주소로 내려받는 것은 검증하지 못했다** — 배포 후 `deploy/README.md` "회신 사진 보관 0026" 집계로 확인할 것.
-- 남은 일: main 통합·배포(마이그레이션 0026 포함). SMS/MMS 로 들어오는 MMS MO 의 첨부(`contentInfoLst`, msghub `GET /mo/v1/file/{moKey}`)는 범위 밖이다. 운영에 아직 사례가 없다. 대화방에서 사진을 보내는 기능은 없다.
+- 남은 일: (2026-10-16 갱신) 맨 위 통합 항목에서 MMS MO 첨부까지 `mo_media` 로 합쳤다(`source=MMS_API`). 401·403 은 이제 재시도 대상이다. main 통합·배포는 거기서. 대화방에서 사진을 보내는 기능은 없다.
 
 ## 2026-10-16 — 녹음 재생 팝업·팩스 기본 해상도 선명 운영 배포(`bb5e4c3`)
 

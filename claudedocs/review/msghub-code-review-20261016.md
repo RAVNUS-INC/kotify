@@ -4,7 +4,7 @@
 범위: 클라이언트·인증(`app/msghub/*`), 리포트(`routes/webhook.py`·`services/report.py`·`reconcile.py`), MO·대화방 답장(`webhook.py`·`services/chat.py`), 캠페인 발송(`services/compose.py`·`routes/campaigns.py`).
 '확인됨' 은 코드 경로를 직접 다시 읽어 확인한 것, '추정' 은 msghub 실제 동작이 문서에 없어 결과가 갈릴 수 있는 것.
 
-## 처리 결과 (브랜치 `fix/msghub-review-deterministic`, 2026-10-16, 미푸시)
+## 처리 결과 (브랜치 `fix/msghub-review-deterministic`, 2026-10-16, 미푸시 — 이후 배포 전 리뷰 [deploy-review-20261016.md](deploy-review-20261016.md) 반영)
 
 아래 리뷰 본문은 리뷰 시점 그대로 두고 처리 결과만 여기 적는다. 검증은 로컬 테스트(pytest·ruff·웹 typecheck·lint·vitest)뿐이고 운영·msghub 실제 응답으로는 확인하지 않았다. 보류 항목(3·4·6·7)은 리뷰 세션이 위임받은 기본안대로 처리했다.
 
@@ -12,12 +12,12 @@
 |---|------|------|
 | 1 | 수정 | `AuthError` 를 `MsghubAuthError` 하위로 — 토큰 실패가 첫 청크에서 캠페인을 멈춘다(`5062ecd`) |
 | 2 | 수정 | 사전 갱신 실패 시 30초 넘게 남은 토큰을 계속 쓰고 30초 뒤 재시도(`5062ecd`) |
-| 3 | 수정 | `MsghubClient._call`: 서버가 20xxx·29011·29025 로 거부하면 토큰을 버리고 1회 재발급·재요청, 다시 거부되면 `MsghubAuthError`. 업로드·health check·MO 컨텐츠 포함 |
+| 3 | 수정 | `MsghubClient._call`·`fetch_mo_content`: 토큰 오류(20003·20004)일 때만, 거부된 토큰이 지금 캐시한 것과 같을 때만 버리고 1회 재발급·재요청. 그 밖의 인증 오류는 바로 올림(배포 전 리뷰 M5 반영) |
 | 4 | 수정 | `30124` 는 전달 성공(집계·과금). 단말 전달 가능 4개·성공 불확실 3개(`codes.UNCERTAIN_CODES`)는 실패(0원)로 확정하되 양방향 대체 SMS 를 보내지 않고, 수신자 배지 '결과 불확실'·말풍선 '결과 불확실'(주의 색)로 구분. 성공 판정을 쓰는 집계(캠페인·대시보드·리포트·비용 상한·알림 담당자·답장 기본 채널) 모두 `DELIVERED_CODES` 기준 |
 | 5 | 수정 | 배치 내 moKey 중복은 duplicates 로 건너뜀(`5062ecd`) |
-| 6 | 수정 | MMS MO(`contentCnt>0`, moKey 있음)는 응답 뒤 백그라운드로 `GET /mo/v1/file/{moKey}` 를 받아 DB 보관(10MB 상한, alembic `0026`). 실패 시 재조정 루프가 1·2·4…분(최대 6시간) 간격, 7일·12회 넘으면 `EXPIRED`. 대화방에 `moTitle`·이미지(그 밖 형식은 내려받기, `nosniff`). 받으면 SSE `message.new` 발행. RCS 양방향 `fileMessage` 는 형식 미문서라 받지 않음 |
+| 6 | 수정 | RCS 사진 브랜치와 합쳐 `mo_media` 테이블 하나(`source` RCS_URL/MMS_API, alembic `0026` 하나, `mo_messages` 는 그대로). MMS 는 `GET /mo/v1/file/{moKey}` 로 받아 보관(10MB), 지수 간격 재시도·7일 만료, 사진이 아니면 내려받기. 대화방에 `moTitle`·첨부, 목록·알림 `[사진]`/`[첨부 파일]`. 조회 `GET /api/chat/media/{mo_id}` |
 | 7 | 수정 | 서버가 숫자만 남긴 국내 번호(휴대폰·0 시작 9~11자리·15xx~19xx 8자리, `+82`→0)로 정규화해 dedupe·발송. 틀린 값이 있으면 `POST /campaigns` 400 `invalid_recipients`(값 목록), 미리보기 `valid=false`. 웹 입력도 같은 규칙으로 즉시 표시·제출 차단, 안내 문구 정정("이름·그룹" 제거) |
-| 8 | 수정 | 일반 모드 29002 를 30초 뒤 같은 cliKey 로 1회 재시도(`5062ecd`). 청크 사이 속도 조절은 넣지 않음 |
+| 8 | 수정 | 29002 를 5초 뒤 같은 cliKey 로 1회 재시도(처음 30초였으나 웹 요청 프록시 제한 때문에 배포 전 리뷰 M3 로 단축). 대화방 단건 답장은 재시도하지 않음. 청크 사이 속도 조절은 넣지 않음(계약 TPS 근거 없음) |
 
 참고(낮음):
 

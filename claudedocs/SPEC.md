@@ -305,7 +305,7 @@ ID 재사용을 막는 별도 순번 또는 `AUTOINCREMENT`를 함께 설계해�
 
 - **Report**: `POST /webhook/msghub/{token}/report` — 발송 결과 (DELIVERED / FAILED + 실제 도달 채널).
 - **MO**: `POST /webhook/msghub/{token}/mo` — 수신 메시지 (기록만, 자동 응답 없음). 같은 배치 안에 같은 moKey(또는 같은 대체 키)가 두 번 오면 중복으로 세고 건너뛴다. 아는 목록 키(`moLst`·`rcsBiLst`·`rcsBiaLst`·`rcsBirLst` 등)가 하나도 없는 본문은 성공으로 답하되 구조를 WARNING 으로 남긴다.
-- **MMS MO 첨부**: `contentCnt > 0` 인 SMS/MMS MO(moKey 있음)는 `mo_messages.content_fetch_status = PENDING` 으로 저장하고, 응답 뒤 백그라운드로 `GET /mo/v1/file/{moKey}` 를 받아 DB(`content_blob`, 10MB 상한)에 보관한다. 실패하면 60초 재조정 루프가 1·2·4…분(최대 6시간) 간격으로 다시 받고, 받은 지 7일(msghub 보관 기간)이 지나거나 12회 실패하면 `EXPIRED`. 대화방은 MMS 제목(`moTitle`)과 첨부를 보여 주며, 이미지(jpeg·png·gif·webp·bmp)만 `GET /threads/mo/{id}/content` 로 화면에 바로 보이고 그 밖은 내려받기다. RCS 양방향 MO 의 `fileMessage` 는 형식이 문서에 없어 받지 않는다.
+- **회신 첨부**(`mo_media`, alembic `0026`, `app/services/mo_media.py`): 회신 1건당 1행, `source` 로 받는 곳을 나눈다. RCS 양방향 `contentInfo.fileMessage`(`RCS_URL`, 통신사 주소 — https·공인 IP·리다이렉트 재검사, 이미지만, 그 밖은 `UNSUPPORTED`)와 MMS MO `contentCnt > 0`·실제 moKey(`MMS_API`, `GET /mo/v1/file/{moKey}` — 사진이 아니어도 받음). 웹훅 트랜잭션에 행을 만들고 응답 뒤 백그라운드로, 남은 것은 60초 재조정 루프가 5건씩 받는다. `PENDING→FETCHING` 조건부 선점, 일시 실패는 1·2·4…분(최대 6시간) 뒤 다시(`next_fetch_at`, RCS 3회·MMS 12회), MMS 는 받은 지 7일 지나면 `FAILED`. 한 건은 60초 안에 끝낸다. RCS 401·403 은 `인증 거부 HTTP …` 로 구분해 다시 시도한다. MMS 29011 은 그 행만 `FAILED`, 그 밖의 msghub 인증 오류는 이번 주기를 멈춘다. 끝나면 SSE `message.new`. 화면은 `GET /chat/media/{mo_id}`(require_user, nosniff·CSP sandbox) — 사진은 inline, 사진이 아닌 MMS 첨부는 `application/octet-stream` 내려받기. 대화방 메시지는 `title`(MMS 제목)과 `attachment {kind: image|file, status: ready|pending|failed|unsupported, url?}`. 글 없는 회신은 목록·알림·연락처에서 `[사진]`/`[첨부 파일]`(RCS·MMS 모두).
 - **결과 코드**: 리포트 결과 `10000`·`30124`(코드표 "성공")는 전달 성공으로 집계·과금한다. 단말 전달 가능 코드(`41007`·`54004`·`55806`·`55820`)와 성공 불확실 코드(`32114`·`55821`·`56003`)는 실패로 집계하고(0원) 양방향 답장의 대체 SMS 를 보내지 않으며, 수신자·말풍선에 '결과 불확실' 로 구분해 보인다.
 - **등록 URL**: 위 경로는 FastAPI 기준이다. msghub 콘솔에는 `{app.public_url}/api`를 앞에 붙인 URL(예: `https://sms.example.com/api/webhook/msghub/{token}/report`)을 등록하며, 요청은 NPM → Next.js `/api/*` rewrite를 거쳐 FastAPI에 도달한다. 토큰이 들어간 전체 URL은 설정 → 개발자 탭(`GET /webhooks`)에서 복사한다.
 - **URL 토큰 인증**: msghub는 웹훅에 인증 헤더를 붙이지 않는다(공식 문서 2.8 메시지 리포트 §3). 서명(HMAC) 검증은 적용할 수 없으므로 URL 경로의 `{token}`이 유일한 보호 수단이다. `_verify_token`이 `msghub.webhook_token` 설정값과 `secrets.compare_digest`로 비교한다. 설정값이 비어 있으면 `dev_mode`에서만 통과하고 운영에서는 거부하며, 설정값 조회에 실패해도(복호화 오류 등) 거부한다. 거부 응답은 HTTP 401이다(Report `{"error": "unauthorized"}`, MO `{"code": "20001", "message": "unauthorized"}`).
@@ -350,8 +350,8 @@ JSON은 정상이지만 구조가 스키마와 다르면 MO는 400(`20003`), 리
 - 이미지 업로드는 같은 전처리 JPEG를 MMS와 RCS 컨텐츠 API에 각각 등록한다. `attachments.msghub_file_id`는 MMS ID, `msghub_rcs_file_id`는 RCS ID이며 만료 시각도 채널별로 저장한다.
 - RCS 이미지의 `media`에는 RCS ID, `fbInfoLst`의 MMS에는 MMS ID를 사용한다. 즉시·예약 발송 모두 실제 발송 예정 시각 전에 만료되는 파일을 거부한다. 기존 MMS ID만 있는 첨부는 일반 MMS로만 사용할 수 있고 RCS 발송에는 다시 업로드해야 한다.
 - health check(`PUT /client/v1/healthCheck`)는 재조정과 다른 백그라운드 태스크로 시작 간격 50초(요청 시간을 빼고 잔다)로 호출한다 — 공식 문서는 1분 이하. 실패는 기록만 한다.
-- msghub 가 토큰을 거부하면(20xxx·29011·29025) 캐시한 토큰을 버리고 한 번 재발급해 같은 요청을 다시 보낸다. 토큰 발급·갱신 실패(`AuthError`, `MsghubAuthError` 하위)는 캠페인을 첫 청크에서 멈춘다. 만료 10분 전 갱신이 실패해도 토큰이 30초 넘게 남았으면 그대로 쓰고 30초 뒤 다시 갱신한다.
-- 청크 요청이 요청 단위 [재전송] 내부 오류(`21400`·`22004`·`23004`·`23005`·`29017`·`29019`·`29032`·`31112`·`31118`·`65999`)면 5초 뒤, 일반 모드의 `29002` 면 30초 뒤 같은 cliKey 로 한 번 더 보낸다. 단말 전달 가능 코드는 이중 수신 우려로 다시 보내지 않는다.
+- msghub 가 토큰 오류(`20003`·`20004`)로 거부하면 거부된 토큰이 지금 캐시한 것과 같을 때만 버리고 한 번 새로 받아 같은 요청을 다시 보낸다. 키·IP·비밀번호·권한 오류(`20000`·`20001`·`20002`·`29011`·`29025`)는 재발급하지 않고 바로 올린다(발급 횟수 제한 `50010` 방지). 토큰 발급·갱신 실패(`AuthError`)나 인증 거부로 캠페인을 멈추면 이 청크와 남은 청크를 그 코드로 `FAILED` 기록하고 state·카운트를 확정한 뒤 오류를 올린다. 토큰 발급·갱신 실패(`AuthError`, `MsghubAuthError` 하위)는 캠페인을 첫 청크에서 멈춘다. 만료 10분 전 갱신이 실패해도 토큰이 30초 넘게 남았으면 그대로 쓰고 30초 뒤 다시 갱신한다.
+- 청크 요청이 요청 단위 [재전송] 내부 오류(`21400`·`22004`·`23004`·`23005`·`29017`·`29019`·`29032`·`31112`·`31118`·`65999`)면 5초 뒤, `29002` 면 5초 뒤(RCS 는 직접 발송으로 바꿔) 같은 cliKey 로 한 번 더 보낸다. 발송은 웹 요청 안이라 기다림을 짧게 두고 `/api` 프록시 시간 제한을 120초로 늘렸다(`web/next.config.mjs` `experimental.proxyTimeout`). 대화방 단건 답장은 다시 보내지 않고 실패로 응답하며, `Idempotency-Key` 가 같으면 새로 보내지 않고 첫 결과를 돌려준다. 단말 전달 가능 코드는 이중 수신 우려로 다시 보내지 않는다.
 - 재조정은 오래된 미완료 메시지부터 조회한다. 공급자가 `OVER_DATE` 또는 `INVALID_KEY`를 반환하면 해당 메시지를 `FAILED`로 닫아 최근 메시지 조회를 막지 않게 한다.
 
 ### 5.5 에러 처리
@@ -541,7 +541,7 @@ web/app/
 }
 ```
 
-`message`와 `sendChannel`은 필수이며 채널은 `rcs` 또는 `sms`다. `recipients`는 기본 빈 배열·최대 1000개, `hasAttachment`는 기본 false다. 수신자 수는 실제 발송 API와 같이 **숫자만 남긴 국내 번호로 정규화한 뒤의 중복 제거**로 계산한다(`010-1234-5678` 과 `01012345678` 은 1명). 국내 번호 형식(휴대폰, 0 으로 시작하는 9~11자리, 15xx~19xx 8자리, `+82`·`82` 는 0 으로)이 아닌 항목이 있으면 `valid=false` 와 틀린 값을 담은 `error` 를 준다. `POST /campaigns` 는 같은 경우 HTTP 400 `invalid_recipients`(메시지와 `fields.recipients` 에 틀린 값)로 거부하고 아무것도 보내지 않는다. 발송·저장은 정규화한 번호로 한다.
+`message`와 `sendChannel`은 필수이며 채널은 `rcs` 또는 `sms`다. `recipients`는 기본 빈 배열·최대 1000개, `hasAttachment`는 기본 false다. 수신자 수는 실제 발송 API와 같이 **숫자만 남긴 국내 번호로 정규화한 뒤의 중복 제거**로 계산한다(`010-1234-5678` 과 `01012345678` 은 1명). 국내 번호 형식(휴대폰, 0 으로 시작하는 9~11자리, 050 안심번호 12자리, 15xx~19xx 8자리, `+82`·`82` 는 0 으로)이 아닌 항목이 있으면 `valid=false` 와 틀린 값을 담은 `error` 를 준다. `POST /campaigns` 는 같은 경우 HTTP 400 `invalid_recipients`(메시지와 `fields.recipients` 에 틀린 값)로 거부하고 아무것도 보내지 않는다. 발송·저장은 정규화한 번호로 한다(`to_number_raw` 에도 정규화한 값이 들어간다). 대화방 답장은 이미 받은 회신·보낸 기록의 번호라 형식 검사 없이 숫자만 남겨 보낸다.
 
 ```json
 {
