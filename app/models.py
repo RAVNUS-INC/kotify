@@ -343,22 +343,49 @@ class MoMessage(Base):
     raw_payload: Mapped[str] = mapped_column(Text, nullable=False)
     # 우리 서버가 수신한 일시
     received_at: Mapped[str] = mapped_column(Text, nullable=False)
-    # MMS MO 첨부 — msghub 는 7일만 보관해 받아서 보관한다 (services.mo_content).
-    # deferred — 대화방 조회가 MO 행을 읽을 때 파일 본문까지 올리지 않게.
-    content_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
-    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    content_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # NULL(첨부 없음) | PENDING | FETCHED | FAILED(재시도 대기) | EXPIRED(보관 기간·재시도 한도 초과)
-    content_fetch_status: Mapped[str | None] = mapped_column(Text, nullable=True)
-    content_fetch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    content_next_fetch_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 마지막 가져오기 실패 사유 (번호·본문 미포함)
-    content_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
     __table_args__ = (
         Index("idx_mo_messages_mo_number", "mo_number"),
         Index("idx_mo_messages_received_at", "received_at"),
-        Index("idx_mo_messages_content_fetch", "content_fetch_status"),
+    )
+
+
+class MoMedia(Base):
+    """고객 회신(MO)에 붙은 파일 1건 — 회신과 1:1 (services.mo_media).
+
+    source 로 받는 곳이 갈린다.
+    - RCS_URL: RCS 양방향 contentInfo.fileMessage.fileUrl(통신사 서버 주소, 일회성·단기 유효일 수 있음).
+      이미지만 받고 그 밖의 형식은 UNSUPPORTED. 원본 주소는 mo_messages.content_info_lst 에만 둔다.
+    - MMS_API: MMS MO(contentCnt>0) — msghub GET /mo/v1/file/{moKey}, msghub 보관 7일.
+      이미지가 아니어도 받아서 내려받기로 준다.
+    상태: PENDING(가져올 차례, next_fetch_at 이후) → FETCHING(가져오는 중) → FETCHED / FAILED(error 에 사유),
+    UNSUPPORTED(내려받지 않음).
+    """
+
+    __tablename__ = "mo_media"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("mo_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    # 통신사가 알려 준 형식(fileMIMEType). 실제 응답 형식은 content_type.
+    declared_mime: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # RCS_URL | MMS_API
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="RCS_URL")
+    fetch_status: Mapped[str] = mapped_column(Text, nullable=False)
+    fetch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 실패 뒤 다시 시도할 수 있는 시각 (UTC ISO). NULL 이면 바로.
+    next_fetch_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    locked_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    fetched_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("mo_id", name="uq_mo_media_mo_id"),
+        Index("idx_mo_media_fetch", "fetch_status"),
     )
 
 

@@ -24,8 +24,9 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import require_sender, require_setup_complete, require_user
 from app.db import get_db
-from app.models import Campaign, Message, MoMessage, ThreadRead, User
+from app.models import Campaign, Message, MoMedia, MoMessage, ThreadRead, User
 from app.security.csrf import verify_csrf
+from app.services import mo_media
 from app.services.chat import (
     ChatMessage as ServiceChatMessage,
 )
@@ -194,26 +195,65 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
         row["senderName"] = m.sender_name or "알 수 없음"
     if m.title:
         row["title"] = m.title
-    if m.attachment_status:
-        row["attachment"] = _attachment_to_ts(m)
+    if m.attachment and m.mo_id:
+        status = _ATTACHMENT_STATUS.get(m.attachment, "failed")
+        attachment: dict = {"kind": m.attachment_kind or "image", "status": status}
+        if status == "ready":
+            attachment["url"] = f"/api/chat/media/{m.mo_id}"
+        row["attachment"] = attachment
     return row
 
 
-# 브라우저에 그대로 보여 줄 첨부 형식 — 그 밖(동영상·SVG·HTML 등)은 내려받기로만 준다.
+# mo_media.fetch_status → 화면 상태. 가져오는 중(FETCHING)도 아직 기다리는 중이다.
+_ATTACHMENT_STATUS = {
+    "FETCHED": "ready",
+    "PENDING": "pending",
+    "FETCHING": "pending",
+    "FAILED": "failed",
+    "UNSUPPORTED": "unsupported",
+}
+
+
+def _attachment_preview(m: ServiceChatMessage) -> str:
+    """글 없이 파일만 온 회신의 미리보기 — 목록(_mo_preview_body)과 같은 문구."""
+    if not m.attachment:
+        return ""
+    return mo_media.IMAGE_LABEL if m.attachment_kind == "image" else mo_media.FILE_LABEL
+
+
+@router.get("/chat/media/{mo_id}", response_model=None)
+def api_get_mo_media(mo_id: int, db: Session = Depends(get_db)) -> Response | JSONResponse:
+    """고객 회신에 붙은 파일 원본 — 대화방을 볼 수 있는 사용자(require_user)만.
+
+    이미지(앞부분으로 형식을 직접 확인한 것)는 화면에 바로 보이고, 그 밖(MMS 첨부만 해당)은
+    application/octet-stream 내려받기로만 준다. 어느 쪽이든 nosniff·sandbox 로 문서로 해석될 여지를 막는다.
+    """
+    row = db.execute(
+        select(MoMedia.content_blob, MoMedia.content_type).where(
+            MoMedia.mo_id == mo_id, MoMedia.fetch_status == "FETCHED"
+        )
+    ).first()
+    if row is None or row.content_blob is None or not row.content_type:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "첨부를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    image = row.content_type in _INLINE_IMAGE_TYPES
+    return Response(
+        content=row.content_blob,
+        media_type=row.content_type if image else "application/octet-stream",
+        headers={
+            # 보관한 원본은 바뀌지 않는다 — 같은 사용자 브라우저에서만 재사용.
+            "Cache-Control": "private, max-age=86400, immutable",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Content-Disposition": f'{"inline" if image else "attachment"}; filename="reply-{mo_id}"',
+        },
+    )
+
+
+# 화면에 그대로 보여 줄 형식 — mo_media.sniff_image 가 고르는 것과 같다.
 _INLINE_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"})
-
-
-def _attachment_to_ts(m: ServiceChatMessage) -> dict:
-    """MMS MO 첨부 상태 → {status: ready|pending|unavailable, url?, isImage?}."""
-    if m.attachment_status == "FETCHED":
-        return {
-            "status": "ready",
-            "url": f"/api/threads/mo/{m.mo_id}/content",
-            "isImage": (m.attachment_type or "").lower() in _INLINE_IMAGE_TYPES,
-        }
-    if m.attachment_status in ("PENDING", "FAILED"):
-        return {"status": "pending"}
-    return {"status": "unavailable"}
 
 
 def _campaign_label(subject: str | None, content: str | None, cid: int) -> str:
@@ -357,7 +397,7 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
         "id": tid,
         "name": phone,
         "phone": phone,
-        "preview": (last.body or "")[:60],
+        "preview": (last.body or _attachment_preview(last))[:60],
         "time": fmt_kst_hhmm(last.timestamp),
         "date": fmt_kst_date(last.timestamp),
         "channel": last_channel,
@@ -375,31 +415,6 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
     if send_channel:
         detail["defaultSendChannel"] = send_channel
     return {"data": detail}
-
-
-# ── GET /threads/mo/{id}/content — 받은 MMS 첨부 ─────────────────────────────
-
-
-@router.get("/threads/mo/{mo_id}/content", response_model=None)
-def get_mo_content(mo_id: int, db: Session = Depends(get_db)) -> Response | JSONResponse:
-    """보관한 MMS MO 첨부. 이미지만 화면에 바로 보이고 그 밖의 형식은 내려받기로 준다."""
-    mo = db.get(MoMessage, mo_id)
-    if mo is None or mo.content_fetch_status != "FETCHED" or mo.content_blob is None:
-        return JSONResponse(
-            {"error": {"code": "not_found", "message": "첨부를 찾을 수 없습니다"}},
-            status_code=404,
-        )
-    content_type = (mo.content_type or "").lower()
-    inline = content_type in _INLINE_IMAGE_TYPES
-    return Response(
-        content=mo.content_blob,
-        media_type=content_type if inline else "application/octet-stream",
-        headers={
-            "Content-Disposition": f'{"inline" if inline else "attachment"}; filename="mo-{mo.id}"',
-            "Cache-Control": "private, no-store",
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
 
 
 # ── POST /threads/validate-reply — 전송 없는 답장 사전 검증 ───────────────────

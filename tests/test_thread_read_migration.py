@@ -91,8 +91,11 @@ def test_full_migration_chain_upgrades_and_downgrades_on_temporary_database(tmp_
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.connect() as conn:
         assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0026"
-        mo_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(mo_messages)")}
-        assert {"content_blob", "content_fetch_status", "content_next_fetch_at"} <= mo_columns
+        assert "content_blob" not in {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(mo_messages)")
+        }  # 첨부는 mo_media 에만 — mo_messages 는 바꾸지 않는다
+        media_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(mo_media)")}
+        assert {"source", "next_fetch_at", "fetch_status"} <= media_columns
         assert {"notification_deliveries", "fax_jobs", "fax_inbox"} <= {
             row[0]
             for row in conn.exec_driver_sql(

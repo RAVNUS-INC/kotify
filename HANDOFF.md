@@ -17,6 +17,15 @@
 - 검증(로컬): `tests/test_web_shutdown_preload.py` 5개 통과(Next 와 같은 종료 처리를 흉내 낸 node 서버 — SSE 열림 시 유예 뒤 rc=0, 유예 중 새 연결 거절, 연결 없으면 즉시 종료, 자식 기본 종료, unit·bootstrap 경로 일치). preload 를 빈 파일로 바꾸면 SSE 테스트 2개 실패 확인. 로컬 node 는 v25(운영 v20.20.2).
 - **남은 일**: 운영 적용(사용자 지시로 보류, 2026-10-16). 업데이트 버튼은 unit 을 설치하지 않으므로 apply 뒤 CT 에서 README 절차(사본 설치·unit 복사·`daemon-reload`)를 한 번 실행. 첫 재시작은 기존 프로세스라 최대 15초 뒤 SIGKILL 될 수 있고, **그다음 재시작(대화방 탭 열린 상태)에서 `Killing` 없이 `kotify-web: SIGTERM — …` 로그로 끝나는지 확인**해야 완료.
 - 곁가지(범위 밖): 일부 IP 에서 `/chat/stream` 303 이 반복된다(로그아웃된 탭의 재연결로 보임).
+
+## 2026-10-16 — 고객이 RCS 대화방으로 보낸 사진 표시 (브랜치 `jj/rcs-image-support-031ed3`, 미배포)
+
+- 사용자 요청: 고객이 보낸 사진을 화면에 보여 줄 것. 서버가 수신 즉시 내려받아 DB 에 저장하고 인증된 API 로 보여 주며, 기존 회신은 소급하되 만료된 건 "불러올 수 없음".
+- 운영 실측(값 가림, 읽기 전용): 회신 151건 중 사진 7건. 형태는 `contentInfo.fileMessage = {fileMIMEType, fileUrl}`(jpeg 6·png 1), `textMessage` 는 null. `fileUrl` 은 SKT·LG U+·KT MaaP 서버. 이전에는 이 7건이 빈 말풍선이었다. 주소가 지금도 열리는지는 확인하지 않았다(운영에서 고객 사진 주소를 여는 요청이 권한 검사에서 막힘). msghub 문서(다른 워크트리 `claudedocs/msghub-api/19-mo.md`)는 MMS MO 컨텐츠 URL 을 "일회성·24시간", 원본 7일 보관으로 적는다. RCS `fileUrl` 규정은 없다.
+- 구현: `mo_media` 테이블(alembic `0026`, 기존 회신 소급 INSERT) + `app/services/mo_media.py`(PENDING→FETCHING 조건부 선점으로 같은 주소를 두 번 열지 않음, 응답받은 4xx 는 바로 FAILED, 연결 실패·5xx 는 3회까지 재시도, https·공인 IP·리다이렉트 재검사·10MB·이미지 형식 확인). 웹훅은 같은 트랜잭션에 행을 만들고 응답 직후 내려받으며, 60초 주기 작업이 남은 행을 줍는다. 끝나면 SSE `message.new` 를 보낸다. `GET /api/chat/media/{mo_id}`(require_user, nosniff·sandbox). 대화방 메시지에 `attachment {kind, status, url?}`. 목록 미리보기·n8n 알림·연락처 회신 문구는 글 없는 회신을 `[사진]`/`[첨부 파일]` 로 표시. 웹 `MessageAttachment`(사진·불러오는 중·불러올 수 없음·이미지 아님, 누르면 원본 새 탭).
+- 검증(로컬): 백엔드 870개·ruff(새 테스트 22개: 웹훅 기록, 4xx 재시도 안 함, 5xx 3회, SSRF·리다이렉트, 동시 실행 시 1회만 요청, 화면 상태, 엔드포인트 헤더, 소급 마이그레이션), 웹 typecheck·lint·Vitest 231개. scratch DB 로 대화방 화면 확인: 사진 2장(글 함께 포함)과 나머지 세 상태 문구 표시, `/api/chat/media` 200 image/jpeg·비로그인 303·미보관 404, 목록 미리보기 `[첨부 파일]`. **실제 통신사 주소로 내려받는 것은 검증하지 못했다** — 배포 후 `deploy/README.md` "회신 사진 보관 0026" 집계로 확인할 것.
+- 남은 일: main 통합·배포(마이그레이션 0026 포함). SMS/MMS 로 들어오는 MMS MO 의 첨부(`contentInfoLst`, msghub `GET /mo/v1/file/{moKey}`)는 범위 밖이다. 운영에 아직 사례가 없다. 대화방에서 사진을 보내는 기능은 없다.
+
 ## 2026-10-16 — 녹음 재생 팝업·팩스 기본 해상도 선명 운영 배포(`bb5e4c3`)
 
 - 사용자 요청: 칸 안에서 펼치는 재생기가 밀려 이상하니 팝업으로 통화 정보와 함께 한 번에 하나씩 재생, 팩스 기본 옵션은 선명.

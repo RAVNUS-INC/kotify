@@ -27,6 +27,9 @@ FastAPI 백엔드 + Next.js 프론트엔드가 단일 컨테이너에 공존합�
 
 CT 생성 후 **아웃바운드 허용**:
 - U+ msghub API 엔드포인트 (`api.msghub.uplus.co.kr:443` 또는 전용선 IP 1.209.4.60/75)
+- 통신사 RCS 파일 서버 HTTPS 443 — 고객이 보낸 사진을 받는다. 2026-10 운영에서 확인한 주소:
+  `image.skt-maap-api.com`(SKT), `img-proxy-maap.uplus.co.kr`(LG U+), `media-ent-bd.hermes.kt.com`(KT).
+  통신사가 주소를 바꿀 수 있으므로 호스트 단위 허용보다 HTTPS 아웃바운드 전체 허용이 안전하다
 - Keycloak 서버 주소:포트
 - NTP 서버 (UDP 123)
 - GitHub (git clone용) — 사내 git 미러를 쓰면 해당 주소
@@ -332,6 +335,32 @@ systemctl show kotify-web -p TimeoutStopUSec -p Environment   # 15s, NODE_OPTION
 새 설정은 다음 재시작부터 적용된다. 첫 재시작에서는 기존 프로세스(preload 없음)를 멈추므로
 최대 15초 뒤 SIGKILL 될 수 있다. 그다음 재시작부터 journal 에
 `kotify-web: SIGTERM — 열린 요청을 최대 5000ms 기다린 뒤 종료` 가 찍히고 `Killing` 은 없어야 한다.
+
+### 회신 사진 보관 0026 배포·확인
+
+`0026_mo_media.py` 는 `mo_media` 테이블(회신 1건당 첨부 1행, 원본 BLOB)을 만들고, 이미 저장된
+회신 중 `content_info_lst.fileMessage` 가 있는 행을 소급해 넣는다(이미지는 `PENDING`, 그 밖의
+형식은 `UNSUPPORTED`). 마이그레이션은 네트워크를 쓰지 않는다.
+
+- 내려받기: 새 회신은 웹훅 응답 직후, 남은 `PENDING` 은 60초 주기 작업이 한 번에 5건씩 가져온다.
+  배포 직후 소급 행은 몇 분 안에 처리된다. 통신사 주소는 일회성·단기 유효일 수 있어(msghub 문서:
+  MMS MO 컨텐츠 URL 24시간·1회, 원본 7일 보관) 응답을 받은 4xx 는 다시 열지 않고 `FAILED` 로 남긴다.
+  연결 실패·5xx 만 최대 3회 다시 시도한다. 오래된 소급 행은 대부분 `FAILED`(화면 "사진을 불러올 수
+  없습니다")가 정상이다.
+- 안전장치: https·공인 IP 주소만(리다이렉트 단계마다 다시 검사), 10MB 상한, 파일 앞부분으로
+  JPEG·PNG·GIF·WebP·BMP 인지 확인한다. 화면은 `GET /api/chat/media/{mo_id}`(로그인 필요,
+  `nosniff`·`sandbox`)로만 원본을 받고 통신사 주소는 브라우저에 보내지 않는다.
+- 확인(주소·본문 출력 없이 집계만):
+
+  ```bash
+  runuser -u kotify -- sqlite3 -readonly /var/lib/kotify/sms.db \
+    "SELECT fetch_status, error, COUNT(*) FROM mo_media GROUP BY 1, 2;"
+  ```
+
+  새 사진 회신이 `FETCHED` 가 되지 않고 `FAILED`(`공인 주소가 아님`·연결 오류)가 쌓이면 CT 의
+  HTTPS 아웃바운드와 DNS 를 먼저 확인하고 `/var/log/kotify/stderr.log` 의 `회신 이미지 가져오기` 를 본다.
+- 되돌리기: `alembic downgrade 0025` 는 `mo_media` 를 지운다(보관한 사진도 사라진다). 원래 회신과
+  `content_info_lst` 는 그대로다.
 
 ### CT SSH 재로딩 실패
 

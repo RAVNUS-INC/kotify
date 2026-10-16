@@ -27,16 +27,20 @@ export type ChatMessage = {
   senderName?: string;
   /** 수신(them) 전용. MMS 제목. */
   title?: string;
-  /** 수신(them) 전용. MMS 첨부 — ready 면 url 로 받는다(이미지면 화면에 바로 보인다). */
+  /** 수신(them) 전용. 고객이 보낸 파일(RCS fileMessage·MMS 첨부). 없으면 생략. */
   attachment?: MessageAttachment;
 };
 
-export type MessageAttachment =
-  | { status: 'ready'; url: string; isImage: boolean }
-  /** msghub 에서 받아 오는 중(실패 후 재시도 대기 포함). */
-  | { status: 'pending' }
-  /** 보관 기간(7일)이 지났거나 받을 수 없음. */
-  | { status: 'unavailable' };
+/**
+ * 고객이 보낸 파일. 서버가 받아 보관한다(RCS 는 통신사 주소, MMS 는 msghub 컨텐츠 API).
+ * ready 만 url(인증된 `/api/chat/media/{moId}`)이 있다. image 는 화면에 바로, file 은 내려받기만
+ * (MMS 첨부만 해당 — RCS 는 사진이 아니면 unsupported). failed 는 만료·소진돼 다시 받을 수 없는 것.
+ */
+export type MessageAttachment = {
+  kind: 'image' | 'file';
+  status: 'ready' | 'pending' | 'failed' | 'unsupported';
+  url?: string;
+};
 
 export type ChatThread = {
   id: string;

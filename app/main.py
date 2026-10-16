@@ -123,7 +123,7 @@ async def _reconcile_loop() -> None:
     msghub 설정 여부와 관계없이 알림 outbox는 처리한다. 각 작업의 일시 오류는
     로그만 남겨 한 경로의 장애가 다른 경로나 다음 주기를 중단하지 않게 한다.
     """
-    from app.services.mo_content import fetch_pending as fetch_mo_contents
+    from app.services.mo_media import fetch_pending as fetch_mo_media
     from app.services.notify import process_n8n_outbox
     from app.services.reconcile import reconcile_pending_messages
 
@@ -148,10 +148,11 @@ async def _reconcile_loop() -> None:
                         await reconcile_pending_messages(db, client)
                     except Exception:  # noqa: BLE001
                         logger.exception("msghub 재조정 실패")
-                    try:
-                        await fetch_mo_contents(db, client)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("MO 첨부 가져오기 실패")
+                # 회신 첨부 — RCS 는 msghub 없이도, MMS 는 msghub 가 있을 때만 받는다.
+                try:
+                    await fetch_mo_media(db, msghub=client)
+                except Exception:  # noqa: BLE001
+                    logger.exception("회신 첨부 가져오기 실패")
             finally:
                 db.close()
         except asyncio.CancelledError:

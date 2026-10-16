@@ -6,6 +6,9 @@ export type {
   MessageStatus,
 } from './MessageBubble';
 
+export { MessageAttachment } from './MessageAttachment';
+export type { MessageAttachmentProps } from './MessageAttachment';
+
 export { ChatFilters } from './ChatFilters';
 export type { ChatFiltersProps, ChatFilter } from './ChatFilters';
 
