@@ -1,6 +1,14 @@
 # Handoff — 현재 상황 요약
 
-## 2026-10-16 — 배포 후보 통합: fix + main + RCS 사진, 배포 전 리뷰 M1~M7 수정 (브랜치 `fix/msghub-review-deterministic`, 푸시·main 병합·배포 안 함)
+## 2026-10-16 — msghub 리뷰 수정·RCS/MMS 회신 첨부·웹 종료 유예 운영 배포(`3d7e765`)
+
+- 범위: 운영 `bb5e4c3` → `3d7e765`(13커밋). `fix/msghub-review-deterministic` 를 main 에 fast-forward 푸시(pre-push 전부 통과). alembic `0025` → `0026`(`mo_media`).
+- 배포: 06:58 UTC `apply`(pull·backend·migrate·web·build) → 06:59:27 worker done → 07:00:09 `post-restart: 정상 기동 — 3d7e765`.
+- 웹 종료 유예 적용(deploy/README 순서): preload 사본은 post-restart 가 이미 설치(`/usr/local/lib/kotify` 0755 root, 사본 0644, kotify 사용자 읽기 확인, 저장소 파일과 같음) → 기존 unit 을 `/root/kotify-web.service.bak-20261016` 로 백업 → 새 unit 복사·`daemon-reload`(`TimeoutStopSec=15s`·`NODE_OPTIONS`·`ExecStartPre test -r` 확인) → 재시작. 기동 완료 뒤 재시작에서 journal 에 `kotify-web: SIGTERM — 열린 요청을 최대 5000ms 기다린 뒤 종료`, `Killing` 0건. **대화방 탭(SSE)이 열린 상태의 재시작은 확인 못 함** — 다음 배포 때 `Killing` 이 없는지 볼 것.
+- 확인: 두 서비스 active·`NRestarts=0`, healthz(8080·3000) `3d7e765`, alembic `0026 (head)`, `PRAGMA quick_check` ok, 배포 이후 warning 이상 journal 없음, stderr.log 마지막 기동 이후 오류 없음. `mo_media` 소급 RCS 사진 7건 → 07:02 UTC 기준 7건 모두 `FETCHED`(통신사 주소를 인증 없이 받을 수 있음을 처음 실측). MMS 첨부 행은 0건(대상 회신 없음 — `/mo/v1/file` 실제 응답은 여전히 미확인).
+- **로그인 화면 확인은 안 함.** 남은 확인: NPM `proxy_read_timeout`(120초보다 짧으면 1,000명 발송이 먼저 끊김), 첫 MMS 회신 첨부 수신 때 `mo_media` 집계.
+
+## 2026-10-16 — 배포 후보 통합: fix + main + RCS 사진, 배포 전 리뷰 M1~M7 수정 (`3d7e765`, main 병합·운영 배포 — 위 항목)
 
 - 범위: msghub 리뷰 수정(`5062ecd`·`0c8d74c`) 위에 `origin/main` 4c0bc57(웹 종료 유예) 병합 `bf0bba5`, RCS 사진 브랜치 249ecc6 병합·첨부 통합 `bd593fc`, 배포 전 리뷰 M1·M2 `cf78bac`, M3·M4 `61899e5`, M5·M6·낮음 `cba2b80`. 항목별 결과: [claudedocs/review/deploy-review-20261016.md](claudedocs/review/deploy-review-20261016.md) "처리 결과", [msghub-code-review-20261016.md](claudedocs/review/msghub-code-review-20261016.md) "처리 결과".
 - 회신 첨부는 `mo_media` 하나(alembic `0026`, RCS 사진 + MMS 첨부, `mo_messages` 는 그대로). 조회는 `/api/chat/media/{mo_id}` 하나.
@@ -16,7 +24,8 @@
 - 수정(사용자 선택 A안): `deploy/kotify-web-shutdown.cjs` preload — SIGTERM 뒤 5초(`KOTIFY_WEB_SHUTDOWN_GRACE_MS` 로 테스트 조정) 유예 후 남은 연결을 끊고 `exit 0`, 열린 연결이 없으면 Next 가 바로 종료, 다른 SIGTERM 처리기가 없는 자식 node 는 기본 동작 유지. `kotify-web.service` 에 `TimeoutStopSec=15`(안전망)·`NODE_OPTIONS=--require=/usr/local/lib/kotify/kotify-web-shutdown.cjs`. preload 는 저장소 밖 사본을 쓴다(`--require` 대상이 없으면 node 가 기동 실패 — 실측, git 롤백 대비). `ct-bootstrap.sh` 가 사본을 설치, `deploy/README.md` "kotify-web 종료 유예" 에 수동 설치 절차.
 - 정지 순서 변경(kotify 먼저)은 uvicorn 도 열린 스트림을 기다릴 가능성이 커 택하지 않았다(미검증).
 - 검증(로컬): `tests/test_web_shutdown_preload.py` 5개 통과(Next 와 같은 종료 처리를 흉내 낸 node 서버 — SSE 열림 시 유예 뒤 rc=0, 유예 중 새 연결 거절, 연결 없으면 즉시 종료, 자식 기본 종료, unit·bootstrap 경로 일치). preload 를 빈 파일로 바꾸면 SSE 테스트 2개 실패 확인. 로컬 node 는 v25(운영 v20.20.2).
-- **남은 일**: 운영 적용(사용자 지시로 보류, 2026-10-16). 업데이트 버튼은 unit 을 설치하지 않으므로 apply 뒤 CT 에서 README 절차(사본 설치·unit 복사·`daemon-reload`)를 한 번 실행. 첫 재시작은 기존 프로세스라 최대 15초 뒤 SIGKILL 될 수 있고, **그다음 재시작(대화방 탭 열린 상태)에서 `Killing` 없이 `kotify-web: SIGTERM — …` 로그로 끝나는지 확인**해야 완료.
+- (2026-10-16 갱신) 운영 적용 완료 — 맨 위 `3d7e765` 배포 항목. 아래는 당시 기록.
+- 당시 남은 일: 운영 적용(사용자 지시로 보류, 2026-10-16). 업데이트 버튼은 unit 을 설치하지 않으므로 apply 뒤 CT 에서 README 절차(사본 설치·unit 복사·`daemon-reload`)를 한 번 실행. 첫 재시작은 기존 프로세스라 최대 15초 뒤 SIGKILL 될 수 있고, **그다음 재시작(대화방 탭 열린 상태)에서 `Killing` 없이 `kotify-web: SIGTERM — …` 로그로 끝나는지 확인**해야 완료.
 - 곁가지(범위 밖): 일부 IP 에서 `/chat/stream` 303 이 반복된다(로그아웃된 탭의 재연결로 보임).
 
 ## 2026-10-16 — 고객이 RCS 대화방으로 보낸 사진 표시 (브랜치 `jj/rcs-image-support-031ed3`, 미배포)
