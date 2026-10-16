@@ -99,6 +99,9 @@ async def reset_msghub_client():
 # 웹훅 유실 대비 재조정 주기 (초). 발송 후 충분히 기다린 미완료 메시지를
 # msghub 에서 능동 조회해 상태를 보정한다 (C5). 단일 uvicorn 워커 전제.
 _RECONCILE_INTERVAL_SECONDS = 60
+# msghub 세션 health check 주기 (초). 공식 문서는 1분 이하 — 재조정 루프에 묶으면 60초 + 재조정·팩스
+# 추적 시간이라 늘 1분을 넘었다(21-monitoring). 따로 돌리고 요청 시간(타임아웃 30초)을 빼고 잔다.
+_HEALTH_CHECK_INTERVAL_SECONDS = 50
 
 
 async def _track_fax(db) -> None:
@@ -120,6 +123,7 @@ async def _reconcile_loop() -> None:
     msghub 설정 여부와 관계없이 알림 outbox는 처리한다. 각 작업의 일시 오류는
     로그만 남겨 한 경로의 장애가 다른 경로나 다음 주기를 중단하지 않게 한다.
     """
+    from app.services.mo_content import fetch_pending as fetch_mo_contents
     from app.services.notify import process_n8n_outbox
     from app.services.reconcile import reconcile_pending_messages
 
@@ -141,19 +145,35 @@ async def _reconcile_loop() -> None:
                 client = await aget_msghub_client()
                 if client is not None:
                     try:
-                        await client.health_check()
-                    except Exception:  # noqa: BLE001
-                        logger.exception("msghub health check 실패")
-                    try:
                         await reconcile_pending_messages(db, client)
                     except Exception:  # noqa: BLE001
                         logger.exception("msghub 재조정 실패")
+                    try:
+                        await fetch_mo_contents(db, client)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("MO 첨부 가져오기 실패")
             finally:
                 db.close()
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
             logger.exception("재조정 루프 오류 — 다음 주기 계속")
+
+
+async def _health_check_loop() -> None:
+    """msghub 세션 health check — 재조정과 따로, 시작 간격이 1분을 넘지 않게 돈다."""
+    loop = asyncio.get_running_loop()
+    while True:
+        started = loop.time()
+        try:
+            client = await aget_msghub_client()
+            if client is not None:
+                await client.health_check()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("msghub health check 실패")
+        await asyncio.sleep(max(1.0, _HEALTH_CHECK_INTERVAL_SECONDS - (loop.time() - started)))
 
 
 @asynccontextmanager
@@ -184,15 +204,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 웹훅 유실 대비 재조정 백그라운드 태스크 시작 (C5, 단일 워커 전제)
     reconcile_task = asyncio.create_task(_reconcile_loop())
+    health_task = asyncio.create_task(_health_check_loop())
 
     yield
 
-    # 재조정 태스크 정리 (graceful shutdown)
-    reconcile_task.cancel()
-    try:
-        await reconcile_task
-    except asyncio.CancelledError:
-        pass
+    # 재조정·health check 태스크 정리 (graceful shutdown)
+    for task in (reconcile_task, health_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # 종료
     if _msghub_client is not None:

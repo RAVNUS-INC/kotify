@@ -10,30 +10,43 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 
-# 재시도가 필요한 에러 코드 (msghub API 가이드 공통 결과 코드 기준)
-# 참조: claudedocs/msghub-error-codes.md
+# 공식 결과 코드표(claudedocs/msghub-api/09-result-codes.md)의 [재전송] 코드.
 #
-# - CPS 초과: 29002
-# - 내부오류: 49xxx (전체), 21400, 22004, 23004, 23005, 29017, 29019, 29032,
-#   31112, 31118, 65999
-# - RCS 발송 실패이나 단말 전달 가능성 있는 코드: 41007, 54004, 55806, 55820
-# - HTTP 5xx (client.py에서 별도 처리)
-RETRYABLE_CODES: frozenset[str] = frozenset({
-    # CPS 초과
-    "29002",
-    # 내부 오류
+# 요청 단위 내부 오류 — 요청이 접수되지 않았으니 같은 요청을 다시 보내면 된다.
+RESEND_CODES: frozenset[str] = frozenset({
     "21400", "22004", "23004", "23005",
     "29017", "29019", "29032",
     "31112", "31118",
     "65999",
-    # RCS 발송 실패이나 단말 전달 가능
-    "41007", "54004", "55806", "55820",
 })
+# CPS 초과 — 잠시 뒤 다시 보낸다 (client 가 MsghubRateLimited 로 따로 분류).
+RATE_LIMIT_CODE = "29002"
+# RCS 발송 실패 코드이나 실제 단말로 전달됐을 수 있다 — 다시 보내면 이중 수신될 수 있어
+# 자동 재발송하지 않는다. 리포트로 오면 '결과 불확실' 실패로 둔다(UNCERTAIN_CODES).
+MAYBE_DELIVERED_CODES: frozenset[str] = frozenset({"41007", "54004", "55806", "55820"})
 
-# 49xxx 전체 프리픽스는 프레임워크 내부 오류로 재시도 대상
-_RETRY_PREFIXES: tuple[str, ...] = ("49",)
+RETRYABLE_CODES: frozenset[str] = RESEND_CODES | MAYBE_DELIVERED_CODES | {RATE_LIMIT_CODE}
 
 SUCCESS_CODE = "10000"
+
+# 리포트 결과 코드 중 전달 성공으로 보는 것. 30124 는 코드표 설명이 "성공" 이다.
+# 요청 응답 코드(SUCCESS_CODE)와 구분한다 — 이 집합은 메시지 리포트의 결과에만 쓴다.
+DELIVERED_CODES: frozenset[str] = frozenset({SUCCESS_CODE, "30124"})
+
+# 실패로 확정하되 실제로는 전달됐을 수 있는 리포트 결과 코드 — 화면에 '결과 불확실' 로 구분하고
+# 양방향 답장의 대체 SMS 를 보내지 않는다(이중 수신 방지). 비용·집계는 실패와 같다(0원).
+# 32114 성공불확실(3일이내수신가능), 55821 전송 성공 불확실, 56003 발송 성공·수신 여부 모름.
+UNCERTAIN_CODES: frozenset[str] = MAYBE_DELIVERED_CODES | {"32114", "55821", "56003"}
+
+
+def is_delivered(code: str | None) -> bool:
+    """리포트 결과 코드가 전달 성공인가."""
+    return code in DELIVERED_CODES
+
+
+def is_uncertain(code: str | None) -> bool:
+    """실패로 집계하지만 전달됐을 수 있는 리포트 결과 코드인가."""
+    return code in UNCERTAIN_CODES
 
 # 건당 요금 (원, VAT 별도, 후불)
 PRICE_TABLE: dict[tuple[str, str], int] = {
@@ -118,31 +131,11 @@ _ESTIMATE_MAP: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {
 
 
 def is_retryable(code: str) -> bool:
-    """재시도 가능한 에러 코드인지 확인.
+    """요청 응답 코드가 [재전송] 대상인가 (HTTP 5xx 는 client.py 에서 별도 처리).
 
-    명시 코드 + 49xxx 프리픽스(프레임워크 내부 오류 전체) 둘 다 포함.
-    HTTP 5xx 재시도는 client.py에서 별도 처리.
+    예전엔 49 로 시작하는 코드도 넣었지만 현행 코드표에 49xxx 대역이 없다.
     """
-    if not code:
-        return False
-    if code in RETRYABLE_CODES:
-        return True
-    return any(code.startswith(p) for p in _RETRY_PREFIXES)
-
-
-def describe(code: str | None, raw_message: str | None = None) -> str:
-    """msghub 결과 코드를 사람이 읽을 수 있는 문자열로 변환.
-
-    우선순위:
-    1. msghub가 보내준 resultCodeDesc — 유일한 신뢰 원천
-    2. 없으면 raw 코드만 노출
-    3. 코드도 없으면 "—"
-    """
-    if raw_message:
-        return raw_message
-    if code:
-        return f"결과 코드 {code}"
-    return "—"
+    return bool(code) and code in RETRYABLE_CODES
 
 
 def calculate_cost(channel: str | None, product_code: str | None, success: bool) -> int:

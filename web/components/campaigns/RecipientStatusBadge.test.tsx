@@ -16,4 +16,11 @@ describe('RecipientStatusBadge', () => {
 
     expect(screen.getByText('대기')).toBeInTheDocument();
   });
+
+  it('결과 불확실은 실패와 다른 주의 배지로 표시한다', () => {
+    render(<RecipientStatusBadge status="uncertain" />);
+
+    expect(screen.getByText('결과 불확실')).toHaveClass('text-warning');
+    expect(screen.queryByText('실패')).not.toBeInTheDocument();
+  });
 });

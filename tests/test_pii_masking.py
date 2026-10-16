@@ -91,7 +91,10 @@ PHONE_DASHED = "010-4738-2915"
 REPLY_TEXT = "환불 요청합니다 주소는 강남구 테헤란로"
 _PII_FRAGMENTS = (PHONE, PHONE_DASHED, "4738", "2915", REPLY_TEXT, "환불", "테헤란로")
 
-REPORT_FORMAT_ERROR = {"error": "invalid report format"}
+# 형식 오류는 다시 받아도 같아 200 으로 받는다 — 400 이면 msghub 가 72시간 재전송한다.
+REPORT_FORMAT_ERROR = {"status": "invalid report format"}
+_BAD_BODY = "웹훅 리포트 형식 오류 — 반영하지 않고 받음: PayloadFormatError: "
+_BAD_ITEM = "웹훅 리포트 형식 오류 항목 1건 건너뜀: "
 MO_FORMAT_ERROR = {"code": "20003", "message": "invalid mo format"}
 
 
@@ -120,33 +123,37 @@ def _assert_no_pii(caplog):
 
 
 @pytest.mark.parametrize(
-    ("body", "failure"),
+    ("body", "failure", "expected"),
     [
         pytest.param(
-            {"rptCnt": 1, "rptLst": [PHONE]}, "rptLst[0]: object 자리에 string", id="item-string",
+            {"rptCnt": 1, "rptLst": [PHONE]}, _BAD_ITEM + "rptLst[0]: object 자리에 string",
+            {"status": "no items"}, id="item-string",
         ),
         pytest.param(
             {"rptCnt": 1, "rptLst": {"phone": PHONE_DASHED, "resultCodeDesc": REPLY_TEXT}},
-            "rptLst: array 자리에 object", id="list-object",
+            _BAD_BODY + "rptLst: array 자리에 object", REPORT_FORMAT_ERROR, id="list-object",
         ),
         pytest.param(
             {"rptCnt": 1, "rptLst": [
                 {"cliKey": "c1-0-0", "phone": PHONE, "fbReasonLst": {"fbResultDesc": REPLY_TEXT}},
             ]},
-            "rptLst[0].fbReasonLst: array 자리에 object", id="fb-reason-object",
+            _BAD_ITEM + "rptLst[0].fbReasonLst: array 자리에 object", {"status": "no items"},
+            id="fb-reason-object",
         ),
-        pytest.param([{"phone": PHONE}], "body: object 자리에 array", id="body-array"),
+        pytest.param(
+            [{"phone": PHONE}], _BAD_BODY + "body: object 자리에 array", REPORT_FORMAT_ERROR, id="body-array",
+        ),
     ],
 )
-def test_report_parse_failure_log_has_no_pii(db_session, caplog, body, failure):
+def test_report_parse_failure_log_has_no_pii(db_session, caplog, body, failure, expected):
     caplog.set_level(logging.DEBUG)
 
     resp = _post(receive_report, body, db_session)
 
-    assert resp.status_code == 400
-    assert json.loads(resp.body) == REPORT_FORMAT_ERROR
+    assert resp.status_code == 200
+    assert json.loads(resp.body) == expected
     _assert_no_pii(caplog)
-    assert f"웹훅 리포트 파싱 실패: PayloadFormatError: {failure}" in caplog.text
+    assert failure in caplog.text
 
 
 @pytest.mark.parametrize(

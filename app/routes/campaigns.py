@@ -31,14 +31,15 @@ from app.auth.deps import (
 )
 from app.db import get_db
 from app.models import Attachment, Campaign, Message, MsghubRequest, User
-from app.msghub.codes import PRICE_TABLE, SUCCESS_CODE, estimate_cost
+from app.msghub.codes import DELIVERED_CODES, PRICE_TABLE, estimate_cost, is_delivered, is_uncertain
 from app.msghub.schemas import MsghubBadRequest, MsghubError
 from app.security.csrf import verify_csrf
 from app.services import audit
-from app.services.compose import _classify_msg_type, dedupe_recipients
+from app.services.compose import InvalidRecipients, _classify_msg_type, dedupe_recipients
 from app.services.image import ImageProcessingError, preprocess_mms_image
 from app.services.report import _refresh_campaign_counters
 from app.util.csv_safe import safe_csv_cell as _safe_csv_cell
+from app.util.phone import normalize_recipient
 from app.util.text import measure_bytes
 
 if TYPE_CHECKING:
@@ -72,14 +73,14 @@ _STATUS_MAP = {
 }
 
 # Message/result 상태 → RecipientStatus 매핑
-# web/types/campaign.ts: 'queued' | 'delivered' | 'read' | 'replied' | 'failed' | 'fallback_sms'
-#   | 'cancelled'
+# web/types/campaign.ts: 'queued' | 'delivered' | 'read' | 'replied' | 'failed' | 'uncertain'
+#   | 'fallback_sms' | 'cancelled'
 _RECIPIENT_STATUS = {
     "REG": "queued",
     "ING": "queued",
     "PENDING": "queued",
     "FB_PENDING": "fallback_sms",
-    "DONE": "delivered",  # SUCCESS_CODE 인지는 별도 분기
+    "DONE": "delivered",  # 전달 성공 코드인지는 별도 분기 (_message_to_recipient)
     "FAILED": "failed",
     "CANCELED": "cancelled",  # 예약 취소 — 발송되지 않음 (cancel_campaign)
 }
@@ -153,12 +154,15 @@ def _campaign_to_dict(c: Campaign) -> dict:
 def _message_to_recipient(m: Message) -> dict:
     """Message ORM → Next.js Recipient shape."""
     if m.status == "DONE":
-        if m.result_code == SUCCESS_CODE:
+        if is_delivered(m.result_code):
             # 채널이 fallback(SMS/LMS/MMS)이면 fallback_sms 로 표현 (UX 의미: RCS 에서 떨어짐)
             if m.channel in ("SMS", "LMS", "MMS"):
                 rstatus = "fallback_sms"
             else:
                 rstatus = "delivered"
+        elif is_uncertain(m.result_code):
+            # 실패로 집계하지만 단말에 전달됐을 수 있다 (codes.UNCERTAIN_CODES).
+            rstatus = "uncertain"
         else:
             rstatus = "failed"
     else:
@@ -173,7 +177,7 @@ def _message_to_recipient(m: Message) -> dict:
     sent_at = _fmt_kst(m.complete_time or m.report_dt)
     if sent_at and rstatus != "queued":
         row["sentAt"] = sent_at
-    if rstatus == "failed" and m.result_desc:
+    if rstatus in ("failed", "uncertain") and m.result_desc:
         row["failureReason"] = m.result_desc
     return row
 
@@ -240,6 +244,10 @@ def preview_campaign(body: CampaignPreviewBody) -> dict:
     recipients = dedupe_recipients(body.recipients)
     count = len(recipients)
     data["recipientCount"] = count
+    invalid = [r for r in body.recipients if normalize_recipient(r) is None]
+    if invalid:
+        data["error"] = str(InvalidRecipients(invalid))
+        return {"data": data}
     if not content:
         return {"data": data}
     if body.sendChannel == "sms":
@@ -442,6 +450,16 @@ async def create_campaign(
             status_code=409,
             detail={"code": "duplicate_request", "message": "중복 요청으로 처리되었습니다"},
         ) from None
+    except InvalidRecipients as exc:
+        # 어떤 값이 틀렸는지 알려 준다 — 사용자가 입력한 값이라 노출해도 된다.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_recipients",
+                "message": str(exc),
+                "fields": {"recipients": ", ".join(exc.invalid)},
+            },
+        ) from exc
     except ValueError as exc:
         # ValueError 는 사용자 입력 검증 오류로 메시지를 그대로 노출해도 안전.
         raise HTTPException(
@@ -826,17 +844,20 @@ def export_campaign_csv(
         )
 
     stmt = select(Message).where(Message.campaign_id == campaign_id)
-    # 필터: fail = result_code != SUCCESS_CODE (DONE 상태) 또는 status=FAILED
+    # 필터: fail = 전달 성공 코드가 아닌 DONE 또는 status=FAILED
     if status == "fail":
         stmt = stmt.where(
             or_(
                 Message.status == "FAILED",
-                and_(Message.status == "DONE", Message.result_code != SUCCESS_CODE),
+                and_(
+                    Message.status == "DONE",
+                    or_(Message.result_code.not_in(DELIVERED_CODES), Message.result_code.is_(None)),
+                ),
             )
         )
     elif status == "ok":
         stmt = stmt.where(
-            and_(Message.status == "DONE", Message.result_code == SUCCESS_CODE)
+            and_(Message.status == "DONE", Message.result_code.in_(DELIVERED_CODES))
         )
     stmt = stmt.order_by(Message.id.asc())
     rows = db.execute(stmt).scalars().all()

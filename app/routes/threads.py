@@ -16,7 +16,7 @@ from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.dialects.sqlite import insert
@@ -173,6 +173,8 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
             kind = "sms"
         elif pc.startswith("KAKAO"):
             kind = "kakao"
+    if m.direction == "IN" and (m.mo_type or "").upper() in ("SMSMO", "MMSMO"):
+        kind = "mms" if m.mo_type.upper() == "MMSMO" else "sms"
 
     id_suffix = f"{m.direction.lower()}-{m.mo_id or m.msg_id or 'x'}"
     row: dict = {
@@ -190,7 +192,28 @@ def _service_message_to_ts(m: ServiceChatMessage) -> dict:
         row["status"] = m.delivery
     if m.direction == "OUT":
         row["senderName"] = m.sender_name or "알 수 없음"
+    if m.title:
+        row["title"] = m.title
+    if m.attachment_status:
+        row["attachment"] = _attachment_to_ts(m)
     return row
+
+
+# 브라우저에 그대로 보여 줄 첨부 형식 — 그 밖(동영상·SVG·HTML 등)은 내려받기로만 준다.
+_INLINE_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"})
+
+
+def _attachment_to_ts(m: ServiceChatMessage) -> dict:
+    """MMS MO 첨부 상태 → {status: ready|pending|unavailable, url?, isImage?}."""
+    if m.attachment_status == "FETCHED":
+        return {
+            "status": "ready",
+            "url": f"/api/threads/mo/{m.mo_id}/content",
+            "isImage": (m.attachment_type or "").lower() in _INLINE_IMAGE_TYPES,
+        }
+    if m.attachment_status in ("PENDING", "FAILED"):
+        return {"status": "pending"}
+    return {"status": "unavailable"}
 
 
 def _campaign_label(subject: str | None, content: str | None, cid: int) -> str:
@@ -352,6 +375,31 @@ def api_get_thread(tid: str, db: Session = Depends(get_db)) -> dict | JSONRespon
     if send_channel:
         detail["defaultSendChannel"] = send_channel
     return {"data": detail}
+
+
+# ── GET /threads/mo/{id}/content — 받은 MMS 첨부 ─────────────────────────────
+
+
+@router.get("/threads/mo/{mo_id}/content", response_model=None)
+def get_mo_content(mo_id: int, db: Session = Depends(get_db)) -> Response | JSONResponse:
+    """보관한 MMS MO 첨부. 이미지만 화면에 바로 보이고 그 밖의 형식은 내려받기로 준다."""
+    mo = db.get(MoMessage, mo_id)
+    if mo is None or mo.content_fetch_status != "FETCHED" or mo.content_blob is None:
+        return JSONResponse(
+            {"error": {"code": "not_found", "message": "첨부를 찾을 수 없습니다"}},
+            status_code=404,
+        )
+    content_type = (mo.content_type or "").lower()
+    inline = content_type in _INLINE_IMAGE_TYPES
+    return Response(
+        content=mo.content_blob,
+        media_type=content_type if inline else "application/octet-stream",
+        headers={
+            "Content-Disposition": f'{"inline" if inline else "attachment"}; filename="mo-{mo.id}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 # ── POST /threads/validate-reply — 전송 없는 답장 사전 검증 ───────────────────

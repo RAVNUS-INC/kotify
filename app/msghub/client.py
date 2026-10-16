@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -86,13 +87,20 @@ def _parse_json(resp: httpx.Response) -> dict:
             status_code=resp.status_code,
         )
     try:
-        return resp.json()
+        body = resp.json()
     except (ValueError, json.JSONDecodeError) as exc:
         raise MsghubServerError(
             f"응답 파싱 실패 (HTTP {resp.status_code})",
             code="PARSE_ERROR",
             status_code=resp.status_code,
         ) from exc
+    if not isinstance(body, dict):
+        raise MsghubServerError(
+            f"응답 형식 오류 (HTTP {resp.status_code})",
+            code="PARSE_ERROR",
+            status_code=resp.status_code,
+        )
+    return body
 
 
 class MsghubClient:
@@ -140,14 +148,9 @@ class MsghubClient:
 
     async def health_check(self) -> bool:
         """공식 세션 health check. 1분 이하 주기로 호출해야 세션 알람이 동작한다."""
-        headers = await self._auth_headers()
-        resp = await self._http.put(
-            f"{self._api_base}/client/v1/healthCheck",
-            headers={"Authorization": headers["Authorization"]},
-            timeout=_TIMEOUT,
+        await self._call(
+            "PUT", f"{self._api_base}/client/v1/healthCheck", json_content=False, timeout=_TIMEOUT,
         )
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
         return True
 
     def update_rcs_config(self, brand_id: str, chatbot_id: str) -> None:
@@ -173,6 +176,33 @@ class MsghubClient:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
+
+    async def _call(
+        self, method: str, url: str, *, json_content: bool = True, **kwargs,
+    ) -> tuple[dict, int]:
+        """토큰을 붙여 요청하고 결과 코드를 검사한다. (응답 JSON, HTTP 상태) 를 돌려준다.
+
+        서버가 인증 오류(20xxx·29011·29025)로 거부하면 캐시한 토큰을 버리고 한 번만 새로 발급받아
+        다시 보낸다 — 로컬 만료 시각 전에 서버가 토큰을 무효화하면(무효화 조건은 문서에 없음)
+        예전엔 만료까지 최대 ~50분 같은 토큰으로 계속 실패했다. 거부된 요청은 접수되지 않았으므로
+        다시 보내도 중복이 없다. 두 번째도 거부되면 MsghubAuthError 를 그대로 올린다.
+        """
+        for attempt in range(2):
+            headers = await self._auth_headers()
+            if not json_content:
+                headers.pop("Content-Type", None)
+            resp = await self._http.request(method, url, headers=headers, **kwargs)
+            data = _parse_json(resp)
+            try:
+                _raise_for_response(data, resp.status_code)
+            except MsghubAuthError as exc:
+                if attempt:
+                    raise
+                log.warning("msghub 가 토큰을 거부함 [%s] — 토큰 재발급 후 1회 재시도", exc.code)
+                self._token_mgr.invalidate()
+                continue
+            return data, resp.status_code
+        raise AssertionError("unreachable")
 
     # ── SMS 발송 ─────────────────────────────────────────────────────────────
 
@@ -207,12 +237,8 @@ class MsghubClient:
         if resv_req_dt:
             body["resvReqDt"] = resv_req_dt
 
-        headers = await self._auth_headers()
         # v11 통합 RCS 기준 SMS endpoint. 구버전 /msg/v1/sms는 deprecated.
-        url = f"{self._send_base}/xms/sms/v1"
-        resp = await self._http.post(url, json=body, headers=headers)
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
+        data, _ = await self._call("POST", f"{self._send_base}/xms/sms/v1", json=body)
 
         if resv_yn == "Y":
             return ReserveResponse.from_dict(data)
@@ -257,14 +283,10 @@ class MsghubClient:
         if resv_req_dt:
             body["resvReqDt"] = resv_req_dt
 
-        headers = await self._auth_headers()
         # v11 기준 MMS/LMS endpoint (파일ID 사용 또는 본문만).
         # multipart 직접 첨부는 /xms/mms/file/v1 — 이 앱은 사전등록 방식만 사용.
         # 구버전 /msg/v1/mms는 deprecated.
-        url = f"{self._send_base}/xms/mms/v1"
-        resp = await self._http.post(url, json=body, headers=headers)
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
+        data, _ = await self._call("POST", f"{self._send_base}/xms/mms/v1", json=body)
 
         if resv_yn == "Y":
             return ReserveResponse.from_dict(data)
@@ -319,11 +341,7 @@ class MsghubClient:
         if resv_req_dt:
             body["resvReqDt"] = resv_req_dt
 
-        headers = await self._auth_headers()
-        url = f"{self._send_base}/rcs/v1.1"
-        resp = await self._http.post(url, json=body, headers=headers)
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
+        data, _ = await self._call("POST", f"{self._send_base}/rcs/v1.1", json=body)
 
         if resv_yn == "Y":
             return ReserveResponse.from_dict(data)
@@ -382,11 +400,7 @@ class MsghubClient:
         if campaign_id:
             body["campaignId"] = campaign_id
 
-        headers = await self._auth_headers()
-        url = f"{self._send_base}/rcs/bi/v1.1"
-        resp = await self._http.post(url, json=body, headers=headers)
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
+        data, _ = await self._call("POST", f"{self._send_base}/rcs/bi/v1.1", json=body)
         return SendResponse.from_dict(data)
 
     # ── 파일 업로드 ──────────────────────────────────────────────────────────
@@ -406,33 +420,78 @@ class MsghubClient:
             file_bytes: 파일 바이트
             content_type: MIME 타입
         """
-        headers = await self._auth_headers()
-        # multipart에서는 Content-Type을 직접 설정하지 않음 (httpx가 boundary 자동 설정)
-        headers.pop("Content-Type", None)
-
         req_file = json.dumps({"fileId": file_id, "wideYn": "N"})
 
-        url = f"{self._mnt_base}/file/v1/{channel}"
-        resp = await self._http.post(
-            url,
+        # multipart에서는 Content-Type을 직접 설정하지 않음 (httpx가 boundary 자동 설정)
+        data, _ = await self._call(
+            "POST",
+            f"{self._mnt_base}/file/v1/{channel}",
+            json_content=False,
             data={"reqFile": req_file},
             files={"filePart": (f"{file_id}.jpg", file_bytes, content_type)},
-            headers=headers,
         )
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
         return UploadFileResponse.from_dict(data)
 
     # ── 예약 발송 관리 ───────────────────────────────────────────────────────
 
     async def cancel_reservation(self, web_req_id: str, reason: str = "") -> None:
         """예약 발송 취소."""
-        headers = await self._auth_headers()
-        url = f"{self._api_base}/msg/v1/resv/sendCancel"
         body = {"webReqId": web_req_id, "resvCnclReason": reason or "사용자 취소"}
-        resp = await self._http.post(url, json=body, headers=headers)
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
+        await self._call("POST", f"{self._api_base}/msg/v1/resv/sendCancel", json=body)
+
+    # ── MO 컨텐츠 ────────────────────────────────────────────────────────────
+
+    async def fetch_mo_content(self, mo_key: str, *, max_bytes: int) -> tuple[bytes, str]:
+        """MMS MO 첨부 파일을 받는다 (GET /mo/v1/file/{moKey}). (본문, Content-Type) 을 돌려준다.
+
+        응답은 JSON 이 아니라 파일 본문이다. JSON 이 오면 오류 응답으로 보고 결과 코드대로 예외를 낸다
+        (토큰 거부는 _call 처럼 한 번 재발급해 다시 받는다). max_bytes 를 넘으면 MsghubBadRequest
+        ("TOO_LARGE") — 다시 받아도 같으니 재시도하지 않는다. 컨텐츠는 msghub 에 7일 보관된다.
+        """
+        url = f"{self._api_base}/mo/v1/file/{quote(mo_key, safe='')}"
+        for attempt in range(2):
+            headers = await self._auth_headers()
+            async with self._http.stream("GET", url, headers=headers) as resp:
+                content_type = resp.headers.get("content-type", "application/octet-stream")
+                if resp.status_code >= 500:
+                    raise MsghubServerError(
+                        f"HTTP {resp.status_code} 서버 오류", code="HTTP_ERROR", status_code=resp.status_code,
+                    )
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in resp.aiter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise MsghubBadRequest(
+                            f"MO 컨텐츠가 상한({max_bytes} bytes)을 넘음", code="TOO_LARGE",
+                            status_code=resp.status_code,
+                        )
+                    chunks.append(chunk)
+                status_code = resp.status_code
+            body = b"".join(chunks)
+            if "json" not in content_type.lower() and status_code == 200:
+                if not body:
+                    raise MsghubServerError("MO 컨텐츠가 비어 있음", code="EMPTY", status_code=status_code)
+                return body, content_type.split(";")[0].strip()
+            try:
+                data = json.loads(body)
+            except ValueError as exc:
+                raise MsghubServerError(
+                    f"MO 컨텐츠 응답 해석 실패 (HTTP {status_code})", code="PARSE_ERROR", status_code=status_code,
+                ) from exc
+            if not isinstance(data, dict):
+                raise MsghubServerError("MO 컨텐츠 응답 형식 오류", code="PARSE_ERROR", status_code=status_code)
+            try:
+                _raise_for_response(data, status_code)
+            except MsghubAuthError:
+                if attempt:
+                    raise
+                self._token_mgr.invalidate()
+                continue
+            raise MsghubServerError(
+                "MO 컨텐츠 대신 JSON 성공 응답이 옴", code="PARSE_ERROR", status_code=status_code,
+            )
+        raise AssertionError("unreachable")
 
     # ── 리포트 (개별 조회) ───────────────────────────────────────────────────
 
@@ -446,17 +505,16 @@ class MsghubClient:
         if len(cli_keys) > 10:
             raise ValueError(f"최대 10건 조회 가능: {len(cli_keys)}건 요청됨")
 
-        headers = await self._auth_headers()
         url = f"{self._api_base}/msg/v1/sent"
         body = {
             "cliKeyLst": [
                 {"cliKey": ck, "reqDt": dt} for ck, dt in cli_keys
             ],
         }
-        resp = await self._http.post(url, json=body, headers=headers)
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
-        return data.get("data", {}).get("cliKeyLst", [])
+        data, _ = await self._call("POST", url, json=body)
+        inner = data.get("data")
+        items = inner.get("cliKeyLst") if isinstance(inner, dict) else None
+        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
 
     # ── 통계 조회 ────────────────────────────────────────────────────────────
 
@@ -475,12 +533,9 @@ class MsghubClient:
               - ymd, projectId, apiKey, ch
               - totCnt (전체 발송), succCnt (성공), failCnt (실패)
         """
-        headers = await self._auth_headers()
         url = f"{self._mnt_base}/msg/v1/stat"
         body = {"ymd": ymd, "projectId": project_id}
-        resp = await self._http.post(url, json=body, headers=headers)
-        data = _parse_json(resp)
-        _raise_for_response(data, resp.status_code)
+        data, _ = await self._call("POST", url, json=body)
         payload = data.get("data")
         if isinstance(payload, list):
             return payload

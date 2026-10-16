@@ -343,10 +343,22 @@ class MoMessage(Base):
     raw_payload: Mapped[str] = mapped_column(Text, nullable=False)
     # 우리 서버가 수신한 일시
     received_at: Mapped[str] = mapped_column(Text, nullable=False)
+    # MMS MO 첨부 — msghub 는 7일만 보관해 받아서 보관한다 (services.mo_content).
+    # deferred — 대화방 조회가 MO 행을 읽을 때 파일 본문까지 올리지 않게.
+    content_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # NULL(첨부 없음) | PENDING | FETCHED | FAILED(재시도 대기) | EXPIRED(보관 기간·재시도 한도 초과)
+    content_fetch_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_fetch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    content_next_fetch_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 마지막 가져오기 실패 사유 (번호·본문 미포함)
+    content_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index("idx_mo_messages_mo_number", "mo_number"),
         Index("idx_mo_messages_received_at", "received_at"),
+        Index("idx_mo_messages_content_fetch", "content_fetch_status"),
     )
 
 

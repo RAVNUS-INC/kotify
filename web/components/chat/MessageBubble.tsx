@@ -6,7 +6,7 @@ export type MessageSide = 'us' | 'them';
 // 라벨 (`01:38 / RCS`) 로 표시.
 export type MessageKind = 'rcs' | 'sms' | 'lms' | 'mms' | 'kakao';
 // 발신 전달 상태 — web/types/chat.ts 의 DeliveryStatus 와 같은 값.
-export type MessageStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
+export type MessageStatus = 'pending' | 'sent' | 'failed' | 'uncertain' | 'cancelled';
 
 export type MessageBubbleProps = {
   side?: MessageSide;
@@ -54,10 +54,12 @@ const KIND_LABEL: Record<MessageKind, string> = {
 // 상태도 메타에 텍스트로 붙인다 (`01:38 / RCS / 담당자 · 실패`). 전달 성공(sent)은
 // 라벨을 늘리지 않고, 실패는 놓치지 않게 메타 라벨을 danger 색으로 — 색은 보조일 뿐.
 // 예약 취소(cancelled)는 사용자가 멈춘 것이라 실패가 아니다 — 대기처럼 기본 색.
+// 결과 불확실(uncertain)은 실패 리포트지만 전달됐을 수 있어 실패 색·말풍선을 쓰지 않는다.
 const STATUS_LABEL: Record<MessageStatus, string | null> = {
   pending: '대기',
   sent: null,
   failed: '실패',
+  uncertain: '결과 불확실',
   cancelled: '취소',
 };
 
@@ -89,7 +91,11 @@ export function MessageBubble({
     side === 'us'
       ? 'min-w-0 max-w-[40%] break-words whitespace-normal text-right'
       : 'whitespace-nowrap',
-    outStatus === 'failed' ? 'text-danger' : 'text-ink-dim',
+    outStatus === 'failed'
+      ? 'text-danger'
+      : outStatus === 'uncertain'
+        ? 'text-warning'
+        : 'text-ink-dim',
   );
 
   return (

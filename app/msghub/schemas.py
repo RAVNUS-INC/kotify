@@ -37,7 +37,7 @@ class MsghubRateLimited(MsghubError):
 
 
 class MsghubServerError(MsghubError):
-    """서버 오류 (5xx, 29012 등). 재시도 가능."""
+    """서버 오류 — HTTP 5xx·응답 파싱 실패·[재전송] 코드(codes.RETRYABLE_CODES). 접수 여부가 불확실할 수 있다."""
 
 
 class PayloadFormatError(ValueError):
@@ -93,6 +93,19 @@ class FbInfo:
 # ── 발송 응답 ────────────────────────────────────────────────────────────────
 
 
+def _first_object(value: object) -> dict:
+    """응답 data 가 객체면 그대로, 객체 배열이면 첫 객체, 그 밖엔 빈 dict.
+
+    문서상 예약·업로드 응답의 data 는 객체지만, 다른 모양이 와도 AttributeError 로 접수된 예약을
+    실패로 기록하지 않게 한다(webReqId 를 못 읽으면 빈 값 — 취소만 못 한다).
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return next((v for v in value if isinstance(v, dict)), {})
+    return {}
+
+
 @dataclass
 class SendResultItem:
     """발송 응답의 수신자별 결과."""
@@ -142,7 +155,7 @@ class ReserveResponse:
 
     @staticmethod
     def from_dict(data: dict) -> ReserveResponse:
-        inner = data.get("data") or {}
+        inner = _first_object(data.get("data"))
         return ReserveResponse(
             code=data.get("code", ""),
             message=data.get("message", ""),
@@ -164,7 +177,7 @@ class UploadFileResponse:
 
     @staticmethod
     def from_dict(data: dict) -> UploadFileResponse:
-        inner = data.get("data") or {}
+        inner = _first_object(data.get("data"))
         return UploadFileResponse(
             file_id=inner.get("fileId", ""),
             file_exp_dt=inner.get("fileExpDt", ""),
@@ -313,6 +326,22 @@ class WebhookReport:
             rpt_cnt=_count(body.get("rptCnt", 0), len(items)),
             items=items,
         )
+
+    @staticmethod
+    def from_dict_skipping_bad(data: object) -> tuple[WebhookReport, list[str]]:
+        """항목 단위로 파싱해 형식이 틀린 항목은 빼고 (리포트, 건너뛴 항목의 오류 메시지) 를 돌려준다.
+
+        본문·rptLst 자체가 틀리면 PayloadFormatError. 오류 메시지는 필드 경로와 타입만 담는다(값 없음).
+        """
+        body = _object(data, "body")
+        items: list[ReportItem] = []
+        errors: list[str] = []
+        for i, d in enumerate(_array(body.get("rptLst"), "rptLst")):
+            try:
+                items.append(ReportItem.from_dict(_object(d, f"rptLst[{i}]"), f"rptLst[{i}]"))
+            except PayloadFormatError as exc:
+                errors.append(str(exc))
+        return WebhookReport(rpt_cnt=_count(body.get("rptCnt", 0), len(items)), items=items), errors
 
 
 @dataclass

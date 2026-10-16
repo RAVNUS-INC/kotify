@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
 from app.models import Campaign, Message
-from app.msghub.codes import SUCCESS_CODE
+from app.msghub.codes import DELIVERED_CODES
 from app.services.chat import list_thread_page
 from app.util.time import fmt_kst_date, fmt_kst_hhmm
 
@@ -154,7 +154,7 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
                     (
                         and_(
                             Message.channel == "RCS",
-                            Message.result_code == SUCCESS_CODE,
+                            Message.result_code.in_(DELIVERED_CODES),
                         ),
                         1,
                     ),
@@ -163,7 +163,7 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict:
             ).label("rcs_success"),
             func.sum(
                 case(
-                    (Message.result_code == SUCCESS_CODE, 1),
+                    (Message.result_code.in_(DELIVERED_CODES), 1),
                     else_=0,
                 )
             ).label("ok"),

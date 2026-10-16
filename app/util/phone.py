@@ -49,6 +49,30 @@ def normalize_phone(raw: str) -> str | None:
     return None
 
 
+# 발송 수신번호로 받는 국내 번호 — 휴대폰(위 규칙), 0 으로 시작하는 유선·인터넷 전화 9~11자리,
+# 15xx~19xx 대표번호 8자리. msghub recvInfoLst[].phone 은 20자 이내라 이 형식이면 늘 들어간다.
+_DOMESTIC_PATTERN = re.compile(r"^(?:0\d{8,10}|1[5-9]\d{6})$")
+
+
+def normalize_recipient(raw: str) -> str | None:
+    """발송 수신번호 정규화. 숫자만 남긴 국내 번호, 형식이 틀리면 None.
+
+    구분자(공백·-·.·괄호)를 지우고 +82/82 국가번호를 0 으로 바꾼다(normalize_phone 과 같은 규칙).
+    이름·국제번호·자릿수가 틀린 값은 None — 그대로 보내면 msghub 가 요청째 거부할 수 있다.
+    """
+    if not isinstance(raw, str):
+        return None
+    mobile = normalize_phone(raw)
+    if mobile is not None:
+        return mobile
+    cleaned = _STRIP_CHARS.sub("", raw.strip())
+    if cleaned.startswith("+82"):
+        cleaned = "0" + cleaned[3:]
+    elif cleaned.startswith("82") and len(cleaned) >= 11:
+        cleaned = "0" + cleaned[2:]
+    return cleaned if _DOMESTIC_PATTERN.fullmatch(cleaned) else None
+
+
 def parse_phone_list(text: str) -> tuple[list[str], list[str]]:
     """멀티라인/콤마/세미콜론 구분 텍스트에서 번호 추출.
 

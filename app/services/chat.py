@@ -19,9 +19,11 @@ from app.msghub.codes import (
     CHAT_SESSION_CAP_KRW,
     CHAT_SESSION_MAX_UNITS,
     CHAT_SESSION_WINDOW_HOURS,
+    DELIVERED_CODES,
     REPLY_ID_SAFETY_MARGIN_MINUTES,
     REPLY_ID_VALID_HOURS,
-    SUCCESS_CODE,
+    is_delivered,
+    is_uncertain,
 )
 from app.services.compose import (
     dispatch_campaign,
@@ -44,7 +46,7 @@ class ChatMessage:
     body: str
     timestamp: str                    # ISO 문자열 (정렬 및 표시용)
     status: str | None = None         # OUT 전용
-    delivery: str | None = None       # OUT 전용: pending/sent/failed/cancelled, 모르면 None
+    delivery: str | None = None       # OUT 전용: pending/sent/failed/uncertain/cancelled, 모르면 None
     channel: str | None = None        # OUT 전용: RCS/SMS/LMS/MMS
     cost: int | None = None           # OUT 전용: 원
     telco: str | None = None          # IN 전용
@@ -53,6 +55,11 @@ class ChatMessage:
     campaign_id: int | None = None
     msg_id: int | None = None
     sender_name: str | None = None    # OUT 전용: 캠페인 작성자의 현재 표시명
+    title: str | None = None          # IN 전용: MMS MO 제목(moTitle)
+    mo_type: str | None = None        # IN 전용: SMSMO/MMSMO/RCSMO, 양방향은 message/postback
+    # IN 전용 MMS 첨부: (가져오기 상태 mo_content.PENDING/FETCHED/FAILED/EXPIRED, Content-Type)
+    attachment_status: str | None = None
+    attachment_type: str | None = None
 
 
 @dataclass
@@ -117,14 +124,15 @@ _AWAITING_REPORT_STATUSES = frozenset({"PENDING", "REG", "ING", "FB_PENDING"})
 def delivery_status(
     status: str | None, result_code: str | None, cli_key: str | None
 ) -> str | None:
-    """발신(OUT) 메시지의 전달 상태 — "pending" | "sent" | "failed" | "cancelled", 모르면 None.
+    """발신(OUT) 메시지의 전달 상태 — "pending" | "sent" | "failed" | "uncertain" | "cancelled", 모르면 None.
 
     result_code 만으로는 판정할 수 없다. 접수(REG) 행에는 접수 응답의 성공 코드(10000)가,
     FB_PENDING 행에는 실패한 RCS 리포트 코드가 남아 있어 코드만 보면 각각 전달·실패로
     오판한다. 리포트 수신(DONE)일 때만 코드로 성공을 가린다.
 
     - PENDING·REG·ING·FB_PENDING: 리포트 대기(대체 발송 중 포함) → pending
-    - DONE: 성공 코드면 sent, 아니면(코드 없음 포함) failed
+    - DONE: 전달 성공 코드면 sent, 전달됐을 수 있는 실패 코드(codes.UNCERTAIN_CODES)면 uncertain,
+      그 밖(코드 없음 포함)은 failed. uncertain 도 집계에선 실패다.
     - FAILED: 요청 단계 실패(청크·item 거부, 대체 발송 요청 실패) → failed
     - CANCELED: 예약 취소로 발송되지 않음 → cancelled. 취소 라우트(routes.campaigns.
       cancel_campaign)가 대기 행을 바꾸고, 기존 행은 alembic 0017 이 옮겨 cliKey 없는 NCP
@@ -142,7 +150,9 @@ def delivery_status(
     if status in _AWAITING_REPORT_STATUSES:
         return "pending"
     if status == "DONE":
-        return "sent" if result_code == SUCCESS_CODE else "failed"
+        if is_delivered(result_code):
+            return "sent"
+        return "uncertain" if is_uncertain(result_code) else "failed"
     if status == "FAILED":
         return "failed"
     if status == "CANCELED":
@@ -535,6 +545,10 @@ def get_thread(db: Session, caller: str, phone: str) -> list[ChatMessage]:
                 telco=mo.telco,
                 product_code=mo.product_code,
                 mo_id=mo.id,
+                title=mo.mo_title or None,
+                mo_type=mo.mo_type,
+                attachment_status=mo.content_fetch_status,
+                attachment_type=mo.content_type,
             )
         )
 
@@ -675,7 +689,7 @@ def default_send_channel(db: Session, phone: str) -> str | None:
         .where(
             Message.to_number == phone,
             Message.status == "DONE",
-            Message.result_code == SUCCESS_CODE,
+            Message.result_code.in_(DELIVERED_CODES),
         )
         .order_by(Message.id.desc())
         .limit(1)

@@ -14,7 +14,7 @@
 ## 재시도 필요 조건 (요약)
 
 - **CPS 초과**: `29002`
-- **내부 오류**: `49xxx` (전체 프리픽스), `21400`, `22004`, `23004`, `23005`, `29017`, `29019`, `29032`, `31112`, `31118`, `65999`
+- **내부 오류**: `21400`, `22004`, `23004`, `23005`, `29017`, `29019`, `29032`, `31112`, `31118`, `65999`
 - **RCS 발송 실패이나 실제 단말로 전달될 가능성이 있는 코드**: `41007`, `54004`, `55806`, `55820`
 - **HTTP Status 5xx 에러**
 
@@ -562,12 +562,15 @@
 ## 앱 내 재시도 처리 요약
 
 - `app/msghub/codes.py`
-  - `RETRYABLE_CODES` — 명시 코드 frozenset
-  - `_RETRY_PREFIXES = ("49",)` — 49xxx 전체 프리픽스
-  - `is_retryable(code)` — 위 둘을 조합
+  - `RESEND_CODES`(요청 단위 내부 오류) · `RATE_LIMIT_CODE`(29002) · `MAYBE_DELIVERED_CODES`(41007 등)
+  - `RETRYABLE_CODES` — 위 셋의 합, `is_retryable(code)` 로 검사. 현행 코드표에 49xxx 대역이 없어 49 접두사 규칙은 지웠다
+  - `DELIVERED_CODES`(10000·30124)·`UNCERTAIN_CODES`(단말 전달 가능 4개 + 32114·55821·56003) — 리포트 결과 분류
+- `app/services/compose.py` (`_send_with_resend`)
+  - `RESEND_CODES` → 5초 뒤 같은 cliKey 로 1회 재발송, 일반 모드 29002 → 30초 뒤 1회
+  - `MAYBE_DELIVERED_CODES` → 재발송하지 않음
 - `app/msghub/client.py` (`_raise_for_response`)
   - HTTP 5xx → `MsghubServerError` 자동 재시도
-  - 401 (20xxx, 29011, 29025) → `MsghubAuthError` 토큰 재발급
+  - 401 (20xxx, 29011, 29025) → `MsghubAuthError`. `MsghubClient._call` 이 토큰을 버리고 1회 재발급·재요청
   - 29002 (CPS 초과) → `MsghubRateLimited`
   - 기타 is_retryable → `MsghubServerError`
   - 그 외 → `MsghubBadRequest` (재시도 불가)

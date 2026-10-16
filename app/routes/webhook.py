@@ -37,7 +37,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from starlette.background import BackgroundTask
+from starlette.background import BackgroundTasks
 
 from app.config import settings
 from app.db import get_db
@@ -49,7 +49,7 @@ from app.msghub.schemas import (
     json_type,
 )
 from app.security.settings_store import SettingsStore
-from app.services import events
+from app.services import events, mo_content
 from app.services.report import (
     awaiting_record,
     process_report,
@@ -100,6 +100,8 @@ def _verify_token(token: str, db: Session) -> bool:
 # 키 자리에 오거나 키에 섞이면(tel01012345678 등) 값이 새기 때문이다.
 _LOGGABLE_KEY = re.compile(r"[A-Za-z_]{1,64}")
 _SHAPE_MAX_KEYS = 20
+# MO 웹훅 본문에서 아는 목록 키 — 하나도 없으면 모르는 형식으로 경고한다.
+_KNOWN_MO_KEYS = frozenset({"moLst", "moCnt", "rcsBiLst", "rcsBiCnt", "rcsBiaLst", "rcsBirLst"})
 
 
 def _payload_shape(body: object) -> str:
@@ -159,13 +161,21 @@ async def receive_report(
         return JSONResponse({"error": "invalid json"}, status_code=400)
 
     try:
-        report = WebhookReport.from_dict(body)
+        report, bad_items = WebhookReport.from_dict_skipping_bad(body)
     except Exception as exc:
-        # 원문에는 수신 번호가 있다 — 실패 위치와 구조만 남긴다.
-        log.warning(
-            "웹훅 리포트 파싱 실패: %s — 구조 %s", _parse_failure(exc), _payload_shape(body)
+        # 원문에는 수신 번호가 있다 — 실패 위치와 구조만 남긴다. 형식 오류는 다시 받아도 같으므로
+        # 200 으로 받는다 — 400 이면 msghub 가 72시간 동안 같은 배치를 재전송한다.
+        log.error(
+            "웹훅 리포트 형식 오류 — 반영하지 않고 받음: %s — 구조 %s",
+            _parse_failure(exc), _payload_shape(body),
         )
-        return JSONResponse({"error": "invalid report format"}, status_code=400)
+        return JSONResponse({"status": "invalid report format"}, status_code=200)
+    if bad_items:
+        # 형식이 틀린 항목만 빼고 나머지는 반영한다 (같은 이유로 재전송을 받지 않는다).
+        log.error(
+            "웹훅 리포트 형식 오류 항목 %d건 건너뜀: %s — 구조 %s",
+            len(bad_items), "; ".join(bad_items[:3]), _payload_shape(body),
+        )
 
     if not report.items:
         return JSONResponse({"status": "no items"}, status_code=200)
@@ -317,7 +327,11 @@ async def receive_mo(
         )
 
     if not payload.items:
-        # rcsBiaLst/rcsBirLst만 있는 heartbeat/ack 등에서 정상 경로 — success 반환
+        # rcsBiaLst/rcsBirLst만 있는 heartbeat/ack 등에서 정상 경로 — success 반환.
+        # 아는 목록 키가 하나도 없으면 형식이 바뀐 것일 수 있다 — 성공으로 답하면 msghub 큐에서 지워지므로
+        # 구조(키·타입, 값 없음)를 남긴다.
+        if isinstance(body, dict) and not _KNOWN_MO_KEYS.intersection(body):
+            log.warning("모르는 MO 페이로드 형식 — 구조 %s", _payload_shape(body))
         return JSONResponse(
             {"code": "10000", "message": "success"}, status_code=200
         )
@@ -421,6 +435,7 @@ async def receive_mo(
                 mo_recv_dt=item.mo_recv_dt or None,
                 raw_payload=raw,
                 received_at=now,
+                content_fetch_status=mo_content.initial_status(item, mo_key),
             )
             db.add(mo)
             saved_mos.append(mo)
@@ -467,14 +482,18 @@ async def receive_mo(
 
     # outbox HTTP 전송은 응답 반환 후 수행한다. 네트워크 장애면 FAILED로 남고
     # 주기 작업이 재시도한다. 같은 MO는 UNIQUE(mo_id)라 중복 알림 행이 생기지 않는다.
-    background: BackgroundTask | None = None
+    background = BackgroundTasks()
     if delivery_ids:
         from app.services.notify import process_n8n_outbox
 
-        background = BackgroundTask(process_n8n_outbox, db)
+        background.add_task(process_n8n_outbox, db)
+    # MMS 첨부는 응답을 늦추지 않게 응답 뒤 받는다. 실패하면 재조정 루프가 7일 안에서 다시 받는다.
+    content_ids = [mo.id for mo in saved_mos if mo.content_fetch_status == mo_content.PENDING]
+    if content_ids:
+        background.add_task(mo_content.fetch_new, content_ids)
 
     return JSONResponse(
         {"code": "10000", "message": "success"},
         status_code=200,
-        background=background,
+        background=background if background.tasks else None,
     )

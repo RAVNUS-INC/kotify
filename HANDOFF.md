@@ -1,14 +1,12 @@
 # Handoff — 현재 상황 요약
 
-## 2026-10-16 — msghub 코드 리뷰의 확정 결함 4건 수정 (브랜치 `fix/msghub-review-deterministic`, 푸시·main 미머지)
+## 2026-10-16 — msghub 코드 리뷰 지적 전부 수정 (브랜치 `fix/msghub-review-deterministic`, 푸시·main 미머지)
 
-- 근거: msghub 현행 문서 기준 코드 리뷰(`claudedocs/review/msghub-code-review-20261016.md`, 리뷰 세션 워크트리에만 있음) 중 msghub 미문서 동작에 기대지 않는 것만. 리뷰 #1·#2·#5·#8 과 참고 항목 "인증 ReadError·data.token 누락".
-- `app/msghub/auth.py`: `AuthError` 를 `MsghubAuthError` 하위로 — 토큰 발급·갱신 실패도 발송 루프의 `except MsghubAuthError` 를 타서 첫 청크에서 캠페인을 멈춘다(예전엔 청크마다 재인증 → 50010 위험). `status_code` 는 없음이라 `_explicit_rejection_code` 판정·양방향 답장 경로는 바뀌지 않는다. 이미지 업로드 라우트는 500 대신 기존 502 `upload_failed`. 재시도 대상을 `httpx.TransportError`(ReadError·RemoteProtocolError 포함)로 넓히고, 응답이 객체가 아니거나 `data.token`·`refreshToken` 이 없으면 `AuthError("PARSE_ERROR")`.
-- 같은 파일 `get_token`: 사전 갱신(만료 10분 전)·재인증이 실패해도 access token 이 30초 넘게 남았으면 그 토큰을 쓰고, 30초 동안 갱신을 다시 시도하지 않는다(`ACCESS_MIN_REMAINING`·`RENEW_RETRY_AFTER`). 남은 시간이 그보다 적으면 예전처럼 예외.
-- `app/routes/webhook.py` MO: 같은 배치 안 같은 moKey(또는 같은 대체 키)는 중복으로 세고 건너뛴다(`batch_keys`). 예전엔 `autoflush=False` 라 사전 조회가 앞 행을 못 봐 UNIQUE 위반 → 배치 전체 롤백·20004.
-- `app/services/compose.py` 일반(sms) 모드: 29002 면 30초(`_RATE_LIMIT_WAIT`, RCS 경로와 공유) 뒤 같은 cliKey 로 한 번 더 보낸다(요청 단위 거부라 접수분 0 — RCS 경로와 같은 근거). 재시도도 실패하면 기존대로 명시 거부 기록.
-- 테스트: `tests/test_msghub_token_manager.py`(신규 11개), `test_mo_webhook.py`·`test_dispatch_ratelimit.py` 에 3개. 새 테스트는 수정 전 코드에서 실패함을 확인. 로컬 pytest 862개·ruff·웹 typecheck·lint·Vitest 226개 통과. 운영 확인 없음.
-- 손대지 않은 것(제품 결정·msghub 동작 확인 필요): 리포트 성공불확실 코드(#4), MO 첨부·제목(#6), 수신번호 검증(#7), 서버 토큰 거부 시 캐시 무효화(#3), 인증 실패로 멈춘 캠페인이 DISPATCHING 으로 남는 기존 한계.
+- 근거·항목별 결과: [claudedocs/review/msghub-code-review-20261016.md](claudedocs/review/msghub-code-review-20261016.md) 맨 위 "처리 결과". 1차 커밋 `5062ecd`(리뷰 #1·#2·#5·#8), 2차 커밋은 나머지 전부(#3·#4·#6·#7·참고 항목). 보류였던 제품 결정은 리뷰 세션이 정한 기본안대로 했다.
+- 주요 동작 변화: 토큰 거부 시 1회 재발급·재요청(#3) / `30124` 성공, 성공 불확실·단말 전달 가능 코드는 실패지만 대체 SMS 없음·'결과 불확실' 표시(#4) / MMS MO 첨부를 받아 DB 보관·대화방 표시, `moTitle` 표시(#6, **alembic `0026` 마이그레이션**) / 수신번호를 서버가 정규화·검증, 틀리면 400 `invalid_recipients`(#7) / health check 별도 태스크 50초 / 요청 단위 [재전송] 코드 5초 뒤 1회 재발송 / 리포트 형식 오류는 200(정상 항목은 반영).
+- 검증(로컬): pytest 915개·ruff, 웹 typecheck·lint·Vitest 26파일 233개. 새 테스트 `test_msghub_token_manager`·`test_msghub_client_retry`·`test_report_result_codes`·`test_recipient_normalization`·`test_mo_content`·`test_webhook_report_format`, 기존 `test_dispatch_ratelimit`·`test_mo_webhook`·`test_pii_masking`(리포트 형식 오류 200 으로 기대값 변경)·`test_thread_read_migration`(head 0026). **운영·msghub 실제 응답으로는 확인하지 않았다** — 특히 `/mo/v1/file` 응답 형식(파일 본문/JSON 오류)과 한 MO 에 첨부가 여럿일 때 동작은 문서에 없다.
+- 배포 시: `0026` 이 기존 MO 중 `content_cnt > 0`·실제 moKey 인 행을 PENDING 으로 표시한다. 받은 지 7일 지난 건은 첫 주기에 EXPIRED 로 닫히고(요청 안 함), 7일 안의 건은 재조정 루프가 20건씩 받는다.
+- 남은 확인 필요(코드 변경 없음): mnt-api 토큰 공용 여부, chatbotId 다중 채널, 직접 LMS/MMS 빈 제목 허용 여부, 본문 `#{..}`·`{{..}}` 치환 여부. 인증 실패로 멈춘 캠페인이 DISPATCHING 으로 남는 기존 한계도 그대로다.
 
 ## 2026-10-16 — 녹음 재생 팝업·팩스 기본 해상도 선명 운영 배포(`bb5e4c3`)
 

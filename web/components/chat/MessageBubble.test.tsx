@@ -41,6 +41,18 @@ describe('MessageBubble 발신 전달 상태', () => {
     expect(failed).not.toHaveClass('bg-brand-soft');
   });
 
+  it('결과 불확실은 실패와 구분해 주의 색 라벨만 붙이고 말풍선은 실패 색을 쓰지 않는다', () => {
+    render(
+      <MessageBubble side="us" kind="rcs" status="uncertain" timestamp="01:38" senderName="가상 담당가">
+        답장입니다
+      </MessageBubble>,
+    );
+    expect(screen.getByText('01:38 / RCS / 가상 담당가 · 결과 불확실')).toHaveClass('text-warning');
+    const bubble = screen.getByLabelText('보낸 RCS 메시지, 전송 결과 불확실');
+    expect(bubble).toHaveClass('bg-brand-soft');
+    expect(bubble).not.toHaveClass('bg-danger-bg');
+  });
+
   it('결과를 기다리는 발신(SMS 대체 발송 중 포함)은 대기로 표시한다', () => {
     render(
       <MessageBubble side="us" kind="sms" status="pending" timestamp="01:38" senderName="가상 담당가">

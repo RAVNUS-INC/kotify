@@ -7,9 +7,10 @@ export type SendChannel = 'rcs' | 'sms';
 /**
  * 발신 메시지 전달 상태. pending = 결과 리포트 대기(SMS 대체 발송 중 포함),
  * sent = 전달 성공 리포트, failed = msghub 요청 실패 또는 실패 리포트,
+ * uncertain = 실패 리포트지만 단말에 전달됐을 수 있음(성공 불확실 등, 대체 SMS 없음),
  * cancelled = 예약 취소로 발송되지 않음.
  */
-export type DeliveryStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
+export type DeliveryStatus = 'pending' | 'sent' | 'failed' | 'uncertain' | 'cancelled';
 
 export type ChatMessage = {
   id: string;
@@ -24,7 +25,18 @@ export type ChatMessage = {
   status?: DeliveryStatus;
   /** 발신(us) 전용. 캠페인 작성자의 현재 표시명. */
   senderName?: string;
+  /** 수신(them) 전용. MMS 제목. */
+  title?: string;
+  /** 수신(them) 전용. MMS 첨부 — ready 면 url 로 받는다(이미지면 화면에 바로 보인다). */
+  attachment?: MessageAttachment;
 };
+
+export type MessageAttachment =
+  | { status: 'ready'; url: string; isImage: boolean }
+  /** msghub 에서 받아 오는 중(실패 후 재시도 대기 포함). */
+  | { status: 'pending' }
+  /** 보관 기간(7일)이 지났거나 받을 수 없음. */
+  | { status: 'unavailable' };
 
 export type ChatThread = {
   id: string;

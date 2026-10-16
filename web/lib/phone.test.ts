@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatPhone } from './phone';
+import { formatPhone, isSendableNumber } from './phone';
 
 describe('formatPhone', () => {
   it('휴대폰 11자리 → 010-1234-5678', () => {
@@ -42,3 +42,18 @@ describe('formatPhone', () => {
     expect(formatPhone('abc')).toBe('');
   });
 });
+
+describe('isSendableNumber', () => {
+  it('하이픈·공백·국가번호가 있어도 국내 번호면 받는다', () => {
+    for (const ok of ['010-1234-5678', '01012345678', '+82 10 1234 5678', '02-123-4567', '031-1234-5678', '1588-1234']) {
+      expect(isSendableNumber(ok), ok).toBe(true);
+    }
+  });
+
+  it('이름·국제번호·자릿수가 틀린 값은 거부한다', () => {
+    for (const bad of ['홍길동', '+1 415 555 0100', '0101234', '010123456789012', '']) {
+      expect(isSendableNumber(bad), bad).toBe(false);
+    }
+  });
+});
+

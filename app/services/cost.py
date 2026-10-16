@@ -9,7 +9,7 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
 from app.models import Campaign, Message
-from app.msghub.codes import SUCCESS_CODE, allocate_chat_session_costs
+from app.msghub.codes import DELIVERED_CODES, allocate_chat_session_costs, is_delivered
 from app.util.time import parse_mixed_ts
 
 
@@ -24,7 +24,7 @@ def apply_chat_session_cap(db: Session, changed_messages: Iterable[Message]) -> 
     for message in changed_messages:
         if not (
             message.status == "DONE"
-            and message.result_code == SUCCESS_CODE
+            and is_delivered(message.result_code)
             and message.channel == "RCS"
             and message.product_code == "CHAT"
         ):
@@ -41,7 +41,7 @@ def apply_chat_session_cap(db: Session, changed_messages: Iterable[Message]) -> 
         .where(
             tuple_(Campaign.caller_number, Message.to_number).in_(pairs),
             Message.status == "DONE",
-            Message.result_code == SUCCESS_CODE,
+            Message.result_code.in_(DELIVERED_CODES),
             Message.channel == "RCS",
             Message.product_code == "CHAT",
         )

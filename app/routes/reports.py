@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import require_setup_complete, require_user
 from app.db import get_db
 from app.models import Campaign, Message, MoMessage
-from app.msghub.codes import SUCCESS_CODE
+from app.msghub.codes import DELIVERED_CODES
 from app.util.csv_safe import safe_csv_cell as _safe
 
 router = APIRouter(
@@ -188,7 +188,7 @@ def _channels_breakdown(
                 Campaign.created_at >= s,
                 Campaign.created_at < e,
                 Message.status == "DONE",
-                Message.result_code == SUCCESS_CODE,
+                Message.result_code.in_(DELIVERED_CODES),
             )
         )
         .group_by(Message.channel)

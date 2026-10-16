@@ -18,7 +18,13 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Campaign, Message
-from app.msghub.codes import SUCCESS_CODE, calculate_cost
+from app.msghub.codes import (
+    DELIVERED_CODES,
+    SUCCESS_CODE,
+    calculate_cost,
+    is_delivered,
+    is_uncertain,
+)
 from app.msghub.schemas import RecvInfo, ReportItem, SendResponse
 from app.services.cost import apply_chat_session_cap
 from app.util.phone import mask_phone
@@ -151,7 +157,7 @@ def process_report(db: Session, items: list[ReportItem]) -> tuple[int, list[Mess
             updated_msgs.append(msg)
             campaign_ids.add(msg.campaign_id)
             processed += 1
-            if item.result_code != SUCCESS_CODE:
+            if not is_delivered(item.result_code):
                 failed_msgs.append(msg)
 
     fallback_needed = _mark_chat_fallback(db, failed_msgs)
@@ -220,7 +226,7 @@ def process_sent_query(
             continue
 
         if sq.status == "DONE" and sq.result_code:
-            success = sq.result_code == SUCCESS_CODE
+            success = is_delivered(sq.result_code)
             msg.status = "DONE"
             msg.result_code = sq.result_code
             msg.result_desc = sq.result_code_desc
@@ -362,6 +368,8 @@ def _mark_chat_fallback(db: Session, failed_msgs: list[Message]) -> list[Message
 
     대화방 답장(compose.dispatch_chat_reply)은 msghub 가 자동 대체하지 않아 send_sms_fallback 이
     보낸다. -fb 행은 그 대체 SMS 의 결과라 제외한다 — 답장 하나에 대체 SMS 는 한 번이다.
+    전달됐을 수 있는 실패 코드(codes.UNCERTAIN_CODES)도 제외한다 — 대체 SMS 를 보내면 고객이 같은
+    답장을 두 번 받을 수 있다. 그 행은 실패로 확정하고 화면에 '결과 불확실' 로 보인다.
     """
     if not failed_msgs:
         return []
@@ -376,7 +384,11 @@ def _mark_chat_fallback(db: Session, failed_msgs: list[Message]) -> list[Message
     )
     fallback_needed: list[Message] = []
     for msg in failed_msgs:
-        if msg.campaign_id in chat_cids and not msg.cli_key.endswith("-fb"):
+        if (
+            msg.campaign_id in chat_cids
+            and not msg.cli_key.endswith("-fb")
+            and not is_uncertain(msg.result_code)
+        ):
             msg.status = "FB_PENDING"
             fallback_needed.append(msg)
     return fallback_needed
@@ -519,7 +531,7 @@ def _update_message(msg: Message, item: ReportItem) -> bool:
     if item.cli_key == f"{msg.cli_key}-fb":
         msg.cli_key = item.cli_key
 
-    success = item.result_code == SUCCESS_CODE
+    success = is_delivered(item.result_code)
 
     msg.status = "DONE"
     msg.msg_key = item.msg_key or msg.msg_key
@@ -584,9 +596,9 @@ def _refresh_campaign_counters(db: Session, campaign_id: int) -> None:
         return
 
     # SQL aggregate — O(1) 메모리, DB에서 직접 집계
-    is_success = (Message.status == "DONE") & (Message.result_code == SUCCESS_CODE)
+    is_success = (Message.status == "DONE") & (Message.result_code.in_(DELIVERED_CODES))
     is_fail = (Message.status.in_(("FAILED", "DONE"))) & (
-        (Message.result_code != SUCCESS_CODE) | (Message.result_code.is_(None))
+        (Message.result_code.not_in(DELIVERED_CODES)) | (Message.result_code.is_(None))
     )
     is_canceled = Message.status == "CANCELED"
     is_rcs = (Message.channel == "RCS") & is_success

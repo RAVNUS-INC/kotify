@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models import Campaign, Message, MsghubRequest, NotificationDelivery, User
-from app.msghub.codes import SUCCESS_CODE
+from app.msghub.codes import SUCCESS_CODE, is_delivered
 from app.security.settings_store import SettingsStore
 from app.util.time import parse_mixed_ts
 
@@ -105,7 +105,7 @@ def lookup_last_sender(db: Session, phone: str) -> dict | None:
     for row in rows:
         status = row.status
         if status == "DONE":
-            if row.result_code != SUCCESS_CODE:
+            if not is_delivered(row.result_code):
                 continue
             timestamp_raw = row.complete_time or row.sent_at or row.created_at
         elif status == "DELIVERED":

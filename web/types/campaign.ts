@@ -35,6 +35,8 @@ export type RecipientStatus =
   | 'read'
   | 'replied'
   | 'failed'
+  /** 실패로 집계했지만 단말에 전달됐을 수 있는 결과 코드(성공 불확실 등). */
+  | 'uncertain'
   | 'fallback_sms'
   /** 예약 취소로 발송되지 않음. */
   | 'cancelled';

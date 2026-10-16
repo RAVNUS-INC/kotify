@@ -20,7 +20,7 @@ import {
   toDigits,
   type HiworksLookupResult,
 } from '@/lib/hiworks-client';
-import { formatPhone } from '@/lib/phone';
+import { formatPhone, isSendableNumber } from '@/lib/phone';
 import type { SenderNumber } from '@/types/number';
 import { AttachmentPicker } from './AttachmentPicker';
 
@@ -196,14 +196,24 @@ export function ComposeForm() {
     };
   }, [recipients]);
 
+  // 서버도 같은 규칙으로 거부(400)하지만, 칩을 넣는 즉시 어떤 값이 틀렸는지 보여 준다.
+  const invalidRecipients = useMemo(
+    () => recipients.filter((r) => !isSendableNumber(r)),
+    [recipients],
+  );
   const recipientsState: 'warn' | 'err' | undefined =
-    recipients.length > 1000 ? 'err' : recipients.length > 500 ? 'warn' : undefined;
+    recipients.length > 1000 || invalidRecipients.length > 0
+      ? 'err'
+      : recipients.length > 500
+        ? 'warn'
+        : undefined;
 
   const canSubmit =
     sender !== '' &&
     !senderLoading &&
     recipients.length > 0 &&
     recipients.length <= 1000 &&
+    invalidRecipients.length === 0 &&
     trimmedMessage !== '' &&
     estimate?.valid === true &&
     !currentPreview?.failure &&
@@ -328,7 +338,14 @@ export function ComposeForm() {
             label="수신자"
             htmlFor="recipients"
             required
-            hint="이름·번호·그룹 입력 후 Enter 또는 쉼표. 캠페인당 최대 1,000명"
+            hint="휴대폰·전화번호 입력 후 Enter 또는 쉼표(하이픈 있어도 됨). 캠페인당 최대 1,000명"
+            error={
+              invalidRecipients.length > 0
+                ? `번호 형식이 틀렸습니다: ${invalidRecipients.slice(0, 5).join(', ')}${
+                    invalidRecipients.length > 5 ? ` 외 ${invalidRecipients.length - 5}건` : ''
+                  }`
+                : undefined
+            }
             counter={{
               value: `${recipients.length} / 1,000명`,
               state: recipientsState,

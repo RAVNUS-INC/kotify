@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { ChatThreadDetail } from '@/types/chat';
 import { markReadClient, withDateDividers } from '@/lib/chat';
 import { ChatDateDivider } from './ChatDateDivider';
+import { MessageAttachmentView } from './MessageAttachmentView';
 import { MessageBubble } from './MessageBubble';
 import { ThreadComposer } from './ThreadComposer';
 
@@ -68,6 +69,8 @@ export function ThreadView({ thread }: ThreadViewProps) {
                 timestamp={m.time}
                 senderName={m.senderName}
               >
+                {m.title && <strong className="block font-semibold">{m.title}</strong>}
+                {m.attachment && <MessageAttachmentView attachment={m.attachment} />}
                 {m.text}
               </MessageBubble>
             </Fragment>

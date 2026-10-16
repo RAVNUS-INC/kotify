@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 
 from app.models import Message
 from app.msghub.codes import SUCCESS_CODE
-from app.msghub.schemas import MsghubRateLimited, SendResponse, SendResultItem
+from app.msghub.schemas import MsghubRateLimited, MsghubServerError, SendResponse, SendResultItem
 from app.services.compose import dispatch_campaign
 
 
@@ -159,3 +159,90 @@ async def test_direct_mode_rate_limited_twice_fails_chunk(db_session, sample_use
     ).scalars().all()
     assert len(failed) == 10 and all(m.result_code == "29002" for m in failed)
     assert (campaign.state, campaign.fail_count, campaign.pending_count) == ("PARTIAL_FAILED", 10, 1)
+
+
+class _DirectServerErrorClient:
+    """일반(sms) 모드 send_sms — 첫 호출은 지정한 [재전송]·불확실 코드 오류, 그 뒤는 성공."""
+
+    def __init__(self, code: str):
+        self.code = code
+        self.calls = 0
+
+    async def send_sms(self, *, callback, msg, recv_list, resv_yn=None, resv_req_dt=None):
+        self.calls += 1
+        if self.calls == 1:
+            raise MsghubServerError(f"[{self.code}] 내부 오류", code=self.code, status_code=200)
+        return SendResponse(code="10000", message="OK", items=[
+            SendResultItem(cli_key=r.cli_key, msg_key="mk", phone=r.phone, code=SUCCESS_CODE, message="성공")
+            for r in recv_list
+        ])
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_resends_request_level_resend_code(db_session, sample_user, sample_caller, monkeypatch):
+    """요청 단위 [재전송] 내부 오류(21400 등)는 잠시 뒤 한 번 더 보낸다 — 예전엔 접수 불확실로 두고 재조정만 기다렸다."""
+    waits: list[float] = []
+
+    async def _record_sleep(seconds):
+        waits.append(seconds)
+    monkeypatch.setattr("app.services.compose.asyncio.sleep", _record_sleep)
+
+    client = _DirectServerErrorClient("21400")
+    campaign = await _dispatch_direct(db_session, sample_user, sample_caller, client, ["01000000001"])
+
+    assert client.calls == 2 and waits == [5]
+    assert (campaign.state, campaign.fail_count) == ("DISPATCHED", 0)
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_does_not_resend_maybe_delivered_code(db_session, sample_user, sample_caller, monkeypatch):
+    """단말 전달 가능성이 있는 코드(41007 등)는 이중 수신 우려로 다시 보내지 않는다."""
+    async def _instant_sleep(_seconds):
+        return None
+    monkeypatch.setattr("app.services.compose.asyncio.sleep", _instant_sleep)
+
+    client = _DirectServerErrorClient("41007")
+    campaign = await _dispatch_direct(db_session, sample_user, sample_caller, client, ["01000000001"])
+
+    assert client.calls == 1
+    assert campaign.fail_count == 1
+
+
+class _RcsServerErrorClient:
+    def __init__(self):
+        self.calls = 0
+
+    async def send_rcs(self, *, recv_list, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise MsghubServerError("[29019] db error", code="29019", status_code=200)
+        return SendResponse(code="10000", message="OK", items=[
+            SendResultItem(cli_key=r.cli_key, msg_key="mk", phone=r.phone, code=SUCCESS_CODE, message="성공")
+            for r in recv_list
+        ])
+
+
+@pytest.mark.asyncio
+async def test_rcs_mode_resends_request_level_resend_code(db_session, sample_user, sample_caller, monkeypatch):
+    async def _instant_sleep(_seconds):
+        return None
+    monkeypatch.setattr("app.services.compose.asyncio.sleep", _instant_sleep)
+
+    client = _RcsServerErrorClient()
+    campaign = await dispatch_campaign(
+        db=db_session, msghub_client=client, created_by=sample_user.sub,
+        caller_number=sample_caller.number, content="안내", recipients=["01000000001"],
+        message_type="SMS",
+    )
+    assert client.calls == 2
+    assert campaign.fail_count == 0
+
+
+def test_fallback_title_is_single_line():
+    from app.services.compose import _build_fallback
+
+    long_body = "\n  첫 줄 제목입니다\n둘째 줄 " + "가" * 100
+    [fb] = _build_fallback("long", long_body, None, None)
+    assert fb.title == "첫 줄 제목입니다"
+    [fb] = _build_fallback("long", long_body, "제목\n개행", None)
+    assert "\n" not in fb.title

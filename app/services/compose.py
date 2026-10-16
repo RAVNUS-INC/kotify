@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Attachment, Caller, Campaign, Message, MsghubRequest
 from app.msghub.client import CHUNK_SIZE
-from app.msghub.codes import SUCCESS_CODE
+from app.msghub.codes import RESEND_CODES, SUCCESS_CODE
 from app.msghub.schemas import (
     FbInfo,
     MsghubAuthError,
@@ -30,7 +30,7 @@ from app.msghub.schemas import (
 )
 from app.services import audit
 from app.services.report import _refresh_campaign_counters, awaiting_record
-from app.util.phone import normalize_phone, parse_phone_list
+from app.util.phone import normalize_phone, normalize_recipient, parse_phone_list
 from app.util.text import classify_message_type, measure_bytes
 from app.util.time import parse_mixed_ts
 
@@ -82,6 +82,8 @@ MAX_RECIPIENTS_PER_CAMPAIGN = 1000
 
 # 29002(CPS 초과) 뒤 같은 청크를 다시 보내기 전 대기 (초). RCS·일반 모드 모두 한 번만 재시도한다.
 _RATE_LIMIT_WAIT = 30
+# 요청 단위 [재전송] 내부 오류(codes.RESEND_CODES) 뒤 다시 보내기 전 대기 (초).
+_RESEND_WAIT = 5
 
 # 청크를 보내는 중인 캠페인 id. 캠페인은 첫 청크 전에 RESERVED 로 커밋돼 목록에서 취소할 수
 # 있는데, 그때 취소가 끼면 이미 접수된 청크 행만 보고 전체 취소로 마무리해 뒤 청크가 예약
@@ -95,18 +97,39 @@ def is_dispatching(campaign_id: int) -> bool:
     return campaign_id in _dispatching
 
 
-def dedupe_recipients(recipients: list[str]) -> list[str]:
-    """수신자 중복 제거 — 순서 보존 (C2).
+class InvalidRecipients(ValueError):
+    """국내 번호 형식이 아닌 수신자가 있다. invalid 에 입력 그대로의 값을 순서대로 담는다."""
 
-    동일 번호가 여러 번 입력돼도(엑셀 복붙 등) 1건만 발송하여
-    중복 발송·이중 과금을 방지한다. dict.fromkeys 로 첫 등장 순서를 유지한다.
+    def __init__(self, invalid: list[str]) -> None:
+        self.invalid = invalid
+        shown = ", ".join(invalid[:5]) + (f" 외 {len(invalid) - 5}건" if len(invalid) > 5 else "")
+        super().__init__(f"수신번호 형식이 올바르지 않습니다: {shown}")
 
-    주의: 문자열 동일성 기준이다. "010-1234-5678" 과 "01012345678" 은
-    서로 다른 문자열이라 별개로 취급된다. 저장 시 to_number 는
-    _norm_to_number 로 숫자만 통일하지만(대화방 그룹핑 키), dedupe 는 사용자
-    입력 원본 기준이라 여기선 정규화하지 않는다.
+
+def normalize_recipients(recipients: list[str]) -> list[str]:
+    """수신번호를 숫자만 남긴 국내 번호로 정규화하고 중복을 없앤다 — 순서 보존 (C2).
+
+    정규화한 값으로 비교하므로 "010-1234-5678" 과 "01012345678" 은 한 번만 보낸다(예전엔 입력
+    문자열 기준이라 둘 다 발송·과금됐다). 형식이 틀린 값이 하나라도 있으면 InvalidRecipients —
+    잘못된 번호가 섞인 청크는 msghub 가 요청째 거부해 같은 청크의 정상 수신자까지 실패할 수 있다.
     """
-    return list(dict.fromkeys(recipients))
+    normalized: list[str] = []
+    invalid: list[str] = []
+    for raw in recipients:
+        value = normalize_recipient(raw)
+        if value is None:
+            invalid.append(str(raw))
+        else:
+            normalized.append(value)
+    if invalid:
+        raise InvalidRecipients(invalid)
+    return list(dict.fromkeys(normalized))
+
+
+def dedupe_recipients(recipients: list[str]) -> list[str]:
+    """형식이 맞는 수신번호만 정규화해 중복 없이 센다 — 견적(preview)용. 형식 검사는 하지 않는다."""
+    normalized = (normalize_recipient(r) for r in recipients)
+    return list(dict.fromkeys(v for v in normalized if v is not None))
 
 
 def _norm_to_number(phone: str) -> str:
@@ -226,8 +249,38 @@ def _build_fallback(
 
     # 장문: MMS 채널로 title+body 전송 (파일 없음 = LMS 동작)
     # title 없으면 content 앞부분에서 추출하거나 기본값 사용
-    fallback_title = subject or (content[:20].strip() or "알림")
+    fallback_title = _one_line_title(subject or content)
     return [FbInfo(ch="MMS", msg=content, title=fallback_title)]
+
+
+def _one_line_title(text: str) -> str:
+    """LMS·MMS 제목 — 첫 줄 앞 20자. 개행이 들어가면 단말마다 제목 표시가 깨진다."""
+    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return first[:20].strip() or "알림"
+
+
+async def _send_with_resend(call, chunk_idx: int, *, retry_rate_limit: bool):
+    """청크 요청을 보내고, 공식 코드표가 [재전송] 이라 한 요청 단위 거부면 잠시 뒤 한 번 더 보낸다.
+
+    (응답, 재시도했는가) 를 돌려준다. 내부 오류(RESEND_CODES)는 요청이 접수되지 않은 것이라 같은 cliKey 로
+    다시 보내도 중복이 없다 — 예전엔 접수 불확실(FAILED, 코드 없음)로 두고 재조정에만 맡겼다. 29002 는
+    retry_rate_limit 일 때만 여기서 다시 보낸다(RCS 경로는 직접 발송으로 바꿔 보내는 처리가 따로 있다).
+    단말 전달 가능성이 있는 코드(codes.MAYBE_DELIVERED_CODES)는 이중 수신 우려로 다시 보내지 않는다.
+    재시도도 실패하면 그 예외를 그대로 올린다.
+    """
+    try:
+        return await call(), False
+    except MsghubRateLimited:
+        if not retry_rate_limit:
+            raise
+        wait, reason = _RATE_LIMIT_WAIT, "29002(CPS 초과)"
+    except MsghubServerError as exc:
+        if exc.code not in RESEND_CODES:
+            raise
+        wait, reason = _RESEND_WAIT, f"[재전송] {exc.code}"
+    log.warning("청크 요청 %s — %d초 뒤 재시도: chunk=%d", reason, wait, chunk_idx)
+    await asyncio.sleep(wait)
+    return await call(), True
 
 
 def _build_merge_data(
@@ -288,14 +341,20 @@ async def _dispatch_rcs_chunks(
                 for i, phone in enumerate(chunk)
             ]
 
-            resp = await client.send_rcs(
-                messagebase_id=messagebase_id,
-                callback=callback,
-                recv_list=recv_list,
-                fb_info_lst=fb_info_lst,
-                resv_yn="Y" if is_reserved else None,
-                resv_req_dt=msghub_reserve_time,
+            resp, retried = await _send_with_resend(
+                lambda recv_list=recv_list: client.send_rcs(
+                    messagebase_id=messagebase_id,
+                    callback=callback,
+                    recv_list=recv_list,
+                    fb_info_lst=fb_info_lst,
+                    resv_yn="Y" if is_reserved else None,
+                    resv_req_dt=msghub_reserve_time,
+                ),
+                chunk_idx,
+                retry_rate_limit=False,
             )
+            if retried and not is_reserved:
+                sent_at = _now_iso()
 
             msghub_req = MsghubRequest(
                 campaign_id=campaign.id,
@@ -450,7 +509,7 @@ async def dispatch_campaign(
     """
     # 0. 수신자 중복 제거 (C2) — 한도 판정 전에 수행해 실제 발송 건수 기준으로 검증.
     original_count = len(recipients)
-    recipients = dedupe_recipients(recipients)
+    recipients = normalize_recipients(recipients)
     deduped_count = original_count - len(recipients)
 
     # 0.1 수신자 수 제한 (중복 제거 후 기준)
@@ -899,23 +958,16 @@ async def _dispatch_direct_chunks(
                 RecvInfo(cli_key=_make_cli_key(campaign.id, chunk_idx, i), phone=phone)
                 for i, phone in enumerate(chunk)
             ]
-            try:
-                resp = await _send_direct(
+            resp, retried = await _send_with_resend(
+                lambda recv_list=recv_list: _send_direct(
                     client, callback, content, subject, recv_list,
                     msg_type, mms_file_id, is_reserved, msghub_reserve_time,
-                )
-            except MsghubRateLimited:
-                # 29002 는 요청 전체를 ingress 에서 거부해 접수분이 0이다(_dispatch_rcs_chunks 와 같은
-                # 근거) → 잠시 뒤 같은 cliKey 로 한 번 더 보내도 중복이 없다. 예전엔 바로 명시 거부로
-                # FAILED 확정해 재조정에서도 빠져 그 청크가 영구 미발송이었다. 재시도도 실패하면 아래
-                # 공통 처리로 기록한다.
-                log.warning("일반 발송 29002(CPS 초과) — %d초 뒤 재시도: chunk=%d", _RATE_LIMIT_WAIT, chunk_idx)
-                await asyncio.sleep(_RATE_LIMIT_WAIT)
-                sent_at = reserve_utc_iso if is_reserved else _now_iso()
-                resp = await _send_direct(
-                    client, callback, content, subject, recv_list,
-                    msg_type, mms_file_id, is_reserved, msghub_reserve_time,
-                )
+                ),
+                chunk_idx,
+                retry_rate_limit=True,
+            )
+            if retried and not is_reserved:
+                sent_at = _now_iso()
             msghub_req = MsghubRequest(
                 campaign_id=campaign.id,
                 chunk_index=chunk_idx,
